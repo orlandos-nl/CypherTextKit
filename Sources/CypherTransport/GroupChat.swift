@@ -38,29 +38,45 @@ public struct GroupChatId: CustomStringConvertible, Identifiable, Codable, Hasha
     public var id: String { raw }
 }
 
+public struct ReferencedBlob<T: Codable>: Codable {
+    public let id: String
+    public var blob: T
+    
+    public init(id: String, blob: T) {
+        self.id = id
+        self.blob = blob
+    }
+}
+
 public struct GroupChatConfig: Codable {
     private enum CodingKeys: String, CodingKey {
-        case groupChatId = "a"
-        case members = "b"
-        case createdAt = "c"
-        case admins = "d"
-        case metadata = "e"
+        case members = "a"
+        case createdAt = "b"
+        case moderators = "c"
+        case metadata = "d"
+        case admin = "e"
     }
     
-    public let groupChatId: GroupChatId
     public private(set) var members: Set<Username>
     public let createdAt: Date
-    public private(set) var admins: Set<Username>
+    public private(set) var moderators: Set<Username>
     public var metadata: Document
+    public let admin: Username
     
-    public init(members: Set<Username>, admins: Set<Username>) {
-        assert(admins.isSubset(of: members), "All admins must be a member of the group")
+    public init(
+        admin: Username,
+        members: Set<Username>,
+        moderators: Set<Username>,
+        metadata: Document
+    ) {
+        assert(members.contains(admin), "Admin must be a member of the group")
+        assert(moderators.isSubset(of: members), "All admins must be a member of the group")
         
-        self.groupChatId = GroupChatId()
+        self.admin = admin
         self.members = members
-        self.admins = admins
+        self.moderators = moderators
         self.createdAt = Date()
-        self.metadata = Document()
+        self.metadata = metadata
     }
     
     public mutating func addMember(_ username: Username) {
@@ -69,16 +85,16 @@ public struct GroupChatConfig: Codable {
     
     public mutating func removeMember(_ username: Username) {
         members.remove(username)
-        admins.remove(username)
+        moderators.remove(username)
     }
     
     public mutating func promoteAdmin(_ username: Username) {
         assert(members.contains(username))
         
-        admins.insert(username)
+        moderators.insert(username)
     }
     
     public mutating func demoteAdmin(_ username: Username) {
-        admins.remove(username)
+        moderators.remove(username)
     }
 }

@@ -49,13 +49,13 @@ public final class CypherMessenger: CypherTransportClientDelegate {
     
     private init(
         eventLoop: EventLoop,
-        delegate: CypherMessengerEventHandler,
+        eventHandler: CypherMessengerEventHandler,
         config: _CypherMessengerConfig,
         database: CypherMessengerStore,
         transport: CypherServerTransportClient
     ) {
         self.eventLoop = eventLoop
-        self.eventHandler = delegate
+        self.eventHandler = eventHandler
         self.config = config
         self.cachedStore = _CypherMessengerStoreCache(base: database, eventLoop: eventLoop)
         self.transport = transport
@@ -73,7 +73,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         appPassword: String,
         usingTransport createTransport: @escaping (TransportCreationRequest) -> EventLoopFuture<Transport>,
         database: CypherMessengerStore,
-        delegate: CypherMessengerEventHandler,
+        eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
     ) -> EventLoopFuture<CypherMessenger> {
         let deviceId = DeviceId()
@@ -121,7 +121,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     // Existing config found, this is a new device that needs to be registered
                     let messenger = CypherMessenger(
                         eventLoop: eventLoop,
-                        delegate: delegate,
+                        eventHandler:         eventHandler,
                         config: config,
                         database: database,
                         transport: transport
@@ -147,7 +147,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     }.map {
                         CypherMessenger(
                             eventLoop: eventLoop,
-                            delegate: delegate,
+                            eventHandler:         eventHandler,
                             config: config,
                             database: database,
                             transport: transport
@@ -166,7 +166,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         appPassword: String,
         usingTransport: Transport.Type,
         database: CypherMessengerStore,
-        delegate: CypherMessengerEventHandler,
+        eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
     ) -> EventLoopFuture<CypherMessenger> {
         Self.registerMessenger(
@@ -183,7 +183,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                 )
             },
             database: database,
-            delegate: delegate,
+            eventHandler: eventHandler,
             on: eventLoop
         )
     }
@@ -197,7 +197,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         appPassword: String,
         usingTransport createTransport: Transport.Type,
         database: CypherMessengerStore,
-        delegate: CypherMessengerEventHandler,
+        eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
     ) -> EventLoopFuture<CypherMessenger> {
         resumeMessenger(
@@ -213,7 +213,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                 )
             },
             database: database,
-            delegate: delegate,
+            eventHandler:         eventHandler,
             on: eventLoop
         )
     }
@@ -224,7 +224,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         appPassword: String,
         usingTransport createTransport: @escaping (TransportCreationRequest) -> EventLoopFuture<Transport>,
         database: CypherMessengerStore,
-        delegate: CypherMessengerEventHandler,
+        eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
     ) -> EventLoopFuture<CypherMessenger> {
         return database.readLocalDeviceSalt().flatMap { salt -> EventLoopFuture<_CypherMessengerConfig> in
@@ -247,7 +247,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                 return createTransport(transportRequest).map { transport in
                     CypherMessenger(
                         eventLoop: eventLoop,
-                        delegate: delegate,
+                        eventHandler: eventHandler,
                         config: config,
                         database: database,
                         transport: transport
@@ -424,6 +424,22 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                 keys: keyMessages
             )
         }
+    }
+    
+    public func decrypt<M: Model>(_ model: M) -> DecryptedModel<M> {
+        model.decrypted(using: databaseEncryptionKey)
+    }
+    
+    public func encryptLocalFile(_ data: Data) throws -> AES.GCM.SealedBox {
+        try AES.GCM.seal(data, using: databaseEncryptionKey)
+    }
+    
+    public func decryptLocalFile(_ box: AES.GCM.SealedBox) throws -> Data {
+        try AES.GCM.open(box, using: databaseEncryptionKey)
+    }
+    
+    public func sign<T: Codable>(_ value: T) throws -> Signed<T> {
+        try Signed(value, signedBy: config.deviceKeys.identity)
     }
     
     func _signRatchetMessage(_ message: RatchetMessage, rekey: RekeyState) throws -> RatchetedCypherMessage {

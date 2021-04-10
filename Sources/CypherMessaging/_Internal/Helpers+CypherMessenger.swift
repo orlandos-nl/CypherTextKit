@@ -31,7 +31,7 @@ internal extension CypherMessenger {
         }
         
         return cachedStore.fetchChatMessage(byId: id).flatMap { message in
-            let decryptedMessage = self._decrypt(message)
+            let decryptedMessage = self.decrypt(message)
             
             let result = decryptedMessage.deliveryState.update(to: newState)
             return self.cachedStore.updateChatMessage(decryptedMessage.encrypted).map {
@@ -68,18 +68,6 @@ internal extension CypherMessenger {
         self.jobQueue.queueTask(task)
     }
     
-    func _decrypt<M: Model>(_ model: M) -> DecryptedModel<M> {
-        model.decrypted(using: databaseEncryptionKey)
-    }
-    
-    func _encryptFile(_ data: Data) throws -> AES.GCM.SealedBox {
-        try AES.GCM.seal(data, using: databaseEncryptionKey)
-    }
-    
-    func _decryptFile(_ box: AES.GCM.SealedBox) throws -> Data {
-        try AES.GCM.open(box, using: databaseEncryptionKey)
-    }
-    
     func _updateUserIdentity(of user: Username, to publicKey: PublicSigningKey) -> EventLoopFuture<UserIdentityState> {
         // TODO:
         return eventLoop.makeSucceededFuture(.consistent)
@@ -88,7 +76,7 @@ internal extension CypherMessenger {
     func _createDeviceIdentity(from device: UserDeviceConfig, forUsername username: Username) -> EventLoopFuture<DecryptedModel<DeviceIdentity>> {
         return cachedStore.fetchDeviceIdentities().flatMap { deviceIdentities in
             for deviceIdentity in deviceIdentities {
-                let deviceIdentity = self._decrypt(deviceIdentity)
+                let deviceIdentity = self.decrypt(deviceIdentity)
                 
                 if
                     deviceIdentity.props.username == username,
@@ -117,7 +105,7 @@ internal extension CypherMessenger {
                 // New device
                 // TODO: Emit notification?
                 
-                let decryptedDevice = self._decrypt(newDevice)
+                let decryptedDevice = self.decrypt(newDevice)
                 return self.cachedStore.createDeviceIdentity(newDevice).map {
                     decryptedDevice
                 }
@@ -314,11 +302,7 @@ internal extension CypherMessenger {
                 }
             }
         case .groupChat(let groupId):
-            return self.getGroupChat(byId: groupId).flatMap { group in
-                guard let group = group else {
-                    return self.eventLoop.makeFailedFuture(CypherSDKError.unknownGroup)
-                }
-                
+            return self._openGroupChat(byId: groupId).flatMap { group in
                 let context = ReceivedMessageContext(
                     sender: DeviceReference(
                         username: sender.props.username,
@@ -413,7 +397,7 @@ internal extension CypherMessenger {
     ) -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
         cachedStore.fetchDeviceIdentities().map { deviceIdentities in
             deviceIdentities.compactMap { deviceIdentity in
-                let deviceIdentity = self._decrypt(deviceIdentity)
+                let deviceIdentity = self.decrypt(deviceIdentity)
                 
                 if deviceIdentity.props.username == username {
                     return deviceIdentity
@@ -461,7 +445,7 @@ internal extension CypherMessenger {
     ) -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
         cachedStore.fetchDeviceIdentities().map { deviceIdentities in
             deviceIdentities.compactMap { deviceIdentity -> DecryptedModel<DeviceIdentity>? in
-                let deviceIdentity = self._decrypt(deviceIdentity)
+                let deviceIdentity = self.decrypt(deviceIdentity)
                 
                 if usernames.contains(deviceIdentity.props.username) {
                     return deviceIdentity

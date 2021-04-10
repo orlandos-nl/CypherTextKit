@@ -10,4 +10,5 @@ enum CypherSDKError: Error {
     case unknownGroup
     case invalidDeliveryStateTransition
     case appLocked
+    case invalidGroupConfig
 }

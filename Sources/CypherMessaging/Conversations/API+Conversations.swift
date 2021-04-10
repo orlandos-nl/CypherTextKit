@@ -8,7 +8,7 @@ extension CypherMessenger {
     public func getInternalConversation() -> EventLoopFuture<InternalConversation> {
         cachedStore.fetchConversations().flatMap { conversations in
             for conversation in conversations {
-                let conversation = self._decrypt(conversation)
+                let conversation = self.decrypt(conversation)
                 
                 if conversation.members == [self.username] {
                     let internalChat = InternalConversation(conversation: conversation, messenger: self)
@@ -21,9 +21,62 @@ extension CypherMessenger {
                 metadata: [:]
             ).map { conversation in
                 InternalConversation(
-                    conversation: self._decrypt(conversation),
+                    conversation: self.decrypt(conversation),
                     messenger: self
                 )
+            }
+        }
+    }
+    
+    internal func _openGroupChat(byId id: GroupChatId) -> EventLoopFuture<GroupChat> {
+        getGroupChat(byId: id).flatMap { groupChat in
+            if let groupChat = groupChat {
+                return self.eventLoop.makeSucceededFuture(groupChat)
+            }
+            
+            return self.transport.readPublishedBlob(
+                byId: id.raw,
+                as: Signed<GroupChatConfig>.self
+            ).flatMap { config in
+                guard let config = config else {
+                    return self.eventLoop.makeFailedFuture(CypherSDKError.unknownGroup)
+                }
+                
+                do {
+                    let groupConfig = try config.blob.readWithoutVerifying()
+                    
+                    return self._fetchDeviceIdentities(for: groupConfig.admin).flatMap { devices in
+                        for device in devices {
+                            if config.blob.isSigned(by: device.props.identity) {
+                                do {
+                                    let config = ReferencedBlob(id: config.id, blob: groupConfig)
+                                    let conversation = try Conversation(
+                                        props: .init(
+                                            members: groupConfig.members,
+                                            metadata: BSONEncoder().encode(config),
+                                            localOrder: 0
+                                        ),
+                                        encryptionKey: self.databaseEncryptionKey
+                                    )
+                                    
+                                    return self.cachedStore.createConversation(conversation).map {
+                                        GroupChat(
+                                            conversation: self.decrypt(conversation),
+                                            messenger: self,
+                                            groupConfig: config
+                                        )
+                                    }
+                                } catch {
+                                    return self.eventLoop.makeFailedFuture(error)
+                                }
+                            }
+                        }
+                        
+                        return self.eventLoop.makeFailedFuture(CypherSDKError.invalidGroupConfig)
+                    }
+                } catch {
+                    return self.eventLoop.makeFailedFuture(error)
+                }
             }
         }
     }
@@ -31,15 +84,24 @@ extension CypherMessenger {
     public func getGroupChat(byId id: GroupChatId) -> EventLoopFuture<GroupChat?> {
         cachedStore.fetchConversations().flatMapThrowing { conversations in
             nextConversation: for conversation in conversations {
-                let conversation = self._decrypt(conversation)
+                let conversation = self.decrypt(conversation)
                 if conversation.members.count < 2 || !conversation.members.contains(self.username) {
+                    continue nextConversation
+                }
+                
+                let config = try BSONDecoder().decode(
+                    ReferencedBlob<GroupChatConfig>.self,
+                    from: conversation.metadata
+                )
+                
+                if GroupChatId(config.id) != id {
                     continue nextConversation
                 }
 
                 return GroupChat(
                     conversation: conversation,
                     messenger: self,
-                    groupConfig: try BSONDecoder().decode(GroupChatConfig.self, from: conversation.metadata)
+                    groupConfig: config
                 )
             }
             
@@ -50,7 +112,7 @@ extension CypherMessenger {
     public func getPrivateChat(with otherUser: Username) -> EventLoopFuture<PrivateChat?> {
         cachedStore.fetchConversations().map { conversations in
             nextConversation: for conversation in conversations {
-                let conversation = self._decrypt(conversation)
+                let conversation = self.decrypt(conversation)
                 
                 if
                     conversation.members.count != 2
@@ -70,25 +132,39 @@ extension CypherMessenger {
         }
     }
     
-    public func createGroupChat(with users: Set<Username>) -> EventLoopFuture<GroupChat> {
+    public func createGroupChat(with users: Set<Username>, metadata: Document = [:]) -> EventLoopFuture<GroupChat> {
         var members = users
         members.insert(username)
         let config = GroupChatConfig(
+            admin: self.username,
             members: members,
-            admins: [self.username]
+            moderators: [self.username],
+            metadata: metadata
         )
         
         do {
-            return self._createConversation(
-                members: members,
-                metadata: try BSONEncoder().encode(config)
-            ).map { conversation in
-                GroupChat(
-                    conversation: self._decrypt(conversation),
-                    messenger: self,
-                    groupConfig: config
+            return try self.transport.publishBlob(
+                self.sign(config)
+            ).flatMapThrowing { referencedBlob in
+                let groupConfig = ReferencedBlob(
+                    id: referencedBlob.id,
+                    blob: config
                 )
+                let configDocument = try BSONEncoder().encode(groupConfig)
+                return (groupConfig, configDocument)
+            }.flatMap { (groupConfig, configDocument) in
+                self._createConversation(
+                    members: members,
+                    metadata: configDocument
+                ).map { conversation in
+                    GroupChat(
+                        conversation: self.decrypt(conversation),
+                        messenger: self,
+                        groupConfig: groupConfig
+                    )
+                }
             }
+            
         } catch {
             return eventLoop.makeFailedFuture(error)
         }
@@ -112,7 +188,7 @@ extension CypherMessenger {
                     )
                 }.map { conversation in
                     PrivateChat(
-                        conversation: self._decrypt(conversation),
+                        conversation: self.decrypt(conversation),
                         messenger: self
                     )
                 }
@@ -123,7 +199,7 @@ extension CypherMessenger {
     public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) -> EventLoopFuture<[PrivateChat]> {
         cachedStore.fetchConversations().flatMapThrowing { conversations in
             return try conversations.compactMap { conversation -> PrivateChat? in
-                let conversation = self._decrypt(conversation)
+                let conversation = self.decrypt(conversation)
                 guard
                     conversation.members.contains(self.username),
                     conversation.members.count == 2
@@ -201,7 +277,7 @@ extension AnyConversation {
             )
             
             return messenger.cachedStore.createChatMessage(chatMessage).map {
-                self.messenger._decrypt(chatMessage)
+                self.messenger.decrypt(chatMessage)
             }
         } catch {
             return messenger.eventLoop.makeFailedFuture(error)
@@ -320,7 +396,7 @@ extension AnyConversation {
                         return AnyChatMessage(
                             target: target,
                             messenger: messenger,
-                            chatMessage: messenger._decrypt(message)
+                            chatMessage: messenger.decrypt(message)
                         )
                     }
                 }
@@ -345,9 +421,9 @@ public struct InternalConversation: AnyConversation {
 public struct GroupChat: AnyConversation {
     public let conversation: DecryptedModel<Conversation>
     public let messenger: CypherMessenger
-    public private(set) var groupConfig: GroupChatConfig
+    public private(set) var groupConfig: ReferencedBlob<GroupChatConfig>
     public var target: TargetConversation {
-        return .groupChat(groupConfig.groupChatId)
+        return .groupChat(GroupChatId(groupConfig.id))
     }
     public var resolvedTarget: TargetConversation.Resolved {
         .groupChat(self)

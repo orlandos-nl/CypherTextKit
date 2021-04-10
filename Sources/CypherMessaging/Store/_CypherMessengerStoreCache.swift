@@ -63,9 +63,12 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         if var conversations = conversations {
             conversations.append(conversation)
             self.conversations = conversations
+            return eventLoop.makeSucceededVoidFuture()
+        } else {
+            return fetchConversations().map { conversations in
+                self.conversations = conversations + [conversation]
+            }
         }
-        
-        return eventLoop.makeSucceededVoidFuture()
     }
     
     func updateConversation(_ conversation: Conversation) -> EventLoopFuture<Void> {

@@ -41,8 +41,8 @@ public protocol CypherServerTransportClient: AnyObject {
     func readKeyBundle(forUsername username: Username) -> EventLoopFuture<UserConfig>
     func publishKeyBundle(_ data: UserConfig) -> EventLoopFuture<Void>
     
-    func publishBlob(_ data: Signed<Data>) -> EventLoopFuture<String>
-    func readPublishedBlob(byId id: String) -> EventLoopFuture<Signed<Data>?>
+    func publishBlob<C: Codable>(_ blob: C) -> EventLoopFuture<ReferencedBlob<C>>
+    func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) -> EventLoopFuture<ReferencedBlob<C>?>
     
     func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId: DeviceId, messageId: String) -> EventLoopFuture<Void>
     func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, messageId: String) -> EventLoopFuture<Void>

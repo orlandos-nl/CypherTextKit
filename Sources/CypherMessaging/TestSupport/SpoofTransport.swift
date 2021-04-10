@@ -10,7 +10,7 @@ fileprivate final class SpoofServer {
     private var userDevices = [Username: Set<DeviceId>]()
     fileprivate var publicKeys = [Username: UserConfig]()
     fileprivate var groupChats = [GroupChatId: GroupChatConfig]()
-    fileprivate var publishedBlobs = [String: Signed<Data>]()
+    fileprivate var publishedBlobs = [String: Data]()
     
     fileprivate static let local = SpoofServer()
     
@@ -202,14 +202,28 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
         return self.eventLoop.makeSucceededVoidFuture()
     }
     
-    public func publishBlob(_ data: Signed<Data>) -> EventLoopFuture<String> {
-        let id = UUID().uuidString
-        server.publishedBlobs[id] = data
-        return eventLoop.makeSucceededFuture(id)
+    public func publishBlob<C: Codable>(_ blob: C) -> EventLoopFuture<ReferencedBlob<C>> {
+        do {
+            let id = UUID().uuidString.lowercased()
+            let resolved = ReferencedBlob(id: id, blob: blob)
+            server.publishedBlobs[id] = try BSONEncoder().encode(blob).makeData()
+            return eventLoop.makeSucceededFuture(resolved)
+        } catch {
+            return eventLoop.makeFailedFuture(error)
+        }
     }
     
-    public func readPublishedBlob(byId id: String) -> EventLoopFuture<Signed<Data>?> {
-        eventLoop.makeSucceededFuture(server.publishedBlobs[id])
+    public func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) -> EventLoopFuture<ReferencedBlob<C>?> {
+        do {
+            guard let blob = server.publishedBlobs[id] else {
+                return eventLoop.makeSucceededFuture(nil)
+            }
+            
+            let value = try BSONDecoder().decode(type, from: Document(data: blob))
+            return eventLoop.makeSucceededFuture(ReferencedBlob(id: id, blob: value))
+        } catch {
+            return eventLoop.makeFailedFuture(error)
+        }
     }
     
     public func sendMessage(_ message: RatchetedCypherMessage, toUser otherUser: Username, otherUserDeviceId: DeviceId, messageId: String) -> EventLoopFuture<Void> {

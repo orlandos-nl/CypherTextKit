@@ -152,12 +152,29 @@ public struct Signed<T: Codable>: Codable {
         )
     }
     
+    public func isSigned(by publicIdentity: PublicSigningKey) -> Bool {
+        do {
+            try publicIdentity.validateSignature(
+                signature,
+                forData: value.makeData()
+            )
+            
+            return true
+        } catch {
+            return false
+        }
+    }
+    
     public func readAndVerifySignature(signedBy publicIdentity: PublicSigningKey) throws -> T {
         try publicIdentity.validateSignature(
             signature,
             forData: value.makeData()
         )
         
+        return try BSONDecoder().decode(T.self, from: value)
+    }
+    
+    public func readWithoutVerifying() throws -> T {
         return try BSONDecoder().decode(T.self, from: value)
     }
 }
