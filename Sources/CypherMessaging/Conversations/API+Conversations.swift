@@ -50,10 +50,14 @@ extension CypherMessenger {
                             if config.blob.isSigned(by: device.props.identity) {
                                 do {
                                     let config = ReferencedBlob(id: config.id, blob: groupConfig)
+                                    let groupMetadata = GroupMetadata(
+                                        custom: [:],
+                                        config: config
+                                    )
                                     let conversation = try Conversation(
                                         props: .init(
                                             members: groupConfig.members,
-                                            metadata: BSONEncoder().encode(config),
+                                            metadata: BSONEncoder().encode(groupMetadata),
                                             localOrder: 0
                                         ),
                                         encryptionKey: self.databaseEncryptionKey
@@ -63,7 +67,7 @@ extension CypherMessenger {
                                         GroupChat(
                                             conversation: self.decrypt(conversation),
                                             messenger: self,
-                                            groupConfig: config
+                                            metadata: groupMetadata
                                         )
                                     }
                                 } catch {
@@ -89,19 +93,19 @@ extension CypherMessenger {
                     continue nextConversation
                 }
                 
-                let config = try BSONDecoder().decode(
-                    ReferencedBlob<GroupChatConfig>.self,
+                let groupMetadata = try BSONDecoder().decode(
+                    GroupMetadata.self,
                     from: conversation.metadata
                 )
                 
-                if GroupChatId(config.id) != id {
+                if GroupChatId(groupMetadata.config.id) != id {
                     continue nextConversation
                 }
 
                 return GroupChat(
                     conversation: conversation,
                     messenger: self,
-                    groupConfig: config
+                    metadata: groupMetadata
                 )
             }
             
@@ -132,35 +136,44 @@ extension CypherMessenger {
         }
     }
     
-    public func createGroupChat(with users: Set<Username>, metadata: Document = [:]) -> EventLoopFuture<GroupChat> {
+    public func createGroupChat(
+        with users: Set<Username>,
+        localMetadata: Document = [:],
+        sharedMetadata: Document = [:]
+    ) -> EventLoopFuture<GroupChat> {
         var members = users
         members.insert(username)
         let config = GroupChatConfig(
             admin: self.username,
             members: members,
             moderators: [self.username],
-            metadata: metadata
+            metadata: sharedMetadata
         )
         
         do {
             return try self.transport.publishBlob(
                 self.sign(config)
             ).flatMapThrowing { referencedBlob in
-                let groupConfig = ReferencedBlob(
-                    id: referencedBlob.id,
-                    blob: config
+                let metadata = GroupMetadata(
+                    custom: localMetadata,
+                    config: ReferencedBlob(
+                        id: referencedBlob.id,
+                        blob: config
+                    )
                 )
-                let configDocument = try BSONEncoder().encode(groupConfig)
-                return (groupConfig, configDocument)
-            }.flatMap { (groupConfig, configDocument) in
-                self._createConversation(
+            
+                let metadataDocument = try BSONEncoder().encode(metadata)
+                
+                return (metadata, metadataDocument)
+            }.flatMap { (metadata, metadataDocument) in
+                return self._createConversation(
                     members: members,
-                    metadata: configDocument
+                    metadata: metadataDocument
                 ).map { conversation in
                     GroupChat(
                         conversation: self.decrypt(conversation),
                         messenger: self,
-                        groupConfig: groupConfig
+                        metadata: metadata
                     )
                 }
             }
@@ -302,7 +315,7 @@ extension AnyConversation {
                 return messenger.eventLoop.makeSucceededFuture(nil)
             case .saveAndSend:
                 return _saveMessage(
-                    senderId: 0,
+                    senderId: messenger.deviceIdentityId,
                     order: conversation.props.getNextLocalOrder(),
                     props: .init(
                         sending: message,
@@ -383,7 +396,7 @@ extension AnyConversation {
             messages.append(
                 messenger.cachedStore.listChatMessages(
                     inConversation: self.conversation.id,
-                    senderId: 0, // current device
+                    senderId: messenger.deviceIdentityId,
                     sortedBy: sortMode,
                     offsetBy: 0,
                     limit: .max
@@ -421,13 +434,22 @@ public struct InternalConversation: AnyConversation {
 public struct GroupChat: AnyConversation {
     public let conversation: DecryptedModel<Conversation>
     public let messenger: CypherMessenger
-    public private(set) var groupConfig: ReferencedBlob<GroupChatConfig>
+    public var metadata: GroupMetadata
+    public var groupConfig: ReferencedBlob<GroupChatConfig> {
+        metadata.config
+    }
     public var target: TargetConversation {
         return .groupChat(GroupChatId(groupConfig.id))
     }
+    
     public var resolvedTarget: TargetConversation.Resolved {
         .groupChat(self)
     }
+}
+
+public struct GroupMetadata: Codable {
+    public var custom: Document
+    public internal(set) var config: ReferencedBlob<GroupChatConfig>
 }
 
 public struct PrivateChat: AnyConversation {

@@ -56,8 +56,10 @@ internal extension CypherMessenger {
                 encryptionKey: self.databaseEncryptionKey
             )
             
-            return cachedStore.createConversation(conversation).map {
-                conversation
+            return cachedStore.createConversation(conversation).flatMap {
+                self.eventHandler.onCreateConversation(conversation).map {
+                    conversation
+                }
             }
         } catch {
             return eventLoop.makeFailedFuture(error)

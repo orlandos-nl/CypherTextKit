@@ -15,12 +15,16 @@ fileprivate struct _CypherMessengerConfig: Codable {
         case deviceKeys = "b"
         case username = "c"
         case registeryMode = "d"
+        case custom = "e"
+        case deviceIdentityId = "f"
     }
     
     let databaseEncryptionKey: Data
     let deviceKeys: DevicePrivateKeys
     let username: Username
     var registeryMode: DeviceRegisteryMode
+    var custom: Document
+    let deviceIdentityId: Int
 }
 
 enum RekeyState {
@@ -37,7 +41,8 @@ public struct TransportCreationRequest {
 public final class CypherMessenger: CypherTransportClientDelegate {
     public let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
-    private let config: _CypherMessengerConfig
+    private var config: _CypherMessengerConfig
+    internal var deviceIdentityId: Int { config.deviceIdentityId }
     internal let eventHandler: CypherMessengerEventHandler
     internal let cachedStore: _CypherMessengerStoreCache
     internal let transport: CypherServerTransportClient
@@ -86,7 +91,9 @@ public final class CypherMessenger: CypherTransportClientDelegate {
             databaseEncryptionKey: databaseEncryptionKeyData,
             deviceKeys: DevicePrivateKeys(deviceId: deviceId),
             username: username,
-            registeryMode: .unregistered
+            registeryMode: .unregistered,
+            custom: [:],
+            deviceIdentityId: .random(in: 1 ..< .max)
         )
         
         return database.readLocalDeviceSalt().map { salt -> SymmetricKey in
@@ -469,6 +476,22 @@ public final class CypherMessenger: CypherTransportClientDelegate {
             sharedInfo: "X3DHTemporaryReplacement".data(using: .ascii)!,
             outputByteCount: 32
         )
+    }
+    
+    public func readCustomConfig() -> EventLoopFuture<Document> {
+        return eventLoop.makeSucceededFuture(config.custom)
+    }
+    
+    public func writeCustomConfig(_ custom: Document) -> EventLoopFuture<Void> {
+        do {
+            var newConfig = config
+            newConfig.custom = custom
+            return self.cachedStore.writeLocalDeviceConfig(try BSONEncoder().encode(newConfig).makeData()).map {
+                self.config = newConfig
+            }
+        } catch {
+            return eventLoop.makeFailedFuture(error)
+        }
     }
     
     private func _writeWithRatchetEngine<T>(

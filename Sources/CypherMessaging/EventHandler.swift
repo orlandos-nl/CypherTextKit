@@ -48,4 +48,5 @@ public protocol CypherMessengerEventHandler {
     func receiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction>
     func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction>
     func privateChatMetadata(withUser otherUser: Username) -> EventLoopFuture<Document>
+    func onCreateConversation(_ conversation: Conversation) -> EventLoopFuture<Void>
 }

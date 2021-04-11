@@ -23,4 +23,8 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     public func privateChatMetadata(withUser otherUser: Username) -> EventLoopFuture<Document> {
         eventLoop.makeSucceededFuture([:])
     }
+    
+    public func onCreateConversation(_ conversation: Conversation) -> EventLoopFuture<Void> {
+        eventLoop.makeSucceededVoidFuture()
+    }
 }
