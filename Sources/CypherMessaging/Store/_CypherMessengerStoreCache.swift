@@ -63,10 +63,12 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         if var conversations = conversations {
             conversations.append(conversation)
             self.conversations = conversations
-            return eventLoop.makeSucceededVoidFuture()
+            return base.createConversation(conversation)
         } else {
             return fetchConversations().map { conversations in
                 self.conversations = conversations + [conversation]
+            }.flatMap {
+                base.createConversation(conversation)
             }
         }
     }
