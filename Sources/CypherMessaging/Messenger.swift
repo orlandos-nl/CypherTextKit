@@ -573,7 +573,26 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                         initialMessage: ratchetMessage
                     )
                 } catch {
-                    return self.eventLoop.makeFailedFuture(error)
+                    return self._queueTask(
+                        .sendMultiRecipientMessage(
+                            SendMultiRecipientMessageTask(
+                                message: CypherMessage(
+                                    messageType: .magic,
+                                    messageSubtype: "protocol/rekey",
+                                    text: "",
+                                    metadata: [:],
+                                    order: 0,
+                                    target: .otherUser(username)
+                                ),
+                                messageId: UUID().uuidString,
+                                recipients: [username],
+                                localId: nil,
+                                pushType: .none
+                            )
+                        )
+                    ).flatMapThrowing {
+                        throw error
+                    }
                 }
             }
             
