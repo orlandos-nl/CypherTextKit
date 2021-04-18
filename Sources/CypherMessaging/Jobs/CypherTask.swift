@@ -216,6 +216,15 @@ enum CypherTask: Codable, Task {
         }
     }
     
+    var requiresConnectivity: Bool {
+        switch self {
+        case .sendMessage, .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
+            return true
+        case .processMessage, .processMultiRecipientMessage, .receiveMessageDeliveryStateChangeTask:
+            return false
+        }
+    }
+    
     var priority: TaskPriority {
         switch self {
         case .processMessage, .sendMessage, .sendMultiRecipientMessage, .processMultiRecipientMessage:

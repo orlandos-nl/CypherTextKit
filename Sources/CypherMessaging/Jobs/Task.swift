@@ -7,6 +7,7 @@ public protocol Task: Codable {
     var isBackgroundTask: Bool { get }
     var retryMode: TaskRetryMode { get }
     var priority: TaskPriority { get }
+    var requiresConnectivity: Bool { get }
     
     func execute(on messenger: CypherMessenger) -> EventLoopFuture<Void>
     func onDelayed(on messenger: CypherMessenger) -> EventLoopFuture<Void>
