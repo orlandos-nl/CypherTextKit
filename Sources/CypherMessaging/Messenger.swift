@@ -548,7 +548,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         self._fetchDeviceIdentity(for: username, deviceId: deviceId).flatMap { device in
             let data: Data
             var ratchet: DoubleRatchetHKDF<SHA512>
-            if let existingState = device.doubleRatchet {
+            if let existingState = device.doubleRatchet, !message.rekey {
                 ratchet = DoubleRatchetHKDF(
                     state: existingState,
                     configuration: doubleRatchetConfig
