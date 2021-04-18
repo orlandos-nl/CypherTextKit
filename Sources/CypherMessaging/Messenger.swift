@@ -561,6 +561,36 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     return self.eventLoop.makeFailedFuture(error)
                 }
             } else {
+                func rekey() -> EventLoopFuture<Void> {
+                    device.doubleRatchet = nil
+                    return self.cachedStore.updateDeviceIdentity(device.encrypted).flatMap {
+                        self._queueTask(
+                            .sendMultiRecipientMessage(
+                                SendMultiRecipientMessageTask(
+                                    message: CypherMessage(
+                                        messageType: .magic,
+                                        messageSubtype: "protocol/rekey",
+                                        text: "",
+                                        metadata: [:],
+                                        order: 0,
+                                        target: .otherUser(username)
+                                    ),
+                                    messageId: UUID().uuidString,
+                                    recipients: [username],
+                                    localId: nil,
+                                    pushType: .none
+                                )
+                            )
+                        )
+                    }
+                }
+                
+                guard message.rekey else {
+                    return rekey().flatMapThrowing {
+                        throw CypherSDKError.invalidHandshake
+                    }
+                }
+                
                 do {
                     let secret = try self._formSharedSecret(with: device.props.publicKey)
                     let symmetricKey = self._deriveSymmetricKey(from: secret, initiator: username)
@@ -573,24 +603,8 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                         initialMessage: ratchetMessage
                     )
                 } catch {
-                    return self._queueTask(
-                        .sendMultiRecipientMessage(
-                            SendMultiRecipientMessageTask(
-                                message: CypherMessage(
-                                    messageType: .magic,
-                                    messageSubtype: "protocol/rekey",
-                                    text: "",
-                                    metadata: [:],
-                                    order: 0,
-                                    target: .otherUser(username)
-                                ),
-                                messageId: UUID().uuidString,
-                                recipients: [username],
-                                localId: nil,
-                                pushType: .none
-                            )
-                        )
-                    ).flatMapThrowing {
+                    // TODO: Ignore incoming messages
+                    return rekey().flatMapThrowing {
                         throw error
                     }
                 }

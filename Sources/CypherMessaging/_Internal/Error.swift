@@ -11,4 +11,5 @@ enum CypherSDKError: Error {
     case invalidDeliveryStateTransition
     case appLocked
     case invalidGroupConfig
+    case invalidHandshake
 }
