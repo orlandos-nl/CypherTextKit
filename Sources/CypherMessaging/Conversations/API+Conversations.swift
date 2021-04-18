@@ -409,7 +409,7 @@ extension AnyConversation {
                         return AnyChatMessage(
                             target: target,
                             messenger: messenger,
-                            chatMessage: messenger.decrypt(message)
+                            raw: messenger.decrypt(message)
                         )
                     }
                 }
