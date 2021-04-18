@@ -230,7 +230,7 @@ public final class JobQueue: ObservableObject {
             return self.eventLoop.makeFailedFuture(error)
         }
         
-        guard let messenger = self.messenger else {
+        guard let messenger = self.messenger, messenger.transport.authenticated == .authenticated else {
             return self.eventLoop.makeFailedFuture(CypherSDKError.appLocked)
         }
 
