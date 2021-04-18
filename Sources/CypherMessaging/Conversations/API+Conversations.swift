@@ -344,7 +344,7 @@ extension AnyConversation {
                     return AnyChatMessage(
                         target: self.target,
                         messenger: messenger,
-                        chatMessage: chatMessage
+                        raw: chatMessage
                     )
                 } else {
                     return nil
