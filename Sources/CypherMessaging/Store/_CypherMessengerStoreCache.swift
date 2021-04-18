@@ -68,7 +68,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
             return fetchConversations().map { conversations in
                 self.conversations = conversations + [conversation]
             }.flatMap {
-                base.createConversation(conversation)
+                self.base.createConversation(conversation)
             }
         }
     }
