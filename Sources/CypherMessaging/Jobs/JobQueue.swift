@@ -162,7 +162,10 @@ public final class JobQueue: ObservableObject {
             }
             
             next(in: jobs).map {
-                self.startRunningTasks()
+                // If offline, don't restart this. That can cause infinite loops
+                if self.messenger?.transport.authenticated == .authenticated {
+                    self.startRunningTasks()
+                }
             }.whenFailure { error in
                 debugLog("Job queue error", error)
                 self.runningJobs = false

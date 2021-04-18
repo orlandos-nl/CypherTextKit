@@ -68,7 +68,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         self.transport.delegate = self
         self.jobQueue = JobQueue(messenger: self, database: self.cachedStore, databaseEncryptionKey: self.databaseEncryptionKey)
         
-        _ = self.transport.reconnect()
+        self.transport.reconnect().whenSuccess(jobQueue.resume)
     }
     
     public static func registerMessenger<
