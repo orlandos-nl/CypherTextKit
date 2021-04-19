@@ -135,7 +135,9 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     )
                     
                     if existingKeys.identity.data == config.deviceKeys.identity.publicKey.data {
-                        return eventLoop.makeSucceededFuture(messenger)
+                        return database.writeLocalDeviceConfig(encryptedConfig.makeData()).flatMap {
+                            eventLoop.makeSucceededFuture(messenger)
+                        }
                     }
                     
                     let metadata = UserDeviceConfig(
