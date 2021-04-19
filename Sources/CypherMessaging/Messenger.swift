@@ -128,11 +128,15 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     // Existing config found, this is a new device that needs to be registered
                     let messenger = CypherMessenger(
                         eventLoop: eventLoop,
-                        eventHandler:         eventHandler,
+                        eventHandler: eventHandler,
                         config: config,
                         database: database,
                         transport: transport
                     )
+                    
+                    if existingKeys.identity.data == config.deviceKeys.identity.publicKey.data {
+                        return eventLoop.makeSucceededFuture(messenger)
+                    }
                     
                     let metadata = UserDeviceConfig(
                         deviceId: config.deviceKeys.deviceId,
@@ -154,7 +158,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     }.map {
                         CypherMessenger(
                             eventLoop: eventLoop,
-                            eventHandler:         eventHandler,
+                            eventHandler: eventHandler,
                             config: config,
                             database: database,
                             transport: transport
@@ -220,7 +224,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                 )
             },
             database: database,
-            eventHandler:         eventHandler,
+            eventHandler: eventHandler,
             on: eventLoop
         )
     }
