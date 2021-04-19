@@ -552,6 +552,30 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         message: RatchetedCypherMessage
     ) -> EventLoopFuture<(Data, DecryptedModel<DeviceIdentity>)> {
         self._fetchDeviceIdentity(for: username, deviceId: deviceId).flatMap { device in
+            func rekey() -> EventLoopFuture<Void> {
+                device.doubleRatchet = nil
+                return self.cachedStore.updateDeviceIdentity(device.encrypted).flatMap {
+                    self._queueTask(
+                        .sendMultiRecipientMessage(
+                            SendMultiRecipientMessageTask(
+                                message: CypherMessage(
+                                    messageType: .magic,
+                                    messageSubtype: "protocol/rekey",
+                                    text: "",
+                                    metadata: [:],
+                                    order: 0,
+                                    target: .otherUser(username)
+                                ),
+                                messageId: UUID().uuidString,
+                                recipients: [username],
+                                localId: nil,
+                                pushType: .none
+                            )
+                        )
+                    )
+                }
+            }
+            
             let data: Data
             var ratchet: DoubleRatchetHKDF<SHA512>
             if let existingState = device.doubleRatchet, !message.rekey {
@@ -564,33 +588,11 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     let ratchetMessage = try message.readAndValidate(usingIdentity: device.props.identity)
                     data = try ratchet.ratchetDecrypt(ratchetMessage)
                 } catch {
-                    return self.eventLoop.makeFailedFuture(error)
-                }
-            } else {
-                func rekey() -> EventLoopFuture<Void> {
-                    device.doubleRatchet = nil
-                    return self.cachedStore.updateDeviceIdentity(device.encrypted).flatMap {
-                        self._queueTask(
-                            .sendMultiRecipientMessage(
-                                SendMultiRecipientMessageTask(
-                                    message: CypherMessage(
-                                        messageType: .magic,
-                                        messageSubtype: "protocol/rekey",
-                                        text: "",
-                                        metadata: [:],
-                                        order: 0,
-                                        target: .otherUser(username)
-                                    ),
-                                    messageId: UUID().uuidString,
-                                    recipients: [username],
-                                    localId: nil,
-                                    pushType: .none
-                                )
-                            )
-                        )
+                    return rekey().flatMapThrowing {
+                        throw error
                     }
                 }
-                
+            } else {
                 guard message.rekey else {
                     return rekey().flatMapThrowing {
                         throw CypherSDKError.invalidHandshake
