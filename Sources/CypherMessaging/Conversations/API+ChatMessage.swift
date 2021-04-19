@@ -1,7 +1,12 @@
 public struct AnyChatMessage {
     public let target: TargetConversation
     internal let messenger: CypherMessenger
-    public let raw: DecryptedModel<ChatMessage>
+    internal let raw: DecryptedModel<ChatMessage>
+    public var message: CypherMessage { raw.message }
+    public var sendDate: Date { raw.props.sendDate }
+    public var receiveDate: Date { raw.props.receiveDate }
+    public var senderUser: Username { raw.props.senderUser }
+    public var senderDeviceId: DeviceId { raw.props.senderDeviceId }
     
     public var deliveryState: ChatMessage.DeliveryState {
         raw.deliveryState

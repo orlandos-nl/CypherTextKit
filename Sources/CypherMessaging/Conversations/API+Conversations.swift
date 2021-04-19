@@ -230,6 +230,7 @@ public protocol AnyConversation {
     var conversation: DecryptedModel<Conversation> { get }
     var messenger: CypherMessenger { get }
     var target: TargetConversation { get }
+    var metadataContainer: MetadataContainer { get }
     var resolvedTarget: TargetConversation.Resolved { get }
 }
 
@@ -433,6 +434,7 @@ public struct InternalConversation: AnyConversation {
     public let conversation: DecryptedModel<Conversation>
     public let messenger: CypherMessenger
     public let target = TargetConversation.currentUser
+    public let metadataContainer = MetadataContainer()
     public var resolvedTarget: TargetConversation.Resolved {
         .internalChat(self)
     }
@@ -446,6 +448,7 @@ public struct GroupChat: AnyConversation {
     public let conversation: DecryptedModel<Conversation>
     public let messenger: CypherMessenger
     public var metadata: GroupMetadata
+    public let metadataContainer = MetadataContainer()
     public var groupConfig: ReferencedBlob<GroupChatConfig> {
         metadata.config
     }
@@ -466,6 +469,7 @@ public struct GroupMetadata: Codable {
 public struct PrivateChat: AnyConversation {
     public let conversation: DecryptedModel<Conversation>
     public let messenger: CypherMessenger
+    public let metadataContainer = MetadataContainer()
     public var target: TargetConversation {
         .otherUser(conversationPartner)
     }
