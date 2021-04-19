@@ -348,7 +348,7 @@ enum CypherTask: Codable, Task {
                 debugLog("Error processing received message \(message.messageId) by \(message.sender) with error \(error)")
             }
         case .sendMultiRecipientMessage(let task):
-            debugLog("Sending message to multiple recipeints", task.recipients)
+            debugLog("Sending message to multiple recipients", task.recipients)
             return TaskHelpers.writeMultiRecipeintMessageTask(task: task, messenger: messenger)
         case .processMultiRecipientMessage(let task):
             return messenger._receiveMultiRecipientMessage(

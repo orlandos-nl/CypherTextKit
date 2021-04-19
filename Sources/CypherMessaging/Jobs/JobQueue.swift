@@ -58,7 +58,9 @@ public final class JobQueue: ObservableObject {
             
             self.jobs.append(job.decrypted(using: databaseEncryptionKey))
             return database.createJob(job).map {
-                self.startRunningTasks()
+                if !self.runningJobs {
+                    self.startRunningTasks()
+                }
             }
         } catch {
             return eventLoop.makeFailedFuture(error)
@@ -241,9 +243,7 @@ public final class JobQueue: ObservableObject {
             return self.eventLoop.makeFailedFuture(CypherSDKError.offline)
         }
 
-        return task.execute(
-            on: messenger
-        ).hop(
+        return task.execute(on: messenger).hop(
             to: messenger.eventLoop
         ).flatMap {
             self.dequeueJob(job).map {

@@ -247,6 +247,13 @@ extension AnyConversation {
         }
     }
     
+    private func getNextLocalOrder() -> EventLoopFuture<Int> {
+        let order = conversation.props.getNextLocalOrder()
+        return messenger.cachedStore.updateConversation(conversation.encrypted).map {
+            order
+        }
+    }
+    
     public func sendRawMessage(
         type: CypherMessageType,
         messageSubtype: String? = nil,
@@ -256,21 +263,23 @@ extension AnyConversation {
         sentDate: Date = Date(),
         preferredPushType: PushType
     ) -> EventLoopFuture<AnyChatMessage?> {
-        self._sendMessage(
-            CypherMessage(
-                messageType: .text,
-                messageSubtype: messageSubtype,
-                text: text,
-                metadata: metadata,
-                destructionTimer: destructionTimer,
-                sentDate: sentDate,
-                preferredPushType: preferredPushType,
-                order: conversation.props.getNextLocalOrder(),
-                target: target
-            ),
-            to: conversation.members,
-            pushType: preferredPushType
-        )
+        getNextLocalOrder().flatMap { order in
+            self._sendMessage(
+                CypherMessage(
+                    messageType: .text,
+                    messageSubtype: messageSubtype,
+                    text: text,
+                    metadata: metadata,
+                    destructionTimer: destructionTimer,
+                    sentDate: sentDate,
+                    preferredPushType: preferredPushType,
+                    order: order,
+                    target: target
+                ),
+                to: conversation.members,
+                pushType: preferredPushType
+            )
+        }
     }
     
     internal func _saveMessage(
@@ -314,15 +323,17 @@ extension AnyConversation {
             case .send:
                 return messenger.eventLoop.makeSucceededFuture(nil)
             case .saveAndSend:
-                return _saveMessage(
-                    senderId: messenger.deviceIdentityId,
-                    order: conversation.props.getNextLocalOrder(),
-                    props: .init(
-                        sending: message,
-                        senderUser: self.messenger.username,
-                        senderDeviceId: self.messenger.deviceId
-                    )
-                ).map { $0 }
+                return getNextLocalOrder().flatMap { order in
+                    _saveMessage(
+                        senderId: messenger.deviceIdentityId,
+                        order: order,
+                        props: .init(
+                            sending: message,
+                            senderUser: self.messenger.username,
+                            senderDeviceId: self.messenger.deviceId
+                        )
+                    ).map { $0 }
+                }
             }
         }.flatMap { (chatMessage: DecryptedModel<ChatMessage>?) in
             messenger._queueTask(
