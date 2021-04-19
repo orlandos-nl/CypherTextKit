@@ -1,5 +1,6 @@
 public struct AnyChatMessage {
     public let target: TargetConversation
+    public var id: UUID { raw.id }
     internal let messenger: CypherMessenger
     internal let raw: DecryptedModel<ChatMessage>
     public var message: CypherMessage { raw.message }
