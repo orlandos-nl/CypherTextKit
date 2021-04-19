@@ -299,8 +299,16 @@ extension AnyConversation {
                 encryptionKey: messenger.databaseEncryptionKey
             )
             
-            return messenger.cachedStore.createChatMessage(chatMessage).map {
-                self.messenger.decrypt(chatMessage)
+            return messenger.cachedStore.createChatMessage(chatMessage).flatMap {
+                let message = self.messenger.decrypt(chatMessage)
+                
+                return self.messenger.eventHandler.onCreateChatMessage(
+                    AnyChatMessage(
+                        target: self.target,
+                        messenger: self.messenger,
+                        raw: message
+                    )
+                ).map { message }
             }
         } catch {
             return messenger.eventLoop.makeFailedFuture(error)
