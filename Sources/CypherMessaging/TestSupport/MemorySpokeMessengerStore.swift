@@ -84,7 +84,15 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func listChatMessages(inConversation conversationId: UUID, senderId: Int, sortedBy: SortMode, offsetBy offset: Int, limit: Int) -> EventLoopFuture<[ChatMessage]> {
+    public func listChatMessages(
+        inConversation conversationId: UUID,
+        senderId: Int,
+        sortedBy: SortMode,
+        minimumOrder: Int?,
+        maximumOrder: Int?,
+        offsetBy offset: Int,
+        limit: Int
+    ) -> EventLoopFuture<[ChatMessage]> {
         guard var messages = conversationChatMessages[conversationId] else {
             return eventLoop.makeSucceededFuture([])
         }

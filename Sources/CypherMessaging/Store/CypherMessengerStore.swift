@@ -22,6 +22,8 @@ public protocol CypherMessengerStore {
         inConversation: UUID,
         senderId: Int,
         sortedBy: SortMode,
+        minimumOrder: Int?,
+        maximumOrder: Int?,
         offsetBy: Int,
         limit: Int
     ) -> EventLoopFuture<[ChatMessage]>

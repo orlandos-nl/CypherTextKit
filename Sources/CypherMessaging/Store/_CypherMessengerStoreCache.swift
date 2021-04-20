@@ -115,8 +115,24 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         base.updateChatMessage(message)
     }
     
-    func listChatMessages(inConversation conversation: UUID, senderId: Int, sortedBy sortMode: SortMode, offsetBy offset: Int, limit: Int) -> EventLoopFuture<[ChatMessage]> {
-        base.listChatMessages(inConversation: conversation, senderId: senderId, sortedBy: sortMode, offsetBy: offset, limit: limit).map { messages in
+    func listChatMessages(
+        inConversation conversation: UUID,
+        senderId: Int,
+        sortedBy sortMode: SortMode,
+        minimumOrder: Int?,
+        maximumOrder: Int?,
+        offsetBy offset: Int,
+        limit: Int
+    ) -> EventLoopFuture<[ChatMessage]> {
+        base.listChatMessages(
+            inConversation: conversation,
+            senderId: senderId,
+            sortedBy: sortMode,
+            minimumOrder: minimumOrder,
+            maximumOrder: maximumOrder,
+            offsetBy: offset,
+            limit: limit
+        ).map { messages in
             messages.map { message in
                 if let cachedMessage = self.messages[message.id] {
                     return cachedMessage

@@ -401,40 +401,13 @@ extension AnyConversation {
     }
     
     public func allMessages(sortedBy sortMode: SortMode) -> EventLoopFuture<[AnyChatMessage]> {
-        let target = self.target
-        return memberDevices().flatMap { devices in
-            var messages = devices.map { device -> EventLoopFuture<[ChatMessage]> in
-                messenger.cachedStore.listChatMessages(
-                    inConversation: self.conversation.id,
-                    senderId: device.props.senderId,
-                    sortedBy: sortMode,
-                    offsetBy: 0,
-                    limit: .max
-                )
-            }
-            
-            messages.append(
-                messenger.cachedStore.listChatMessages(
-                    inConversation: self.conversation.id,
-                    senderId: messenger.deviceIdentityId,
-                    sortedBy: sortMode,
-                    offsetBy: 0,
-                    limit: .max
-                )
-            )
-            
-            return EventLoopFuture.whenAllSucceed(messages, on: messenger.eventLoop).map { messages in
-                messages.reduce([]) { lhs, rhs in
-                    lhs + rhs.map { message in
-                        return AnyChatMessage(
-                            target: target,
-                            messenger: messenger,
-                            raw: messenger.decrypt(message)
-                        )
-                    }
-                }
-            }
+        cursor(sortedBy: sortMode).flatMap { cursor in
+            cursor.getMore(.max)
         }
+    }
+    
+    public func cursor(sortedBy sortMode: SortMode) -> EventLoopFuture<AnyChatMessageCursor> {
+        AnyChatMessageCursor.readingConversation(self)
     }
 }
 
