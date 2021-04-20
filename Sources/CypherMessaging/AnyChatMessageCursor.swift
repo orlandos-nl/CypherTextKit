@@ -202,7 +202,7 @@ public final class AnyChatMessageCursor {
             return AnyChatMessageCursor(
                 conversationId: conversation.conversation.id,
                 messenger: conversation.messenger,
-                devices: ,
+                devices: devices,
                 sortMode: sortMode
             )
         }
