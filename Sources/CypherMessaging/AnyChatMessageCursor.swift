@@ -180,18 +180,29 @@ public final class AnyChatMessageCursor {
         assert(sortMode == .descending, "Unsupported ascending")
         
         return conversation.memberDevices().map { devices in
-            AnyChatMessageCursor(
+            var devices = devices.map { device in
+                DeviceChatCursor(
+                    target: conversation.target,
+                    conversationId: conversation.conversation.id,
+                    messenger: conversation.messenger,
+                    senderId: device.props.senderId,
+                    sortMode: sortMode
+                )
+            }
+            devices.append(
+                DeviceChatCursor(
+                    target: conversation.target,
+                    conversationId: conversation.conversation.id,
+                    messenger: conversation.messenger,
+                    senderId: conversation.messenger.deviceIdentityId,
+                    sortMode: sortMode
+                )
+            )
+            
+            return AnyChatMessageCursor(
                 conversationId: conversation.conversation.id,
                 messenger: conversation.messenger,
-                devices: devices.map { device in
-                    DeviceChatCursor(
-                        target: conversation.target,
-                        conversationId: conversation.conversation.id,
-                        messenger: conversation.messenger,
-                        senderId: device.props.senderId,
-                        sortMode: sortMode
-                    )
-                },
+                devices: ,
                 sortMode: sortMode
             )
         }
