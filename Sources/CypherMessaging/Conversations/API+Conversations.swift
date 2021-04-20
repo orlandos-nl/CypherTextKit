@@ -239,13 +239,8 @@ extension AnyConversation {
         messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
     
-    public func updateMetadata<Metadata: Encodable>(to metadata: Metadata) -> EventLoopFuture<Void> {
-        do {
-            conversation.metadata = try BSONEncoder().encode(metadata)
-            return messenger.cachedStore.updateConversation(conversation.encrypted)
-        } catch {
-            return messenger.eventLoop.makeFailedFuture(error)
-        }
+    public func save() -> EventLoopFuture<Void> {
+        messenger.cachedStore.updateConversation(conversation.encrypted)
     }
     
     private func getNextLocalOrder() -> EventLoopFuture<Int> {
@@ -401,7 +396,7 @@ extension AnyConversation {
     }
     
     public func allMessages(sortedBy sortMode: SortMode) -> EventLoopFuture<[AnyChatMessage]> {
-        cursor(sortedBy: sortMode).flatMap { cursor in
+        return cursor(sortedBy: sortMode).flatMap { cursor in
             cursor.getMore(.max)
         }
     }
