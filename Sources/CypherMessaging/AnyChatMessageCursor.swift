@@ -158,7 +158,9 @@ public final class AnyChatMessageCursor {
     
     public func getMore(_ max: Int) -> EventLoopFuture<[AnyChatMessage]> {
         let resultSet = ResultSet()
-        resultSet.messages.reserveCapacity(max)
+        if max <= 500 {
+            resultSet.messages.reserveCapacity(max)
+        }
         return _getMore(max, joinedWith: resultSet).map {
             resultSet.messages
         }
