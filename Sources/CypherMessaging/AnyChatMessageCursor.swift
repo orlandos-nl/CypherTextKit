@@ -152,7 +152,9 @@ public final class AnyChatMessageCursor {
             
             resultSet.messages.append(message)
             
-            return self._getMore(max - 1, joinedWith: resultSet)
+            return self.messenger.eventLoop.flatSubmit {
+                self._getMore(max - 1, joinedWith: resultSet)
+            }
         }
     }
     
