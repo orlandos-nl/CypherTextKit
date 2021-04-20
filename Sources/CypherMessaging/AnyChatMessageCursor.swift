@@ -54,7 +54,7 @@ fileprivate final class DeviceChatCursor {
                 return messenger.eventLoop.makeSucceededFuture(nil)
             }
             
-            return getMore(iterationSize).flatMap(popNext)
+            return getMore(iterationSize).flatMap(peekNext)
         } else {
             return messenger.eventLoop.makeSucceededFuture(messages.first)
         }
