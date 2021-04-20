@@ -126,7 +126,7 @@ public final class AnyChatMessageCursor {
             }
         }
         
-        return EventLoopFuture.whenAllSucceed(results, on: messenger.eventLoop).map { results in
+        return EventLoopFuture.whenAllSucceed(results, on: messenger.eventLoop).flatMap { results in
             var results = results.compactMap { $0 }
             results.sort { lhs, rhs in
                 switch self.sortMode {
@@ -136,7 +136,12 @@ public final class AnyChatMessageCursor {
                     return lhs.message.sendDate > rhs.message.sendDate
                 }
             }
-            return results.first?.message
+            
+            guard let result = results.first else {
+                return self.messenger.eventLoop.makeSucceededFuture(nil)
+            }
+            
+            return result.device.popNext()
         }
     }
     
