@@ -44,6 +44,7 @@ public struct ProcessMessageAction {
 }
 
 public protocol CypherMessengerEventHandler {
+    func onRekey(withUser: Username, deviceId: DeviceId) -> EventLoopFuture<Void>
     func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void>
     func receiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction>
     func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction>

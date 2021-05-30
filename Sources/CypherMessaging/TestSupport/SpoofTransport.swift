@@ -83,6 +83,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     let eventLoop: EventLoop
     private let server: SpoofServer
     public private(set) var authenticated = AuthenticationState.unauthenticated
+    public let supportsMultiRecipientMessages = true
     public weak var delegate: CypherTransportClientDelegate? {
         didSet {
             if delegate != nil {
@@ -189,17 +190,6 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
         server.publicKeys[self.username] = keys
         
         return eventLoop.makeSucceededVoidFuture()
-    }
-    
-    public func publishGroupChat(config: GroupChatConfig) -> EventLoopFuture<GroupChatId> {
-        let groupId = GroupChatId()
-        server.groupChats[groupId] = config
-        return self.eventLoop.makeSucceededFuture(groupId)
-    }
-    
-    public func updateGroupChat(byId groupId: GroupChatId, config: GroupChatConfig) -> EventLoopFuture<Void> {
-        server.groupChats[groupId] = config
-        return self.eventLoop.makeSucceededVoidFuture()
     }
     
     public func publishBlob<C: Codable>(_ blob: C) -> EventLoopFuture<ReferencedBlob<C>> {

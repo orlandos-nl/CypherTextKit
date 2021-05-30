@@ -18,7 +18,7 @@ internal extension CypherMessenger {
                 return self.eventLoop.makeFailedFuture(CypherSDKError.badInput)
             }
             
-            let result = message.deliveryState.update(to: newState)
+            let result = message.deliveryState.transition(to: newState)
             return self.cachedStore.updateChatMessage(message.encrypted).map {
                  result
             }
@@ -33,7 +33,7 @@ internal extension CypherMessenger {
         return cachedStore.fetchChatMessage(byId: id).flatMap { message in
             let decryptedMessage = self.decrypt(message)
             
-            let result = decryptedMessage.deliveryState.update(to: newState)
+            let result = decryptedMessage.deliveryState.transition(to: newState)
             return self.cachedStore.updateChatMessage(decryptedMessage.encrypted).map {
                 return result
             }

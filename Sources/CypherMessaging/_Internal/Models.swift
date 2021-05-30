@@ -70,7 +70,7 @@ public final class ChatMessage: Model {
         case none, undelivered, received, read, revoked
         
         @discardableResult
-        public mutating func update(to newState: DeliveryState) -> MarkMessageResult {
+        public mutating func transition(to newState: DeliveryState) -> MarkMessageResult {
             switch (self, newState) {
             case (.none, _), (.undelivered, _), (.received, .read), (.received, .revoked):
                 self = newState

@@ -554,7 +554,10 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         self._fetchDeviceIdentity(for: username, deviceId: deviceId).flatMap { device in
             func rekey() -> EventLoopFuture<Void> {
                 device.doubleRatchet = nil
-                return self.cachedStore.updateDeviceIdentity(device.encrypted).flatMap {
+                
+                return self.eventHandler.onRekey(withUser: username, deviceId: deviceId).flatMap {
+                    self.cachedStore.updateDeviceIdentity(device.encrypted)
+                }.flatMap {
                     self._queueTask(
                         .sendMultiRecipientMessage(
                             SendMultiRecipientMessageTask(

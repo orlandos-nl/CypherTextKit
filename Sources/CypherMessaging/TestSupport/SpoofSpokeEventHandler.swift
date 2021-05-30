@@ -31,4 +31,8 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     public func onCreateChatMessage(_ conversation: AnyChatMessage) -> EventLoopFuture<Void> {
         eventLoop.makeSucceededVoidFuture()
     }
+    
+    public func onRekey(withUser: Username, deviceId: DeviceId) -> EventLoopFuture<Void> {
+        eventLoop.makeSucceededVoidFuture()
+    }
 }
