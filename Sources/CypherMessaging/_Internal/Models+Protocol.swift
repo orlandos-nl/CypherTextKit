@@ -61,6 +61,10 @@ public struct DecryptedModel<M: Model> {
             props[keyPath: keyPath] = newValue
         }
     }
+    
+    public subscript<T>(dynamicMember keyPath: KeyPath<M.SecureProps, T>) -> T {
+        props[keyPath: keyPath]
+    }
 }
 
 extension Model {

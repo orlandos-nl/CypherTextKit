@@ -1,5 +1,4 @@
 import CypherProtocol
-import CypherTransport
 import Foundation
 import NIO
 

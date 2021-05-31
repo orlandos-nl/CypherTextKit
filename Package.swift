@@ -28,11 +28,6 @@ let package = Package(
         .target(
             name: "CypherMessaging",
             dependencies: [
-                .target(name: "CypherTransport")
-            ]),
-        .target(
-            name: "CypherTransport",
-            dependencies: [
                 .target(name: "CypherProtocol")
             ]),
         .target(

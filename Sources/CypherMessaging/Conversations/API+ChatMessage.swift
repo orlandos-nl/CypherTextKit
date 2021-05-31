@@ -3,7 +3,7 @@ public struct AnyChatMessage {
     public var id: UUID { raw.id }
     internal let messenger: CypherMessenger
     internal let raw: DecryptedModel<ChatMessage>
-    public var message: CypherMessage { raw.message }
+    public var message: SingleCypherMessage { raw.message }
     public var sendDate: Date { raw.props.sendDate }
     public var receiveDate: Date { raw.props.receiveDate }
     public var senderUser: Username { raw.props.senderUser }

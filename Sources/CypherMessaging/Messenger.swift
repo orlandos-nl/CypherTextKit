@@ -3,7 +3,6 @@ import Foundation
 import Crypto
 import NIO
 import CypherProtocol
-import CypherTransport
 
 public enum DeviceRegisteryMode: Int, Codable {
     case masterDevice, childDevice, unregistered
@@ -38,10 +37,34 @@ public struct TransportCreationRequest {
     public let signingIdentity: PrivateSigningKey
 }
 
-public final class CypherMessenger: CypherTransportClientDelegate {
+internal struct P2PSession {
+    let username: Username
+    let deviceId: DeviceId
+    let publicKey: PublicKey
+    let identity: PublicSigningKey
+    let transport: P2PTransportClient
+    let client: P2PClient
+    
+    init(
+        deviceIdentity: DecryptedModel<DeviceIdentity>,
+        transport: P2PTransportClient,
+        client: P2PClient
+    ) {
+        self.username = deviceIdentity.username
+        self.deviceId = deviceIdentity.deviceId
+        self.publicKey = deviceIdentity.publicKey
+        self.identity = deviceIdentity.identity
+        self.transport = transport
+        self.client = client
+    }
+}
+
+public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate {
     public let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
     private var config: _CypherMessengerConfig
+    private var p2pFactories = [P2PTransportClientFactory]()
+    private var p2pSessions = [P2PSession]()
     internal var deviceIdentityId: Int { config.deviceIdentityId }
     internal let eventHandler: CypherMessengerEventHandler
     internal let cachedStore: _CypherMessengerStoreCache
@@ -57,6 +80,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         eventHandler: CypherMessengerEventHandler,
         config: _CypherMessengerConfig,
         database: CypherMessengerStore,
+        p2pFactories: [P2PTransportClientFactory],
         transport: CypherServerTransportClient
     ) {
         self.eventLoop = eventLoop
@@ -65,6 +89,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         self.cachedStore = _CypherMessengerStoreCache(base: database, eventLoop: eventLoop)
         self.transport = transport
         self.databaseEncryptionKey = SymmetricKey(data: config.databaseEncryptionKey)
+        self.p2pFactories = p2pFactories
         self.transport.delegate = self
         self.jobQueue = JobQueue(messenger: self, database: self.cachedStore, databaseEncryptionKey: self.databaseEncryptionKey)
         
@@ -77,6 +102,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         username: Username,
         appPassword: String,
         usingTransport createTransport: @escaping (TransportCreationRequest) -> EventLoopFuture<Transport>,
+        p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
@@ -131,6 +157,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                         eventHandler: eventHandler,
                         config: config,
                         database: database,
+                        p2pFactories: p2pFactories,
                         transport: transport
                     )
                     
@@ -163,6 +190,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                             eventHandler: eventHandler,
                             config: config,
                             database: database,
+                            p2pFactories: p2pFactories,
                             transport: transport
                         )
                     }
@@ -178,6 +206,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         authenticationMethod: AuthenticationMethod,
         appPassword: String,
         usingTransport: Transport.Type,
+        p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
@@ -195,6 +224,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     eventLoop: eventLoop
                 )
             },
+            p2pFactories: p2pFactories,
             database: database,
             eventHandler: eventHandler,
             on: eventLoop
@@ -209,6 +239,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         authenticationMethod: AuthenticationMethod,
         appPassword: String,
         usingTransport createTransport: Transport.Type,
+        p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
@@ -225,6 +256,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     eventLoop: eventLoop
                 )
             },
+            p2pFactories: p2pFactories,
             database: database,
             eventHandler: eventHandler,
             on: eventLoop
@@ -236,6 +268,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
     >(
         appPassword: String,
         usingTransport createTransport: @escaping (TransportCreationRequest) -> EventLoopFuture<Transport>,
+        p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop
@@ -263,6 +296,7 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                         eventHandler: eventHandler,
                         config: config,
                         database: database,
+                        p2pFactories: p2pFactories,
                         transport: transport
                     )
                 }
@@ -284,9 +318,37 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         return SymmetricKey(data: SHA256.hash(data: key.data(using: .utf8)!))
     }
     
+    public func verifyAppPassword(matches appPassword: String) -> EventLoopFuture<Bool> {
+        return self.cachedStore.readLocalDeviceSalt().flatMap { salt -> EventLoopFuture<Bool> in
+            let encryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+            
+            return self.cachedStore.readLocalDeviceConfig().map { data -> Bool in
+                do {
+                    let box = try AES.GCM.SealedBox(combined: data)
+                    let config = Encrypted<_CypherMessengerConfig>(representing: box)
+                    _ = try config.decrypt(using: encryptionKey)
+                    return true
+                } catch {
+                    return false
+                }
+            }
+        }
+    }
+    
+    public func changeAppPassword(to appPassword: String) -> EventLoopFuture<Void> {
+        return self.cachedStore.readLocalDeviceSalt().flatMapThrowing { salt in
+            let appEncryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+            
+            let encryptedConfig = try Encrypted(self.config, encryptionKey: appEncryptionKey)
+            return try BSONEncoder().encode(encryptedConfig).makeData()
+        }.flatMap { data in
+            return self.cachedStore.writeLocalDeviceConfig(data)
+        }
+    }
+    
     // TODO: Make internal
     public func receiveServerEvent(_ event: CypherServerEvent) -> EventLoopFuture<Void> {
-        switch event {
+        switch event.raw {
         case let .multiRecipientMessageSent(message, id: messageId, byUser: sender, deviceId: deviceId):
             //            guard let key = message.keys.first(where: {
             //                $0.user == self.config.username && $0.deviceId == self.config.deviceKeys.deviceId
@@ -369,9 +431,9 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                                 forUsername: self.username
                             ).flatMap { _ -> EventLoopFuture<Void> in
                                 return internalConversation.sendInternalMessage(
-                                    CypherMessage(
+                                    SingleCypherMessage(
                                         messageType: .magic,
-                                        messageSubtype: "devices/announce",
+                                        messageSubtype: "_/devices/announce",
                                         text: deviceConfig.deviceId.raw,
                                         metadata: metadata,
                                         order: 0,
@@ -488,15 +550,25 @@ public final class CypherMessenger: CypherTransportClientDelegate {
         return eventLoop.makeSucceededFuture(config.custom)
     }
     
-    public func writeCustomConfig(_ custom: Document) -> EventLoopFuture<Void> {
-        do {
-            var newConfig = config
-            newConfig.custom = custom
-            return self.cachedStore.writeLocalDeviceConfig(try BSONEncoder().encode(newConfig).makeData()).map {
-                self.config = newConfig
+    public func writeCustomConfig(_ custom: Document, appPassword: String) -> EventLoopFuture<Void> {
+        return verifyAppPassword(matches: appPassword).flatMap { matches -> EventLoopFuture<String> in
+            guard matches else {
+                return self.eventLoop.makeFailedFuture(CypherSDKError.incorrectAppPassword)
             }
-        } catch {
-            return eventLoop.makeFailedFuture(error)
+            
+            return self.cachedStore.readLocalDeviceSalt()
+        }.flatMap { salt in
+            do {
+                let appEncryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+                var newConfig = self.config
+                newConfig.custom = custom
+                let encryptedConfig = try Encrypted(newConfig, encryptionKey: appEncryptionKey)
+                return self.cachedStore.writeLocalDeviceConfig(try BSONEncoder().encode(encryptedConfig).makeData()).map {
+                    self.config = newConfig
+                }
+            } catch {
+                return self.eventLoop.makeFailedFuture(error)
+            }
         }
     }
     
@@ -559,20 +631,22 @@ public final class CypherMessenger: CypherTransportClientDelegate {
                     self.cachedStore.updateDeviceIdentity(device.encrypted)
                 }.flatMap {
                     self._queueTask(
-                        .sendMultiRecipientMessage(
-                            SendMultiRecipientMessageTask(
+                        .sendMessage(
+                            SendMessageTask(
                                 message: CypherMessage(
-                                    messageType: .magic,
-                                    messageSubtype: "protocol/rekey",
-                                    text: "",
-                                    metadata: [:],
-                                    order: 0,
-                                    target: .otherUser(username)
+                                    message: SingleCypherMessage(
+                                        messageType: .magic,
+                                        messageSubtype: "_/protocol/rekey",
+                                        text: "",
+                                        metadata: [:],
+                                        order: 0,
+                                        target: .otherUser(username)
+                                    )
                                 ),
-                                messageId: UUID().uuidString,
-                                recipients: [username],
-                                localId: nil,
-                                pushType: .none
+                                recipient: username,
+                                recipientDeviceId: deviceId,
+                                localId: UUID(),
+                                messageId: UUID().uuidString
                             )
                         )
                     )
@@ -625,6 +699,167 @@ public final class CypherMessenger: CypherTransportClientDelegate {
             
             return self.cachedStore.updateDeviceIdentity(device.encrypted).map {
                 (data, device)
+            }
+        }
+    }
+    
+    // TODO: Make internal
+    public func p2pConnection(
+        _ connection: P2PTransportClient,
+        closedWithOptions: Set<P2PTransportClosureOption>
+    ) -> EventLoopFuture<Void> {
+        func close() -> EventLoopFuture<Void> {
+            return connection.disconnect().map {
+                debugLog("Removing P2P session from active pool")
+                
+                self.p2pSessions.removeAll {
+                    $0.transport === connection
+                }
+            }
+        }
+        
+        debugLog("P2P session disconnecting")
+        
+        if closedWithOptions.contains(.reconnnectPossible) {
+            return connection.reconnect().flatMapError { _ in
+                debugLog("Reconnecting P2P connection failed")
+                return close()
+            }
+        }
+        
+        return close()
+    }
+    
+    internal func _processP2PMessage(
+        _ message: SingleCypherMessage,
+        remoteMessageId: String,
+        sender device: DecryptedModel<DeviceIdentity>
+    ) -> EventLoopFuture<Void> {
+        var subType = message.messageSubtype ?? ""
+        
+        assert(subType.hasPrefix("_/p2p/"))
+        
+        subType.removeFirst("_/p2p/".count)
+        
+        var components = subType.split(separator: "/")
+        
+        guard !components.isEmpty else {
+            return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+        }
+        
+        let transportId = String(components.removeFirst())
+        
+        guard let factory = p2pFactories.first(
+            where: { $0.transportLayerIdentifier == transportId }
+        ) else {
+            return eventLoop.makeFailedFuture(CypherSDKError.unsupportedTransport)
+        }
+        
+        let handle = P2PTransportFactoryHandle(
+            transportLayerIdentifier: transportId,
+            messenger: self,
+            targetConversation: message.target,
+            state: P2PFrameworkState(
+                username: device.username,
+                deviceId: device.deviceId,
+                identity: device.identity
+            )
+        )
+        
+        return factory.receiveMessage(message.text, metadata: message.metadata, handle: handle).map { client in
+            if let client = client {
+                client.delegate = self
+                self.p2pSessions.append(
+                    P2PSession(
+                        deviceIdentity: device,
+                        transport: client,
+                        client: P2PClient(
+                            client: client,
+                            messenger: self
+                        )
+                    )
+                )
+            }
+        }
+    }
+    
+    // TODO: Make internal
+    public func p2pConnection(
+        _ connection: P2PTransportClient,
+        receivedMessage buffer: ByteBuffer
+    ) -> EventLoopFuture<Void> {
+        guard let session = self.p2pSessions.first(where: {
+            $0.transport === connection
+        }) else {
+            return eventLoop.makeSucceededVoidFuture()
+        }
+        
+        return session.client.receiveBuffer(buffer)
+    }
+    
+    internal func getEstablishedP2PConnection(
+        with device: DecryptedModel<DeviceIdentity>
+    ) -> EventLoopFuture<P2PClient?> {
+        return eventLoop.makeSucceededFuture(
+            p2pSessions.first(where: {
+                $0.deviceId == device.deviceId && $0.username == device.username
+            })?.client
+        )
+    }
+    
+    internal func createP2PConnection(
+        with device: DecryptedModel<DeviceIdentity>,
+        targetConversation: TargetConversation,
+        preferredTransportIdentifier: String? = nil
+    ) -> EventLoopFuture<Void> {
+        if p2pSessions.contains(where: { $0.deviceId == device.deviceId && $0.username == device.username }) {
+            return eventLoop.makeSucceededVoidFuture()
+        }
+        
+        let transportFactory: P2PTransportClientFactory
+        
+        if let preferredTransportIdentifier = preferredTransportIdentifier {
+            guard let defaultTransport = self.p2pFactories.first(where: {
+                $0.transportLayerIdentifier == preferredTransportIdentifier
+            }) else {
+                return eventLoop.makeFailedFuture(CypherSDKError.invalidTransport)
+            }
+            
+            transportFactory = defaultTransport
+        } else {
+            guard let factory = self.p2pFactories.first else {
+                return eventLoop.makeFailedFuture(CypherSDKError.invalidTransport)
+            }
+            
+            transportFactory = factory
+        }
+        
+        let state = P2PFrameworkState(
+            username: device.username,
+            deviceId: device.deviceId,
+            identity: device.identity
+        )
+        
+        return transportFactory.createConnection(
+            handle: P2PTransportFactoryHandle(
+                transportLayerIdentifier: transportFactory.transportLayerIdentifier,
+                messenger: self,
+                targetConversation: targetConversation,
+                state: state
+            )
+        ).map { client in
+            if let client = client {
+                client.delegate = self
+                self.p2pSessions.append(
+                    P2PSession(
+                        deviceIdentity: device,
+                        transport: client,
+                        client: P2PClient(
+                            client: client,
+                            messenger: self
+                        )
+                    )
+                )
             }
         }
     }

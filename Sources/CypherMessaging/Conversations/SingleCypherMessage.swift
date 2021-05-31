@@ -1,6 +1,5 @@
 import BSON
 import CypherProtocol
-import CypherTransport
 import Foundation
 
 public enum PushType: String, Codable {
@@ -52,7 +51,7 @@ public struct ConversationTarget: Codable {
     }
 }
 
-public struct CypherMessage: Codable {
+public struct SingleCypherMessage: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {
         case messageType = "a"
@@ -66,10 +65,10 @@ public struct CypherMessage: Codable {
         case _target = "i"
     }
     
-    public let messageType: CypherMessageType
-    public let messageSubtype: String?
-    public let text: String
-    public let metadata: Document
+    public var messageType: CypherMessageType
+    public var messageSubtype: String?
+    public var text: String
+    public var metadata: Document
     public let destructionTimer: TimeInterval?
     public let sentDate: Date?
     private let _target: ConversationTarget

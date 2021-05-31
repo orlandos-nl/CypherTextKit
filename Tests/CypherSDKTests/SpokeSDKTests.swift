@@ -3,7 +3,6 @@ import Crypto
 import NIO
 import XCTest
 @testable import CypherMessaging
-import CypherTransport
 import CypherProtocol
 
 final class CypherSDKTests: XCTestCase {
@@ -26,6 +25,87 @@ final class CypherSDKTests: XCTestCase {
         ).wait()
         
         XCTAssertThrowsError(try m0.createPrivateChat(with: "m0").wait())
+    }
+    
+    func testP2P() throws {
+        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let eventLoop = elg.next()
+        
+        let m0 = try CypherMessenger.registerMessenger(
+            username: "m0",
+            authenticationMethod: .password("m0"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            p2pFactories: [
+                SpoofP2PTransportFactory()
+            ],
+            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            on: eventLoop
+        ).wait()
+        
+        let m1 = try CypherMessenger.registerMessenger(
+            username: "m1",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            p2pFactories: [
+                SpoofP2PTransportFactory()
+            ],
+            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            on: eventLoop
+        ).wait()
+        
+        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
+        
+        _ = try m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        ).wait()
+        
+        sleep(5)
+        
+        let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
+        
+        sleep(2)
+        
+        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        
+        _ = try m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        ).wait()
+        
+        _ = try m1Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        ).wait()
+        
+        sleep(2)
+        
+        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 3)
+        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 3)
+        
+        try m0Chat.buildP2PConnections().wait()
+        
+        sleep(2)
+        
+        try XCTAssertEqual(m0Chat.getOpenP2PConnections().wait().count, 1)
+        try XCTAssertEqual(m1Chat.getOpenP2PConnections().wait().count, 1)
+        
+        for connection in try m0Chat.getOpenP2PConnections().wait() {
+            try connection.updateStatus(flags: .isTyping).wait()
+        }
+        
+        sleep(2)
+        
+        let p2pConnection = try m1Chat.getOpenP2PConnections().wait()[0]
+        XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
     }
     
     func testGroupChat() throws {

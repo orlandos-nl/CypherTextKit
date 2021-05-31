@@ -7,7 +7,7 @@ struct Weak<O: AnyObject> {
 }
 
 internal final class _CypherMessengerStoreCache: CypherMessengerStore {
-    private let base: CypherMessengerStore
+    internal let base: CypherMessengerStore
     let eventLoop: EventLoop
     
     private var deviceIdentities: [DeviceIdentity]?

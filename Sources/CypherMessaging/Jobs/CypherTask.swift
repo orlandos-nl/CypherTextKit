@@ -1,4 +1,3 @@
-import CypherTransport
 import CypherProtocol
 import Foundation
 import CryptoKit
@@ -41,7 +40,7 @@ struct CreateChatTask: Codable {
         case acceptedByOtherUser = "h"
     }
     
-    let message: CypherMessage
+    let message: SingleCypherMessage
     let pushType: PushType
     let recipient: Username
     let localId: UUID
@@ -58,7 +57,7 @@ struct AddContactTask: Codable {
         case nickname = "d"
     }
     
-    let message: CypherMessage
+    let message: SingleCypherMessage
     let pushType: PushType
     let recipient: Username
     let nickname: String
@@ -155,7 +154,10 @@ struct SendMultiRecipientMessageTask: Codable {
 }
 
 enum GroupUserAction: Int, Codable {
-    case invite, remove, promoteAdmin, demoteAdmin
+    case invite = 0
+    case remove = 1
+    case promoteAdmin = 2
+    case demoteAdmin = 3
 }
 
 struct GroupUserTask: Codable {

@@ -67,7 +67,11 @@ public enum MarkMessageResult {
 
 public final class ChatMessage: Model {
     public enum DeliveryState: Int, Codable {
-        case none, undelivered, received, read, revoked
+        case none = 0
+        case undelivered = 1
+        case received = 2
+        case read = 3
+        case revoked = 4
         
         @discardableResult
         public mutating func transition(to newState: DeliveryState) -> MarkMessageResult {
@@ -96,12 +100,12 @@ public final class ChatMessage: Model {
         public let sendDate: Date
         public let receiveDate: Date
         public internal(set) var deliveryState: DeliveryState
-        public var message: CypherMessage
+        public var message: SingleCypherMessage
         public let senderUser: Username
         public let senderDeviceId: DeviceId
         
         init(
-            sending message: CypherMessage,
+            sending message: SingleCypherMessage,
             senderUser: Username,
             senderDeviceId: DeviceId
         ) {
@@ -114,7 +118,7 @@ public final class ChatMessage: Model {
         }
         
         init(
-            receiving message: CypherMessage,
+            receiving message: SingleCypherMessage,
             sentAt: Date,
             senderUser: Username,
             senderDeviceId: DeviceId

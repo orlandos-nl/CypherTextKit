@@ -1,6 +1,5 @@
 import Crypto
 import CypherProtocol
-import CypherTransport
 import BSON
 import Foundation
 import NIO
@@ -208,21 +207,30 @@ internal extension CypherMessenger {
                 }
             }
             
-            if let sentDate = message.sentDate, sentDate > Date() {
-                // Message was sent in the future, which is impossible
-                return self.eventLoop.makeSucceededVoidFuture()
+            func processMessage(_ message: SingleCypherMessage) -> EventLoopFuture<Void> {
+                if let sentDate = message.sentDate, sentDate > Date() {
+                    // Message was sent in the future, which is impossible
+                    return self.eventLoop.makeSucceededVoidFuture()
+                }
+                
+                return self._processMessage(
+                    message: message,
+                    remoteMessageId: messageId,
+                    sender: deviceIdentity
+                )
             }
-            
-            return self._processMessage(
-                message: message,
-                remoteMessageId: messageId,
-                sender: deviceIdentity
-            )
+
+            switch message.box {
+            case .single(let message):
+                return processMessage(message)
+            case .array(let messages):
+                return EventLoopFuture.andAllSucceed(messages.map(processMessage), on: self.eventLoop)
+            }
         }
     }
     
     private func _processMessage(
-        message: CypherMessage,
+        message: SingleCypherMessage,
         remoteMessageId: String,
         sender: DecryptedModel<DeviceIdentity>
     ) -> EventLoopFuture<Void> {
@@ -236,8 +244,8 @@ internal extension CypherMessenger {
                 return self.eventLoop.makeFailedFuture(CypherSDKError.badInput)
             }
             
-            switch message.messageSubtype {
-            case "devices/announce":
+            switch (message.messageType, message.messageSubtype ?? "") {
+            case (.magic, "_/devices/announce"):
                 do {
                     let deviceConfig = try BSONDecoder().decode(
                         UserDeviceConfig.self,
@@ -257,7 +265,18 @@ internal extension CypherMessenger {
                     debugLog(error)
                     return eventLoop.makeFailedFuture(error)
                 }
+            case (.magic, let subType) where subType.hasPrefix("_/p2p/"):
+                return _processP2PMessage(
+                    message,
+                    remoteMessageId: remoteMessageId,
+                    sender: sender
+                )
             default:
+                guard message.messageSubtype?.hasPrefix("_/") != true else {
+                    debugLog("Unknown message subtype in cypher messenger namespace")
+                    return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+                }
+                
                 return self.getInternalConversation().map { conversation in
                     ReceivedMessageContext(
                         sender: DeviceReference(
@@ -304,6 +323,11 @@ internal extension CypherMessenger {
                 }
             }
         case .groupChat(let groupId):
+            guard message.messageSubtype?.hasPrefix("_/") != true else {
+                debugLog("Unknown message subtype in cypher messenger namespace")
+                return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+            }
+            
             return self._openGroupChat(byId: groupId).flatMap { group in
                 let context = ReceivedMessageContext(
                     sender: DeviceReference(
@@ -347,6 +371,20 @@ internal extension CypherMessenger {
                 }
             }
         case .otherUser(let recipient):
+            switch (message.messageType, message.messageSubtype ?? "") {
+            case (.magic, let subType) where subType.hasPrefix("_/p2p/"):
+                return _processP2PMessage(
+                    message,
+                    remoteMessageId: remoteMessageId,
+                    sender: sender
+                )
+            case (.magic, let subType), (.media, let subType), (.text, let subType):
+                if subType.hasPrefix("_/") {
+                    debugLog("Unknown message subtype in cypher messenger namespace")
+                    return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+                }
+            }
+            
             let chatName = sender.props.username == self.username ? recipient : sender.props.username
             
             return self.createPrivateChat(with: chatName).flatMap { privateChat in

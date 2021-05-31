@@ -1,6 +1,5 @@
 import NIO
 import CypherProtocol
-import CypherTransport
 
 public struct DeviceReference {
     public let username: Username
@@ -10,14 +9,14 @@ public struct DeviceReference {
 public struct ReceivedMessageContext {
     public let sender: DeviceReference
     public let messenger: CypherMessenger
-    public var message: CypherMessage
+    public var message: SingleCypherMessage
     public let conversation: TargetConversation.Resolved
 }
 
 public struct SentMessageContext {
     public let recipients: Set<Username>
     public let messenger: CypherMessenger
-    public var message: CypherMessage
+    public var message: SingleCypherMessage
     public let conversation: TargetConversation.Resolved
 }
 

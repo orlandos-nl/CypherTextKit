@@ -12,4 +12,7 @@ enum CypherSDKError: Error {
     case appLocked
     case invalidGroupConfig
     case invalidHandshake
+    case incorrectAppPassword
+    case invalidTransport
+    case unsupportedTransport
 }

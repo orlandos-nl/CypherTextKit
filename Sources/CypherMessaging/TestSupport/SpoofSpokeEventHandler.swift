@@ -1,5 +1,4 @@
 import NIO
-import CypherTransport
 
 public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     public let eventLoop: EventLoop

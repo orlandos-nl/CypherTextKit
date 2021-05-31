@@ -1,5 +1,4 @@
 import CypherProtocol
-import CypherTransport
 import BSON
 import Foundation
 import NIO
@@ -235,6 +234,35 @@ public protocol AnyConversation {
 }
 
 extension AnyConversation {
+    public func getOpenP2PConnections() -> EventLoopFuture<[P2PClient]> {
+        return self.memberDevices().flatMap { devices in
+            let connections = devices.map { device in
+                return self.messenger.getEstablishedP2PConnection(with: device)
+            }
+            
+            return EventLoopFuture.whenAllSucceed(connections, on: self.messenger.eventLoop).map { connections in
+                return connections.compactMap { $0 }
+            }
+        }
+    }
+    
+    public func buildP2PConnections(
+        preferredTransportIdentifier: String? = nil
+    ) -> EventLoopFuture<Void> {
+        return self.memberDevices().flatMap { devices in
+            let created = devices.map { device in
+                return self.messenger.createP2PConnection(
+                    with: device,
+                    targetConversation: self.target,
+                    preferredTransportIdentifier: preferredTransportIdentifier
+                )
+            }
+            
+            return EventLoopFuture.andAllSucceed(created, on: self.messenger.eventLoop)
+        }
+    }
+    
+    // TODO: This _could_ be cached in `metadataContainer`
     public func memberDevices() -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
         messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
@@ -261,7 +289,7 @@ extension AnyConversation {
     ) -> EventLoopFuture<AnyChatMessage?> {
         getNextLocalOrder().flatMap { order in
             self._sendMessage(
-                CypherMessage(
+                SingleCypherMessage(
                     messageType: .text,
                     messageSubtype: messageSubtype,
                     text: text,
@@ -311,7 +339,7 @@ extension AnyConversation {
     }
     
     internal func _sendMessage(
-        _ message: CypherMessage,
+        _ message: SingleCypherMessage,
         to recipients: Set<Username>,
         pushType: PushType
     ) -> EventLoopFuture<AnyChatMessage?> {
@@ -343,7 +371,7 @@ extension AnyConversation {
             messenger._queueTask(
                 .sendMultiRecipientMessage(
                     SendMultiRecipientMessageTask(
-                        message: message,
+                        message: CypherMessage(message: message),
                         // We _always_ attach a messageID so the protocol doesn't give away
                         // The precense of magic packets
                         messageId: chatMessage?.encrypted.remoteId ?? UUID().uuidString,
@@ -369,7 +397,7 @@ extension AnyConversation {
     }
     
     internal func _writeMessage(
-        _ message: CypherMessage,
+        _ message: SingleCypherMessage,
         to recipients: Set<Username>
     ) -> EventLoopFuture<Void> {
         let allMessagesQueues = recipients.map { recipient -> EventLoopFuture<Void> in
@@ -378,7 +406,7 @@ extension AnyConversation {
                     messenger._queueTask(
                         .sendMessage(
                             SendMessageTask(
-                                message: message,
+                                message: CypherMessage(message: message),
                                 recipient: recipient,
                                 recipientDeviceId: device.props.deviceId,
                                 localId: nil,
@@ -415,7 +443,7 @@ public struct InternalConversation: AnyConversation {
         .internalChat(self)
     }
     
-    public func sendInternalMessage(_ message: CypherMessage) -> EventLoopFuture<Void> {
+    public func sendInternalMessage(_ message: SingleCypherMessage) -> EventLoopFuture<Void> {
         self._writeMessage(message, to: [messenger.username])
     }
 }
