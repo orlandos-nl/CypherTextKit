@@ -90,6 +90,15 @@
           "revision": "3be4e0980075de10a4bc8dee07491d49175cfd7a",
           "version": "2.27.0"
         }
+      },
+      {
+        "package": "swift-nio-transport-services",
+        "repositoryURL": "https://github.com/apple/swift-nio-transport-services.git",
+        "state": {
+          "branch": null,
+          "revision": "657537c2cf1845f8d5201ecc4e48f21f21841128",
+          "version": "1.10.0"
+        }
       }
     ]
   },

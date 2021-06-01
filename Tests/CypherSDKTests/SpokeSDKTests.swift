@@ -3,6 +3,7 @@ import Crypto
 import NIO
 import XCTest
 @testable import CypherMessaging
+import SystemConfiguration
 import CypherProtocol
 
 final class CypherSDKTests: XCTestCase {
@@ -37,7 +38,7 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             p2pFactories: [
-                SpoofP2PTransportFactory()
+                IPv6TCPP2PTransportClientFactory()
             ],
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
             eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
@@ -50,7 +51,8 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             p2pFactories: [
-                SpoofP2PTransportFactory()
+                SpoofP2PTransportFactory(),
+                IPv6TCPP2PTransportClientFactory()
             ],
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
             eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
@@ -65,11 +67,11 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         ).wait()
         
-        sleep(5)
+        sleep(2)
         
         let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
         
-        sleep(2)
+        sleep(1)
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
@@ -86,25 +88,27 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         ).wait()
         
-        sleep(2)
+        sleep(1)
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 3)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 3)
         
         try m0Chat.buildP2PConnections().wait()
         
-        sleep(2)
+        sleep(1)
         
         try XCTAssertEqual(m0Chat.getOpenP2PConnections().wait().count, 1)
         try XCTAssertEqual(m1Chat.getOpenP2PConnections().wait().count, 1)
+        
+        let p2pConnection = try m1Chat.getOpenP2PConnections().wait()[0]
+        XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), nil)
         
         for connection in try m0Chat.getOpenP2PConnections().wait() {
             try connection.updateStatus(flags: .isTyping).wait()
         }
         
-        sleep(2)
+        sleep(1)
         
-        let p2pConnection = try m1Chat.getOpenP2PConnections().wait()[0]
         XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
     }
     

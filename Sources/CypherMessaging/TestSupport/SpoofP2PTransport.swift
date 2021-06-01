@@ -72,7 +72,7 @@ fileprivate final class SpoofTransportFactoryMedium {
 public final class SpoofP2PTransportFactory: P2PTransportClientFactory {
     public init() {}
     
-    public let transportLayerIdentifier = "spoof"
+    public let transportLayerIdentifier = "_spoof"
     
     public func createConnection(handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
         let localClient = SpoofP2PTransportClient(
