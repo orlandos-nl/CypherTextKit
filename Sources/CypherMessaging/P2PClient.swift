@@ -15,18 +15,28 @@ public final class P2PClient {
     public func receiveBuffer(
         _ buffer: ByteBuffer
     ) -> EventLoopFuture<Void> {
+        guard let messenger = messenger else {
+            return eventLoop.makeSucceededVoidFuture()
+        }
+        
         let document = Document(buffer: buffer)
         
         do {
-            let signedMessage = try BSONDecoder().decode(Signed<P2PMessage>.self, from: document)
-            let message = try signedMessage.readAndVerifySignature(signedBy: client.state.identity)
+            let ratchetMessage = try BSONDecoder().decode(RatchetedCypherMessage.self, from: document)
             
-            switch message.box {
-            case .status(let status):
-                self.remoteStatus = status
+            return messenger._readWithRatchetEngine(
+                ofUser: client.state.username,
+                deviceId: client.state.deviceId,
+                message: ratchetMessage
+            ).flatMapThrowing { data, _ in
+                let messageBson = Document(data: data)
+                let message = try BSONDecoder().decode(P2PMessage.self, from: messageBson)
+                
+                switch message.box {
+                case .status(let status):
+                    self.remoteStatus = status
+                }
             }
-            
-            return eventLoop.makeSucceededVoidFuture()
         } catch {
             return eventLoop.makeFailedFuture(error)
         }
@@ -49,13 +59,20 @@ public final class P2PClient {
             )
         )
         
-        do {
-            let signedMessage = try messenger.sign(message)
-            let bson = try BSONEncoder().encode(signedMessage)
-            
-            return client.sendMessage(bson.makeByteBuffer())
-        } catch {
-            return eventLoop.makeFailedFuture(error)
+        return messenger._writeWithRatchetEngine(
+            ofUser: client.state.username,
+            deviceId: client.state.deviceId
+        ) { ratchetEngine, rekey -> EventLoopFuture<Void> in
+            do {
+                let messageBson = try BSONEncoder().encode(message)
+                let encryptedMessage = try ratchetEngine.ratchetEncrypt(messageBson.makeData())
+                let signedMessage = try messenger._signRatchetMessage(encryptedMessage, rekey: rekey)
+                let signedMessageBson = try BSONEncoder().encode(signedMessage)
+                
+                return self.client.sendMessage(signedMessageBson.makeByteBuffer())
+            } catch {
+                return self.eventLoop.makeFailedFuture(error)
+            }
         }
     }
 }
