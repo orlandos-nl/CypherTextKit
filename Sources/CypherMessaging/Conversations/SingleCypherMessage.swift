@@ -3,7 +3,7 @@ import CypherProtocol
 import Foundation
 
 public enum PushType: String, Codable {
-    case none, call, message, contactRequest = "contactrequest"
+    case none, call, message, contactRequest = "contactrequest", cancelCall = "cancelcall"
 }
 
 public enum CypherMessageType: String, Codable {
@@ -15,10 +15,86 @@ public enum TargetConversation {
     case otherUser(Username)
     case groupChat(GroupChatId)
     
-    public enum Resolved {
+    public enum Resolved: AnyConversation {
         case privateChat(PrivateChat)
         case groupChat(GroupChat)
         case internalChat(InternalConversation)
+        
+        init?(conversation: DecryptedModel<Conversation>, messenger: CypherMessenger) {
+            guard conversation.members.contains(messenger.username) else {
+                return nil
+            }
+            
+            switch conversation.members.count {
+            case ..<0:
+                return nil
+            case 1:
+                self = .internalChat(InternalConversation(conversation: conversation, messenger: messenger))
+            case 2 where conversation.metadata["_type"] as? String != "group":
+                self = .privateChat(PrivateChat(conversation: conversation, messenger: messenger))
+            default:
+                if conversation.metadata["_type"] as? String == "group" {
+                    do {
+                        let groupMetadata = try BSONDecoder().decode(
+                            GroupMetadata.self,
+                            from: conversation.metadata
+                        )
+                        
+                        self = .groupChat(GroupChat(conversation: conversation, messenger: messenger, metadata: groupMetadata))
+                    } catch {
+                        return nil
+                    }
+                } else {
+                    return nil
+                }
+            }
+        }
+        
+        public var conversation: DecryptedModel<Conversation> {
+            switch self {
+            case .privateChat(let chat):
+                return chat.conversation
+            case .groupChat(let chat):
+                return chat.conversation
+            case .internalChat(let chat):
+                return chat.conversation
+            }
+        }
+        
+        public var messenger: CypherMessenger {
+            switch self {
+            case .privateChat(let chat):
+                return chat.messenger
+            case .groupChat(let chat):
+                return chat.messenger
+            case .internalChat(let chat):
+                return chat.messenger
+            }
+        }
+        
+        public var target: TargetConversation {
+            switch self {
+            case .privateChat(let chat):
+                return chat.target
+            case .groupChat(let chat):
+                return chat.target
+            case .internalChat(let chat):
+                return chat.target
+            }
+        }
+        
+        public var cache: Cache {
+            switch self {
+            case .privateChat(let chat):
+                return chat.cache
+            case .groupChat(let chat):
+                return chat.cache
+            case .internalChat(let chat):
+                return chat.cache
+            }
+        }
+        
+        public var resolvedTarget: TargetConversation.Resolved { self }
     }
 }
 

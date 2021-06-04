@@ -19,19 +19,29 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
         eventLoop.makeSucceededFuture(.save)
     }
     
-    public func privateChatMetadata(withUser otherUser: Username) -> EventLoopFuture<Document> {
+    public func createPrivateChatMetadata(withUser otherUser: Username) -> EventLoopFuture<Document> {
         eventLoop.makeSucceededFuture([:])
     }
     
-    public func onCreateConversation(_ conversation: Conversation) -> EventLoopFuture<Void> {
-        eventLoop.makeSucceededVoidFuture()
+    public func createContactMetadata(for username: Username) -> EventLoopFuture<Document> {
+        eventLoop.makeSucceededFuture([:])
     }
     
-    public func onCreateChatMessage(_ conversation: AnyChatMessage) -> EventLoopFuture<Void> {
-        eventLoop.makeSucceededVoidFuture()
-    }
+    public func onCreateConversation(_ conversation: AnyConversation) {}
     
-    public func onRekey(withUser: Username, deviceId: DeviceId) -> EventLoopFuture<Void> {
+    public func onCreateChatMessage(_ conversation: AnyChatMessage) {}
+    
+    public func onCreateContact(_ contact: DecryptedModel<Contact>, messenger: CypherMessenger) {}
+    
+    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
+    
+    public func onMessageChange(_ message: AnyChatMessage) {}
+    
+    public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
+    
+    public func onP2PClientClose(messenger: CypherMessenger) {}
+    
+    public func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void> {
         eventLoop.makeSucceededVoidFuture()
     }
 }

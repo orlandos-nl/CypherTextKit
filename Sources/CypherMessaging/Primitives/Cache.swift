@@ -7,24 +7,24 @@
 
 import SwiftUI
 
-public protocol MetadataContainerKey {
+public protocol CacheKey {
     associatedtype Value
 }
 
-public final class MetadataContainer {
+public final class Cache {
     internal init() {}
     
     private var values = [ObjectIdentifier: Any]()
     
-    public func read<Key: MetadataContainerKey>(_ key: Key.Type) -> Key.Value? {
+    public func read<Key: CacheKey>(_ key: Key.Type) -> Key.Value? {
         values[ObjectIdentifier(key)] as? Key.Value
     }
     
-    public func setValue<Key: MetadataContainerKey>(_ value: Key.Value, forKey key: Key.Type) {
+    public func setValue<Key: CacheKey>(_ value: Key.Value, forKey key: Key.Type) {
         values[ObjectIdentifier(key)] = value
     }
     
-    public func readOrCreateValue<Key: MetadataContainerKey>(forKey key: Key.Type, resolve: () -> Key.Value) -> Key.Value {
+    public func readOrCreateValue<Key: CacheKey>(forKey key: Key.Type, resolve: () -> Key.Value) -> Key.Value {
         if let value = read(key) {
             return value
         } else {

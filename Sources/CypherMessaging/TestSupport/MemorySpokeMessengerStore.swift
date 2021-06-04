@@ -10,6 +10,7 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
     private let salt = UUID().uuidString
     private var localConfig: Data?
     
+    private var contacts = [Contact]()
     private var conversations = [Conversation]()
     private var deviceIdentities = [DeviceIdentity]()
     private var jobs = [Job]()
@@ -19,6 +20,20 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
     
     public init(eventLoop: EventLoop) {
         self.eventLoop = eventLoop
+    }
+    
+    public func fetchContacts() -> EventLoopFuture<[Contact]> {
+        return eventLoop.makeSucceededFuture(contacts)
+    }
+    
+    public func createContact(_ contact: Contact) -> EventLoopFuture<Void> {
+        contacts.append(contact)
+        return eventLoop.makeSucceededVoidFuture()
+    }
+    
+    public func updateContact(_ contact: Contact) -> EventLoopFuture<Void> {
+        // NO-OP, since Model is a reference type
+        return eventLoop.makeSucceededVoidFuture()
     }
     
     public func fetchConversations() -> EventLoopFuture<[Conversation]> {

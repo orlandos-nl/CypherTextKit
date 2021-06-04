@@ -61,6 +61,31 @@ public final class DeviceIdentity: Model {
     }
 }
 
+public final class Contact: Model {
+    public struct SecureProps: Codable {
+        public let username: Username
+        public internal(set) var config: UserConfig
+        public var metadata: Document
+    }
+    
+    public let id: UUID
+
+    public var props: Encrypted<SecureProps>
+    
+    public init(id: UUID, props: Encrypted<SecureProps>) {
+        self.id = id
+        self.props = props
+    }
+    
+    internal init(
+        props: SecureProps,
+        encryptionKey: SymmetricKey
+    ) throws {
+        self.id = UUID()
+        self.props = try .init(props, encryptionKey: encryptionKey)
+    }
+}
+
 public enum MarkMessageResult {
     case success, error, notModified
 }

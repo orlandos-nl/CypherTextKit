@@ -51,7 +51,6 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             p2pFactories: [
-                SpoofP2PTransportFactory(),
                 IPv6TCPP2PTransportClientFactory()
             ],
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
@@ -97,13 +96,13 @@ final class CypherSDKTests: XCTestCase {
         
         sleep(1)
         
-        try XCTAssertEqual(m0Chat.getOpenP2PConnections().wait().count, 1)
-        try XCTAssertEqual(m1Chat.getOpenP2PConnections().wait().count, 1)
+        try XCTAssertEqual(m0Chat.listOpenP2PConnections().wait().count, 1)
+        try XCTAssertEqual(m1Chat.listOpenP2PConnections().wait().count, 1)
         
-        let p2pConnection = try m1Chat.getOpenP2PConnections().wait()[0]
+        let p2pConnection = try m1Chat.listOpenP2PConnections().wait()[0]
         XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), nil)
         
-        for connection in try m0Chat.getOpenP2PConnections().wait() {
+        for connection in try m0Chat.listOpenP2PConnections().wait() {
             try connection.updateStatus(flags: .isTyping).wait()
         }
         

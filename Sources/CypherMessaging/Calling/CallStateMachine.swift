@@ -45,7 +45,18 @@ public enum CallState<CallHandle: Equatable>: Equatable {
     case active(CallActiveState<CallHandle>)
     case activeAndIncoming(CallActiveState<CallHandle>, CallHandle)
     
-    public var isActive: Bool {
+    public var isInCall: Bool {
+        switch self {
+        case .idle:
+            return false
+        case .active(.beingCalled):
+            return false
+        case .active, .activeAndIncoming:
+            return true
+        }
+    }
+    
+    public var isPresented: Bool {
         if case .idle = self {
             return false
         } else {

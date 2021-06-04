@@ -26,7 +26,7 @@ private final class BufferHandler: ChannelInboundHandler {
     }
 }
 
-public final class IPv6TCPP2PTransportClient: P2PTransportClient {
+final class IPv6TCPP2PTransportClient: P2PTransportClient {
     public weak var delegate: P2PTransportClientDelegate?
     public private(set) var connected = ConnectionState.connected
     private let channel: Channel
@@ -57,11 +57,11 @@ public final class IPv6TCPP2PTransportClient: P2PTransportClient {
     }
 }
 
-final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
-    let transportLayerIdentifier = "_ipv6-tcp"
+public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
+    public let transportLayerIdentifier = "_ipv6-tcp"
     let eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     
-    func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
+    public func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
         guard
             let host = metadata["ip"] as? String,
             let port = metadata["port"] as? Int
@@ -77,7 +77,7 @@ final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
             }.map { $0 }
     }
     
-    func createConnection(handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
+    public func createConnection(handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
         let ipAddress: String
         
         findInterface: do {

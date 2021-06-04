@@ -15,4 +15,5 @@ enum CypherSDKError: Error {
     case incorrectAppPassword
     case invalidTransport
     case unsupportedTransport
+    case internalError
 }

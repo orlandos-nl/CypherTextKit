@@ -10,6 +10,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
     let eventLoop: EventLoop
     
+    private var contacts: [Contact]?
     private var deviceIdentities: [DeviceIdentity]?
     private var messages = [UUID: ChatMessage]()
     private var conversations: [Conversation]?
@@ -22,9 +23,41 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     
     func emptyCaches() {
         deviceConfig = nil
+        contacts = nil
         conversations = nil
         deviceIdentities = nil
         messages.removeAll(keepingCapacity: true)
+    }
+    
+    func fetchContacts() -> EventLoopFuture<[Contact]> {
+        if let users = contacts {
+            return eventLoop.makeSucceededFuture(users)
+        } else {
+            return base.fetchContacts().map { contacts in
+                self.contacts = contacts
+                return contacts
+            }
+        }
+    }
+    
+    func createContact(_ contact: Contact) -> EventLoopFuture<Void> {
+        if var users = contacts {
+            users.append(contact)
+            self.contacts = users
+            return base.createContact(contact)
+        } else {
+            return fetchContacts().map { contacts in
+                self.contacts = contacts + [contact]
+            }.flatMap {
+                self.base.createContact(contact)
+            }
+        }
+    }
+    
+    func updateContact(_ contact: Contact) -> EventLoopFuture<Void> {
+        assert(contacts?.contains(where: { $0 === contact }) != false)
+        // Already saved in-memory, because it's a reference type
+        return base.updateContact(contact)
     }
     
     func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessage> {

@@ -34,7 +34,12 @@ public struct TransportCreationRequest {
     public let username: Username
     public let deviceId: DeviceId
     public let userConfig: UserConfig
-    public let signingIdentity: PrivateSigningKey
+    internal let signingIdentity: PrivateSigningKey
+    public var identity: PublicSigningKey { signingIdentity.publicKey }
+    
+    public func signature<D: DataProtocol>(for data: D) throws -> Data {
+        try signingIdentity.signature(for: data)
+    }
 }
 
 internal struct P2PSession {
@@ -65,6 +70,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     private var config: _CypherMessengerConfig
     private var p2pFactories = [P2PTransportClientFactory]()
     private var p2pSessions = [P2PSession]()
+    private var inactiveP2PSessionsTimeout: Int? = 30
     internal var deviceIdentityId: Int { config.deviceIdentityId }
     internal let eventHandler: CypherMessengerEventHandler
     internal let cachedStore: _CypherMessengerStoreCache
@@ -105,7 +111,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop
+        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     ) -> EventLoopFuture<CypherMessenger> {
         let deviceId = DeviceId()
         let databaseEncryptionKey = SymmetricKey(size: .bits256)
@@ -209,7 +215,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop
+        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     ) -> EventLoopFuture<CypherMessenger> {
         Self.registerMessenger(
             username: username,
@@ -231,7 +237,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
     }
     
-    
     public static func resumeMessenger<
         Transport: ConnectableCypherTransportClient
     >(
@@ -242,7 +247,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop
+        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     ) -> EventLoopFuture<CypherMessenger> {
         resumeMessenger(
             appPassword: appPassword,
@@ -271,7 +276,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop
+        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     ) -> EventLoopFuture<CypherMessenger> {
         return database.readLocalDeviceSalt().flatMap { salt -> EventLoopFuture<_CypherMessengerConfig> in
             let encryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
@@ -627,7 +632,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             func rekey() -> EventLoopFuture<Void> {
                 device.doubleRatchet = nil
                 
-                return self.eventHandler.onRekey(withUser: username, deviceId: deviceId).flatMap {
+                return self.eventHandler.onRekey(
+                    withUser: username,
+                    deviceId: deviceId,
+                    messenger: self
+                ).flatMap {
                     self.cachedStore.updateDeviceIdentity(device.encrypted)
                 }.flatMap {
                     self._queueTask(
@@ -709,13 +718,15 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         closedWithOptions: Set<P2PTransportClosureOption>
     ) -> EventLoopFuture<Void> {
         func close() -> EventLoopFuture<Void> {
-            return connection.disconnect().map {
-                debugLog("Removing P2P session from active pool")
-                
-                self.p2pSessions.removeAll {
-                    $0.transport === connection
-                }
+            debugLog("Removing P2P session from active pool")
+            guard let index = self.p2pSessions.firstIndex(where: {
+                $0.transport === connection
+            }) else {
+                return self.eventLoop.makeSucceededVoidFuture()
             }
+            
+            let session = self.p2pSessions.remove(at: index)
+            return session.client.disconnect()
         }
         
         debugLog("P2P session disconnecting")
@@ -775,7 +786,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                         transport: client,
                         client: P2PClient(
                             client: client,
-                            messenger: self
+                            messenger: self,
+                            closeInactiveAfter: self.inactiveP2PSessionsTimeout
                         )
                     )
                 )
@@ -795,6 +807,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
         
         return session.client.receiveBuffer(buffer)
+    }
+    
+    public func listOpenP2PConnections() -> EventLoopFuture<[P2PClient]> {
+        return eventLoop.makeSucceededFuture(p2pSessions.map(\.client))
     }
     
     internal func getEstablishedP2PConnection(
@@ -856,7 +872,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                         transport: client,
                         client: P2PClient(
                             client: client,
-                            messenger: self
+                            messenger: self,
+                            closeInactiveAfter: self.inactiveP2PSessionsTimeout
                         )
                     )
                 )

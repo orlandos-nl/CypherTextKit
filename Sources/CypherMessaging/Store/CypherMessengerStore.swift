@@ -6,6 +6,10 @@ public enum SortMode {
 }
 
 public protocol CypherMessengerStore {
+    func fetchContacts() -> EventLoopFuture<[Contact]>
+    func createContact(_ contact: Contact) -> EventLoopFuture<Void>
+    func updateContact(_ contact: Contact) -> EventLoopFuture<Void>
+    
     func fetchConversations() -> EventLoopFuture<[Conversation]>
     func createConversation(_ conversation: Conversation) -> EventLoopFuture<Void>
     func updateConversation(_ conversation: Conversation) -> EventLoopFuture<Void>

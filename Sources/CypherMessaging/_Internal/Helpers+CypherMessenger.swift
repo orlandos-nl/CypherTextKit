@@ -10,17 +10,16 @@ enum UserIdentityState {
 
 internal extension CypherMessenger {
     func _markMessage(byRemoteId remoteId: String, updatedBy user: Username, as newState: ChatMessage.DeliveryState) -> EventLoopFuture<MarkMessageResult> {
-        return cachedStore.fetchChatMessage(byRemoteId: remoteId).flatMap { message in
-            let message = message.decrypted(using: self.databaseEncryptionKey)
+        return cachedStore.fetchChatMessage(byRemoteId: remoteId).flatMapThrowing { message in
+            let decryptedMessage = message.decrypted(using: self.databaseEncryptionKey)
             
-            guard message.props.senderUser == self.username else {
-                return self.eventLoop.makeFailedFuture(CypherSDKError.badInput)
+            guard decryptedMessage.props.senderUser == self.username else {
+                throw CypherSDKError.badInput
             }
             
-            let result = message.deliveryState.transition(to: newState)
-            return self.cachedStore.updateChatMessage(message.encrypted).map {
-                 result
-            }
+            let result = decryptedMessage.deliveryState.transition(to: newState)
+            self._updateChatMessage(decryptedMessage)
+            return result
         }
     }
     
@@ -29,14 +28,24 @@ internal extension CypherMessenger {
             return eventLoop.makeSucceededFuture(.error)
         }
         
-        return cachedStore.fetchChatMessage(byId: id).flatMap { message in
+        return cachedStore.fetchChatMessage(byId: id).map { message in
             let decryptedMessage = self.decrypt(message)
             
             let result = decryptedMessage.deliveryState.transition(to: newState)
-            return self.cachedStore.updateChatMessage(decryptedMessage.encrypted).map {
-                return result
-            }
+            
+            self._updateChatMessage(decryptedMessage)
+            return result
         }
+    }
+    
+    func _updateChatMessage(_ message: DecryptedModel<ChatMessage>) {
+        self.eventHandler.onMessageChange(
+            AnyChatMessage(
+                target: message.props.message.target,
+                messenger: self,
+                raw: message
+            )
+        )
     }
     
     func _createConversation(
@@ -55,10 +64,14 @@ internal extension CypherMessenger {
                 encryptionKey: self.databaseEncryptionKey
             )
             
-            return cachedStore.createConversation(conversation).flatMap {
-                self.eventHandler.onCreateConversation(conversation).map {
-                    conversation
+            return cachedStore.createConversation(conversation).flatMapThrowing {
+                let decrypted = self.decrypt(conversation)
+                guard let resolved = TargetConversation.Resolved(conversation: decrypted, messenger: self) else {
+                    throw CypherSDKError.internalError
                 }
+                
+                self.eventHandler.onCreateConversation(resolved)
+                return conversation
             }
         } catch {
             return eventLoop.makeFailedFuture(error)
@@ -69,9 +82,40 @@ internal extension CypherMessenger {
         self.jobQueue.queueTask(task)
     }
     
-    func _updateUserIdentity(of user: Username, to publicKey: PublicSigningKey) -> EventLoopFuture<UserIdentityState> {
-        // TODO:
-        return eventLoop.makeSucceededFuture(.consistent)
+    func _updateUserIdentity(of username: Username, to config: UserConfig) -> EventLoopFuture<UserIdentityState> {
+        cachedStore.fetchContacts().flatMap { contacts -> EventLoopFuture<UserIdentityState> in
+            for contact in contacts {
+                let contact = self.decrypt(contact)
+                
+                guard contact.props.username == username else {
+                    continue
+                }
+                
+                if contact.config.identity.data == config.identity.data {
+                    return self.eventLoop.makeSucceededFuture(.consistent)
+                } else {
+                    contact.config = config
+                    return self.cachedStore.updateContact(contact.encrypted).map {
+                        .changedIdentity
+                    }
+                }
+            }
+            
+            return self.eventHandler.createContactMetadata(for: username).flatMapThrowing { metadata in
+                try Contact(
+                    props: Contact.SecureProps(
+                        username: username,
+                        config: config,
+                        metadata: metadata
+                    ),
+                    encryptionKey: self.databaseEncryptionKey
+                )
+            }.flatMap { contact in
+                self.cachedStore.createContact(contact).map {
+                    .newIdentity
+                }
+            }
+        }
     }
     
     func _createDeviceIdentity(from device: UserDeviceConfig, forUsername username: Username) -> EventLoopFuture<DecryptedModel<DeviceIdentity>> {
@@ -123,9 +167,12 @@ internal extension CypherMessenger {
         self.transport.readKeyBundle(forUsername: username).flatMap { userConfig in
             return self._updateUserIdentity(
                 of: username,
-                to: userConfig.identity
+                to: userConfig
             ).flatMapThrowing { identityState -> [EventLoopFuture<DecryptedModel<DeviceIdentity>>] in
                 switch identityState {
+                case .changedIdentity:
+                    self.eventHandler.onContactIdentityChange(username: username, messenger: self)
+                    fallthrough
                 case .consistent, .newIdentity:
                     return try userConfig.readAndValidateDevices().compactMap { device -> EventLoopFuture<DecryptedModel<DeviceIdentity>>? in
                         if let knownDevice = knownDevices.first(where: { $0.props.deviceId == device.deviceId }) {
@@ -142,9 +189,6 @@ internal extension CypherMessenger {
                             return self._createDeviceIdentity(from: device, forUsername: username)
                         }
                     }
-                case .changedIdentity:
-                    // TODO: Emit notification to UI
-                    fatalError()
                 }
             }.flatMap { allDevices in
                 EventLoopFuture.whenAllSucceed(allDevices, on: self.eventLoop)
@@ -266,6 +310,14 @@ internal extension CypherMessenger {
                     return eventLoop.makeFailedFuture(error)
                 }
             case (.magic, let subType) where subType.hasPrefix("_/p2p/"):
+                if
+                    let sentDate = message.sentDate,
+                    abs(sentDate.timeIntervalSince(Date())) >= 15
+                {
+                    // Other client is likely not waiting for P2P anymore
+                    return eventLoop.makeSucceededVoidFuture()
+                }
+                
                 return _processP2PMessage(
                     message,
                     remoteMessageId: remoteMessageId,
