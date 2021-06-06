@@ -10,10 +10,10 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
     let eventLoop: EventLoop
     
-    private var contacts: [Contact]?
-    private var deviceIdentities: [DeviceIdentity]?
-    private var messages = [UUID: ChatMessage]()
-    private var conversations: [Conversation]?
+    private var contacts: [ContactModel]?
+    private var deviceIdentities: [DeviceIdentityModel]?
+    private var messages = [UUID: ChatMessageModel]()
+    private var conversations: [ConversationModel]?
     private var deviceConfig: Data?
     
     init(base: CypherMessengerStore, eventLoop: EventLoop) {
@@ -29,7 +29,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         messages.removeAll(keepingCapacity: true)
     }
     
-    func fetchContacts() -> EventLoopFuture<[Contact]> {
+    func fetchContacts() -> EventLoopFuture<[ContactModel]> {
         if let users = contacts {
             return eventLoop.makeSucceededFuture(users)
         } else {
@@ -40,7 +40,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    func createContact(_ contact: Contact) -> EventLoopFuture<Void> {
+    func createContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
         if var users = contacts {
             users.append(contact)
             self.contacts = users
@@ -54,13 +54,13 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    func updateContact(_ contact: Contact) -> EventLoopFuture<Void> {
+    func updateContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
         assert(contacts?.contains(where: { $0 === contact }) != false)
         // Already saved in-memory, because it's a reference type
         return base.updateContact(contact)
     }
     
-    func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessage> {
+    func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessageModel> {
         if let message = messages[messageId] {
             return eventLoop.makeSucceededFuture(message)
         } else {
@@ -71,7 +71,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    func fetchChatMessage(byRemoteId remoteId: String) -> EventLoopFuture<ChatMessage> {
+    func fetchChatMessage(byRemoteId remoteId: String) -> EventLoopFuture<ChatMessageModel> {
         return base.fetchChatMessage(byRemoteId: remoteId).map { message in
             if let cachedMessage = self.messages[message.id] {
                 return cachedMessage
@@ -81,7 +81,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    func fetchConversations() -> EventLoopFuture<[Conversation]> {
+    func fetchConversations() -> EventLoopFuture<[ConversationModel]> {
         if let conversations = conversations {
             return eventLoop.makeSucceededFuture(conversations)
         } else {
@@ -92,7 +92,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    func createConversation(_ conversation: Conversation) -> EventLoopFuture<Void> {
+    func createConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
         if var conversations = conversations {
             conversations.append(conversation)
             self.conversations = conversations
@@ -106,13 +106,13 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    func updateConversation(_ conversation: Conversation) -> EventLoopFuture<Void> {
+    func updateConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
         assert(conversations?.contains(where: { $0 === conversation }) != false)
         // Already saved in-memory, because it's a reference type
         return base.updateConversation(conversation)
     }
     
-    func fetchDeviceIdentities() -> EventLoopFuture<[DeviceIdentity]> {
+    func fetchDeviceIdentities() -> EventLoopFuture<[DeviceIdentityModel]> {
         if let deviceIdentities = deviceIdentities {
             return eventLoop.makeSucceededFuture(deviceIdentities)
         } else {
@@ -123,7 +123,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    func createDeviceIdentity(_ deviceIdentity: DeviceIdentity) -> EventLoopFuture<Void> {
+    func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
         if var deviceIdentities = deviceIdentities {
             deviceIdentities.append(deviceIdentity)
             self.deviceIdentities = deviceIdentities
@@ -132,18 +132,18 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         return base.createDeviceIdentity(deviceIdentity)
     }
     
-    func updateDeviceIdentity(_ deviceIdentity: DeviceIdentity) -> EventLoopFuture<Void> {
+    func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
         assert(deviceIdentities?.contains(where: { $0 === deviceIdentity }) != false)
         // Already saved in-memory, because it's a reference type
         return base.updateDeviceIdentity(deviceIdentity)
     }
     
-    func createChatMessage(_ message: ChatMessage) -> EventLoopFuture<Void> {
+    func createChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
         messages[message.id] = message
         return base.createChatMessage(message)
     }
     
-    func updateChatMessage(_ message: ChatMessage) -> EventLoopFuture<Void> {
+    func updateChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
         // Already saved in-memory, because it's a reference type
         base.updateChatMessage(message)
     }
@@ -156,7 +156,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         maximumOrder: Int?,
         offsetBy offset: Int,
         limit: Int
-    ) -> EventLoopFuture<[ChatMessage]> {
+    ) -> EventLoopFuture<[ChatMessageModel]> {
         base.listChatMessages(
             inConversation: conversation,
             senderId: senderId,
@@ -189,20 +189,50 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         base.readLocalDeviceSalt()
     }
     
-    func readJobs() -> EventLoopFuture<[Job]> {
+    func readJobs() -> EventLoopFuture<[JobModel]> {
         base.readJobs()
     }
     
-    func createJob(_ job: Job) -> EventLoopFuture<Void> {
+    func createJob(_ job: JobModel) -> EventLoopFuture<Void> {
         base.createJob(job)
     }
     
-    func updateJob(_ job: Job) -> EventLoopFuture<Void> {
+    func updateJob(_ job: JobModel) -> EventLoopFuture<Void> {
         // Forwarded to DB, caching happens inside JobQueue
         base.updateJob(job)
     }
     
-    func removeJob(_ job: Job) -> EventLoopFuture<Void> {
+    func removeJob(_ job: JobModel) -> EventLoopFuture<Void> {
         base.removeJob(job)
+    }
+    
+    func removeContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
+        if let index = contacts?.firstIndex(where: { $0 === contact }) {
+            contacts?.remove(at: index)
+        }
+        
+        return base.removeContact(contact)
+    }
+    
+    func removeConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
+        if let index = conversations?.firstIndex(where: { $0 === conversation }) {
+            conversations?.remove(at: index)
+        }
+        
+        return base.removeConversation(conversation)
+    }
+    
+    func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
+        if let index = deviceIdentities?.firstIndex(where: { $0 === deviceIdentity }) {
+            deviceIdentities?.remove(at: index)
+        }
+        
+        return base.removeDeviceIdentity(deviceIdentity)
+    }
+    
+    func removeChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
+        messages[message.id] = nil
+        
+        return base.removeChatMessage(message)
     }
 }

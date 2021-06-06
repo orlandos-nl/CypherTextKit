@@ -10,61 +10,61 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
     private let salt = UUID().uuidString
     private var localConfig: Data?
     
-    private var contacts = [Contact]()
-    private var conversations = [Conversation]()
-    private var deviceIdentities = [DeviceIdentity]()
-    private var jobs = [Job]()
-    private var conversationChatMessages = [UUID: [ChatMessage]]()
-    private var chatMessages = [UUID: ChatMessage]()
-    private var remoteMessages = [String: ChatMessage]()
+    private var contacts = [ContactModel]()
+    private var conversations = [ConversationModel]()
+    private var deviceIdentities = [DeviceIdentityModel]()
+    private var jobs = [JobModel]()
+    private var conversationChatMessages = [UUID: [ChatMessageModel]]()
+    private var chatMessages = [UUID: ChatMessageModel]()
+    private var remoteMessages = [String: ChatMessageModel]()
     
     public init(eventLoop: EventLoop) {
         self.eventLoop = eventLoop
     }
     
-    public func fetchContacts() -> EventLoopFuture<[Contact]> {
+    public func fetchContacts() -> EventLoopFuture<[ContactModel]> {
         return eventLoop.makeSucceededFuture(contacts)
     }
     
-    public func createContact(_ contact: Contact) -> EventLoopFuture<Void> {
+    public func createContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
         contacts.append(contact)
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func updateContact(_ contact: Contact) -> EventLoopFuture<Void> {
+    public func updateContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
         // NO-OP, since Model is a reference type
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func fetchConversations() -> EventLoopFuture<[Conversation]> {
+    public func fetchConversations() -> EventLoopFuture<[ConversationModel]> {
         return eventLoop.makeSucceededFuture(conversations)
     }
     
-    public func createConversation(_ conversation: Conversation) -> EventLoopFuture<Void> {
+    public func createConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
         conversations.append(conversation)
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func updateConversation(_ conversation: Conversation) -> EventLoopFuture<Void> {
+    public func updateConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
         // NO-OP, since Model is a reference type
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func fetchDeviceIdentities() -> EventLoopFuture<[DeviceIdentity]> {
+    public func fetchDeviceIdentities() -> EventLoopFuture<[DeviceIdentityModel]> {
         return eventLoop.makeSucceededFuture(deviceIdentities)
     }
     
-    public func createDeviceIdentity(_ deviceIdentity: DeviceIdentity) -> EventLoopFuture<Void> {
+    public func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
         deviceIdentities.append(deviceIdentity)
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func updateDeviceIdentity(_ deviceIdentity: DeviceIdentity) -> EventLoopFuture<Void> {
+    public func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
         // NO-OP, since Model is a reference type
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessage> {
+    public func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessageModel> {
         guard let message = chatMessages[messageId] else {
             return eventLoop.makeFailedFuture(MemoryCypherMessengerStoreError.notFound)
         }
@@ -72,7 +72,7 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
         return eventLoop.makeSucceededFuture(message)
     }
     
-    public func fetchChatMessage(byRemoteId remoteId: String) -> EventLoopFuture<ChatMessage> {
+    public func fetchChatMessage(byRemoteId remoteId: String) -> EventLoopFuture<ChatMessageModel> {
         guard let message = remoteMessages[remoteId] else {
             return eventLoop.makeFailedFuture(MemoryCypherMessengerStoreError.notFound)
         }
@@ -80,7 +80,7 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
         return eventLoop.makeSucceededFuture(message)
     }
     
-    public func createChatMessage(_ message: ChatMessage) -> EventLoopFuture<Void> {
+    public func createChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
         chatMessages[message.id] = message
         remoteMessages[message.remoteId] = message
         
@@ -94,7 +94,7 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
         return eventLoop.makeSucceededVoidFuture()
     }
     
-    public func updateChatMessage(_ message: ChatMessage) -> EventLoopFuture<Void> {
+    public func updateChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
         // NO-OP, since Model is a reference type
         return eventLoop.makeSucceededVoidFuture()
     }
@@ -107,7 +107,7 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
         maximumOrder: Int?,
         offsetBy offset: Int,
         limit: Int
-    ) -> EventLoopFuture<[ChatMessage]> {
+    ) -> EventLoopFuture<[ChatMessageModel]> {
         guard var messages = conversationChatMessages[conversationId] else {
             return eventLoop.makeSucceededFuture([])
         }
@@ -136,22 +136,44 @@ public final class MemoryCypherMessengerStore: CypherMessengerStore {
         return eventLoop.makeSucceededFuture(salt)
     }
     
-    public func readJobs() -> EventLoopFuture<[Job]> {
+    public func readJobs() -> EventLoopFuture<[JobModel]> {
         self.eventLoop.makeSucceededFuture(jobs)
     }
     
-    public func createJob(_ job: Job) -> EventLoopFuture<Void> {
+    public func createJob(_ job: JobModel) -> EventLoopFuture<Void> {
         jobs.append(job)
         return self.eventLoop.makeSucceededVoidFuture()
     }
     
-    public func updateJob(_ job: Job) -> EventLoopFuture<Void> {
+    public func updateJob(_ job: JobModel) -> EventLoopFuture<Void> {
         // NO-OP, since `Model` is a class
         return self.eventLoop.makeSucceededVoidFuture()
     }
     
-    public func removeJob(_ job: Job) -> EventLoopFuture<Void> {
+    public func removeJob(_ job: JobModel) -> EventLoopFuture<Void> {
         jobs.removeAll { $0.id == job.id}
         return self.eventLoop.makeSucceededVoidFuture()
     }
+    
+    public func removeContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
+        contacts.removeAll { $0.id == contact.id }
+        return self.eventLoop.makeSucceededVoidFuture()
+    }
+    
+    public func removeConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
+        conversations.removeAll { $0.id == conversation.id }
+        return self.eventLoop.makeSucceededVoidFuture()
+    }
+    
+    public func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
+        deviceIdentities.removeAll { $0.id == deviceIdentity.id }
+        return self.eventLoop.makeSucceededVoidFuture()
+    }
+    
+    public func removeChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
+        chatMessages[message.id] = nil
+        remoteMessages[message.remoteId] = nil
+        return self.eventLoop.makeSucceededVoidFuture()
+    }
+    
 }

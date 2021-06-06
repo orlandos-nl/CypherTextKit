@@ -70,7 +70,7 @@ extension CypherMessenger {
                                         custom: [:],
                                         config: config
                                     )
-                                    let conversation = try Conversation(
+                                    let conversation = try ConversationModel(
                                         props: .init(
                                             members: groupConfig.members,
                                             metadata: BSONEncoder().encode(groupMetadata),
@@ -225,7 +225,8 @@ extension CypherMessenger {
                 return self.eventLoop.makeSucceededFuture(conversation)
             } else {
                 return self.eventHandler.createPrivateChatMetadata(
-                    withUser: otherUser
+                    withUser: otherUser,
+                    messenger: self
                 ).flatMap { metadata in
                     self._createConversation(
                         members: [otherUser],
@@ -305,7 +306,7 @@ extension CypherMessenger {
 }
 
 public protocol AnyConversation {
-    var conversation: DecryptedModel<Conversation> { get }
+    var conversation: DecryptedModel<ConversationModel> { get }
     var messenger: CypherMessenger { get }
     var target: TargetConversation { get }
     var cache: Cache { get }
@@ -325,6 +326,11 @@ extension AnyConversation {
         }
     }
     
+    /// Attempts to build connections with _all_ members of this chat.
+    /// Should result in peer-to-peer connections with all currently active member devices.
+    ///
+    /// You can call this method when actively engaging in a conversation.
+    /// Doing so will improve your connection performance and security
     public func buildP2PConnections(
         preferredTransportIdentifier: String? = nil
     ) -> EventLoopFuture<Void> {
@@ -342,7 +348,7 @@ extension AnyConversation {
     }
     
     // TODO: This _could_ be cached
-    public func memberDevices() -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
+    internal func memberDevices() -> EventLoopFuture<[DecryptedModel<DeviceIdentityModel>]> {
         messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
     
@@ -369,7 +375,7 @@ extension AnyConversation {
         getNextLocalOrder().flatMap { order in
             self._sendMessage(
                 SingleCypherMessage(
-                    messageType: .text,
+                    messageType: type,
                     messageSubtype: messageSubtype,
                     text: text,
                     metadata: metadata,
@@ -388,11 +394,11 @@ extension AnyConversation {
     internal func _saveMessage(
         senderId: Int,
         order: Int,
-        props: ChatMessage.SecureProps,
+        props: ChatMessageModel.SecureProps,
         remoteId: String = UUID().uuidString
-    ) -> EventLoopFuture<DecryptedModel<ChatMessage>> {
+    ) -> EventLoopFuture<DecryptedModel<ChatMessageModel>> {
         do {
-            let chatMessage = try ChatMessage(
+            let chatMessage = try ChatMessageModel(
                 conversationId: conversation.id,
                 senderId: senderId,
                 order: order,
@@ -448,7 +454,7 @@ extension AnyConversation {
                     ).map { $0 }
                 }
             }
-        }.flatMap { (chatMessage: DecryptedModel<ChatMessage>?) in
+        }.flatMap { (chatMessage: DecryptedModel<ChatMessageModel>?) in
             messenger._queueTask(
                 .sendMultiRecipientMessage(
                     SendMultiRecipientMessageTask(
@@ -504,6 +510,26 @@ extension AnyConversation {
         return EventLoopFuture.andAllSucceed(allMessagesQueues, on: self.messenger.eventLoop)
     }
     
+    public func message(byRemoteId remoteId: String) -> EventLoopFuture<AnyChatMessage> {
+        self.messenger.cachedStore.fetchChatMessage(byRemoteId: remoteId).map { message in
+            AnyChatMessage(
+                target: self.target,
+                messenger: self.messenger,
+                raw: self.messenger.decrypt(message)
+            )
+        }
+    }
+    
+    public func message(byLocalId id: UUID) -> EventLoopFuture<AnyChatMessage> {
+        self.messenger.cachedStore.fetchChatMessage(byId: id).map { message in
+            AnyChatMessage(
+                target: self.target,
+                messenger: self.messenger,
+                raw: self.messenger.decrypt(message)
+            )
+        }
+    }
+    
     public func allMessages(sortedBy sortMode: SortMode) -> EventLoopFuture<[AnyChatMessage]> {
         return cursor(sortedBy: sortMode).flatMap { cursor in
             cursor.getMore(.max)
@@ -516,7 +542,7 @@ extension AnyConversation {
 }
 
 public struct InternalConversation: AnyConversation {
-    public let conversation: DecryptedModel<Conversation>
+    public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
     public let target = TargetConversation.currentUser
     public let cache = Cache()
@@ -530,7 +556,7 @@ public struct InternalConversation: AnyConversation {
 }
 
 public struct GroupChat: AnyConversation {
-    public let conversation: DecryptedModel<Conversation>
+    public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
     public var metadata: GroupMetadata
     public let cache = Cache()
@@ -553,7 +579,7 @@ public struct GroupMetadata: Codable {
 }
 
 public struct PrivateChat: AnyConversation {
-    public let conversation: DecryptedModel<Conversation>
+    public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
     public let cache = Cache()
     public var target: TargetConversation {

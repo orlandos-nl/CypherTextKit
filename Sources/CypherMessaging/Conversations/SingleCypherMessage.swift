@@ -15,12 +15,39 @@ public enum TargetConversation {
     case otherUser(Username)
     case groupChat(GroupChatId)
     
+    public func resolve(
+        in messenger: CypherMessenger
+    ) -> EventLoopFuture<TargetConversation.Resolved> {
+        switch self {
+        case .currentUser:
+            return messenger.getInternalConversation().map {
+                .internalChat($0)
+            }
+        case .otherUser(let username):
+            return messenger.getPrivateChat(with: username).flatMapThrowing { chat in
+                if let chat = chat {
+                    return .privateChat(chat)
+                }
+                
+                throw CypherSDKError.unknownChat
+            }
+        case .groupChat(let groupId):
+            return messenger.getGroupChat(byId: groupId).flatMapThrowing { chat in
+                if let chat = chat {
+                    return .groupChat(chat)
+                }
+                
+                throw CypherSDKError.unknownGroup
+            }
+        }
+    }
+    
     public enum Resolved: AnyConversation {
         case privateChat(PrivateChat)
         case groupChat(GroupChat)
         case internalChat(InternalConversation)
         
-        init?(conversation: DecryptedModel<Conversation>, messenger: CypherMessenger) {
+        init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
             guard conversation.members.contains(messenger.username) else {
                 return nil
             }
@@ -50,7 +77,7 @@ public enum TargetConversation {
             }
         }
         
-        public var conversation: DecryptedModel<Conversation> {
+        public var conversation: DecryptedModel<ConversationModel> {
             switch self {
             case .privateChat(let chat):
                 return chat.conversation

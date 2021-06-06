@@ -15,15 +15,21 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
         eventLoop.makeSucceededFuture(.saveAndSend)
     }
     
-    public func receiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction> {
+    public func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction> {
         eventLoop.makeSucceededFuture(.save)
     }
     
-    public func createPrivateChatMetadata(withUser otherUser: Username) -> EventLoopFuture<Document> {
+    public func createPrivateChatMetadata(
+        withUser otherUser: Username,
+        messenger: CypherMessenger
+    ) -> EventLoopFuture<Document> {
         eventLoop.makeSucceededFuture([:])
     }
     
-    public func createContactMetadata(for username: Username) -> EventLoopFuture<Document> {
+    public func createContactMetadata(
+        for username: Username,
+        messenger: CypherMessenger
+    ) -> EventLoopFuture<Document> {
         eventLoop.makeSucceededFuture([:])
     }
     
@@ -31,7 +37,7 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     
     public func onCreateChatMessage(_ conversation: AnyChatMessage) {}
     
-    public func onCreateContact(_ contact: DecryptedModel<Contact>, messenger: CypherMessenger) {}
+    public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {}
     
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
     

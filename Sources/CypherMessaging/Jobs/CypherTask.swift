@@ -106,7 +106,7 @@ struct SendMessageDeliveryStateChangeTask: Codable {
     let messageId: String
     let recipient: Username
     let deviceId: DeviceId?
-    let newState: ChatMessage.DeliveryState
+    let newState: ChatMessageModel.DeliveryState
 }
 
 struct ReceiveMessageDeliveryStateChangeTask: Codable {
@@ -120,7 +120,7 @@ struct ReceiveMessageDeliveryStateChangeTask: Codable {
     let messageId: String
     let sender: Username
     let deviceId: DeviceId?
-    let newState: ChatMessage.DeliveryState
+    let newState: ChatMessageModel.DeliveryState
 }
 
 struct ReceiveMultiRecipientMessageTask: Codable {

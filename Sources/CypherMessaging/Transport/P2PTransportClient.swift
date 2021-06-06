@@ -101,7 +101,7 @@ public struct P2PTransportFactoryHandle {
                     message: CypherMessage(
                         message: SingleCypherMessage(
                             messageType: .magic,
-                            messageSubtype: "_/p2p/\(transportLayerIdentifier)",
+                            messageSubtype: "_/p2p/0/\(transportLayerIdentifier)",
                             text: text,
                             metadata: metadata,
                             destructionTimer: nil,

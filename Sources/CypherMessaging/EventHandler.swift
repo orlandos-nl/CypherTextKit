@@ -45,12 +45,12 @@ public struct ProcessMessageAction {
 public protocol CypherMessengerEventHandler {
     func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void>
     func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void>
-    func receiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction>
+    func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction>
     func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction>
     func onMessageChange(_ message: AnyChatMessage)
-    func createPrivateChatMetadata(withUser otherUser: Username) -> EventLoopFuture<Document>
-    func createContactMetadata(for username: Username) -> EventLoopFuture<Document>
-    func onCreateContact(_ contact: DecryptedModel<Contact>, messenger: CypherMessenger)
+    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) -> EventLoopFuture<Document>
+    func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document>
+    func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger)
     func onCreateConversation(_ conversation: AnyConversation)
     func onCreateChatMessage(_ conversation: AnyChatMessage)
     func onContactIdentityChange(username: Username, messenger: CypherMessenger)

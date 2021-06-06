@@ -9,7 +9,7 @@ enum UserIdentityState {
 }
 
 internal extension CypherMessenger {
-    func _markMessage(byRemoteId remoteId: String, updatedBy user: Username, as newState: ChatMessage.DeliveryState) -> EventLoopFuture<MarkMessageResult> {
+    func _markMessage(byRemoteId remoteId: String, updatedBy user: Username, as newState: ChatMessageModel.DeliveryState) -> EventLoopFuture<MarkMessageResult> {
         return cachedStore.fetchChatMessage(byRemoteId: remoteId).flatMapThrowing { message in
             let decryptedMessage = message.decrypted(using: self.databaseEncryptionKey)
             
@@ -23,7 +23,7 @@ internal extension CypherMessenger {
         }
     }
     
-    func _markMessage(byId id: UUID?, as newState: ChatMessage.DeliveryState) -> EventLoopFuture<MarkMessageResult> {
+    func _markMessage(byId id: UUID?, as newState: ChatMessageModel.DeliveryState) -> EventLoopFuture<MarkMessageResult> {
         guard let id = id else {
             return eventLoop.makeSucceededFuture(.error)
         }
@@ -38,7 +38,7 @@ internal extension CypherMessenger {
         }
     }
     
-    func _updateChatMessage(_ message: DecryptedModel<ChatMessage>) {
+    func _updateChatMessage(_ message: DecryptedModel<ChatMessageModel>) {
         self.eventHandler.onMessageChange(
             AnyChatMessage(
                 target: message.props.message.target,
@@ -51,11 +51,11 @@ internal extension CypherMessenger {
     func _createConversation(
         members: Set<Username>,
         metadata: Document
-    ) -> EventLoopFuture<Conversation> {
+    ) -> EventLoopFuture<ConversationModel> {
         do {
             var members = members
             members.insert(self.username)
-            let conversation = try Conversation(
+            let conversation = try ConversationModel(
                 props: .init(
                     members: members,
                     metadata: metadata,
@@ -101,9 +101,12 @@ internal extension CypherMessenger {
                 }
             }
             
-            return self.eventHandler.createContactMetadata(for: username).flatMapThrowing { metadata in
-                try Contact(
-                    props: Contact.SecureProps(
+            return self.eventHandler.createContactMetadata(
+                for: username,
+                messenger: self
+            ).flatMapThrowing { metadata in
+                try ContactModel(
+                    props: ContactModel.SecureProps(
                         username: username,
                         config: config,
                         metadata: metadata
@@ -118,7 +121,7 @@ internal extension CypherMessenger {
         }
     }
     
-    func _createDeviceIdentity(from device: UserDeviceConfig, forUsername username: Username) -> EventLoopFuture<DecryptedModel<DeviceIdentity>> {
+    func _createDeviceIdentity(from device: UserDeviceConfig, forUsername username: Username) -> EventLoopFuture<DecryptedModel<DeviceIdentityModel>> {
         return cachedStore.fetchDeviceIdentities().flatMap { deviceIdentities in
             for deviceIdentity in deviceIdentities {
                 let deviceIdentity = self.decrypt(deviceIdentity)
@@ -136,7 +139,7 @@ internal extension CypherMessenger {
             }
             
             do {
-                let newDevice = try DeviceIdentity(
+                let newDevice = try DeviceIdentityModel(
                     props: .init(
                         username: username,
                         deviceId: device.deviceId,
@@ -162,19 +165,19 @@ internal extension CypherMessenger {
     
     func _rediscoverDeviceIdentities(
         for username: Username,
-        knownDevices: [DecryptedModel<DeviceIdentity>]
-    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
+        knownDevices: [DecryptedModel<DeviceIdentityModel>]
+    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentityModel>]> {
         self.transport.readKeyBundle(forUsername: username).flatMap { userConfig in
             return self._updateUserIdentity(
                 of: username,
                 to: userConfig
-            ).flatMapThrowing { identityState -> [EventLoopFuture<DecryptedModel<DeviceIdentity>>] in
+            ).flatMapThrowing { identityState -> [EventLoopFuture<DecryptedModel<DeviceIdentityModel>>] in
                 switch identityState {
                 case .changedIdentity:
                     self.eventHandler.onContactIdentityChange(username: username, messenger: self)
                     fallthrough
                 case .consistent, .newIdentity:
-                    return try userConfig.readAndValidateDevices().compactMap { device -> EventLoopFuture<DecryptedModel<DeviceIdentity>>? in
+                    return try userConfig.readAndValidateDevices().compactMap { device -> EventLoopFuture<DecryptedModel<DeviceIdentityModel>>? in
                         if let knownDevice = knownDevices.first(where: { $0.props.deviceId == device.deviceId }) {
                             // Known device, check that everything is consistent
                             // To prevent tampering
@@ -276,7 +279,7 @@ internal extension CypherMessenger {
     private func _processMessage(
         message: SingleCypherMessage,
         remoteMessageId: String,
-        sender: DecryptedModel<DeviceIdentity>
+        sender: DecryptedModel<DeviceIdentityModel>
     ) -> EventLoopFuture<Void> {
         switch message.target {
         case .currentUser:
@@ -309,7 +312,7 @@ internal extension CypherMessenger {
                     debugLog(error)
                     return eventLoop.makeFailedFuture(error)
                 }
-            case (.magic, let subType) where subType.hasPrefix("_/p2p/"):
+            case (.magic, let subType) where subType.hasPrefix("_/p2p/0/"):
                 if
                     let sentDate = message.sentDate,
                     abs(sentDate.timeIntervalSince(Date())) >= 15
@@ -340,7 +343,7 @@ internal extension CypherMessenger {
                         conversation: .internalChat(conversation)
                     )
                 }.flatMap { context in
-                    self.eventHandler.receiveMessage(context).flatMap { action in
+                    self.eventHandler.onReceiveMessage(context).flatMap { action in
                         switch action.raw {
                         case .ignore:
                             return self.eventLoop.makeSucceededVoidFuture()
@@ -391,7 +394,7 @@ internal extension CypherMessenger {
                     conversation: .groupChat(group)
                 )
                 
-                return self.eventHandler.receiveMessage(context).flatMap { action in
+                return self.eventHandler.onReceiveMessage(context).flatMap { action in
                     switch action.raw {
                     case .ignore:
                         return self.eventLoop.makeSucceededVoidFuture()
@@ -424,7 +427,7 @@ internal extension CypherMessenger {
             }
         case .otherUser(let recipient):
             switch (message.messageType, message.messageSubtype ?? "") {
-            case (.magic, let subType) where subType.hasPrefix("_/p2p/"):
+            case (.magic, let subType) where subType.hasPrefix("_/p2p/0/"):
                 return _processP2PMessage(
                     message,
                     remoteMessageId: remoteMessageId,
@@ -450,7 +453,7 @@ internal extension CypherMessenger {
                     conversation: .privateChat(privateChat)
                 )
                 
-                return self.eventHandler.receiveMessage(context).flatMap { action in
+                return self.eventHandler.onReceiveMessage(context).flatMap { action in
                     switch action.raw {
                     case .ignore:
                         return self.eventLoop.makeSucceededVoidFuture()
@@ -486,7 +489,7 @@ internal extension CypherMessenger {
     
     func _fetchKnownDeviceIdentities(
         for username: Username
-    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
+    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentityModel>]> {
         cachedStore.fetchDeviceIdentities().map { deviceIdentities in
             deviceIdentities.compactMap { deviceIdentity in
                 let deviceIdentity = self.decrypt(deviceIdentity)
@@ -503,7 +506,7 @@ internal extension CypherMessenger {
     func _fetchDeviceIdentity(
         for username: Username,
         deviceId: DeviceId
-    ) -> EventLoopFuture<DecryptedModel<DeviceIdentity>> {
+    ) -> EventLoopFuture<DecryptedModel<DeviceIdentityModel>> {
         self._fetchKnownDeviceIdentities(for: username).flatMap { knownDevices in
             if let device = knownDevices.first(where: { $0.props.deviceId == deviceId }) {
                 return self.eventLoop.makeSucceededFuture(device)
@@ -522,7 +525,7 @@ internal extension CypherMessenger {
     
     func _fetchDeviceIdentities(
         for username: Username
-    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
+    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentityModel>]> {
         self._fetchKnownDeviceIdentities(for: username).flatMap { knownDevices in
             if knownDevices.isEmpty, username != self.username {
                 return self._rediscoverDeviceIdentities(for: username, knownDevices: knownDevices)
@@ -534,9 +537,9 @@ internal extension CypherMessenger {
     
     func _fetchDeviceIdentities(
         forUsers usernames: Set<Username>
-    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> {
+    ) -> EventLoopFuture<[DecryptedModel<DeviceIdentityModel>]> {
         cachedStore.fetchDeviceIdentities().map { deviceIdentities in
-            deviceIdentities.compactMap { deviceIdentity -> DecryptedModel<DeviceIdentity>? in
+            deviceIdentities.compactMap { deviceIdentity -> DecryptedModel<DeviceIdentityModel>? in
                 let deviceIdentity = self.decrypt(deviceIdentity)
                 
                 if usernames.contains(deviceIdentity.props.username) {
@@ -546,7 +549,7 @@ internal extension CypherMessenger {
                 }
             }
         }.flatMap { knownDevices in
-            let rediscoveredDevices = usernames.map { username -> EventLoopFuture<[DecryptedModel<DeviceIdentity>]> in
+            let rediscoveredDevices = usernames.map { username -> EventLoopFuture<[DecryptedModel<DeviceIdentityModel>]> in
                 if username != self.username && !knownDevices.contains(where: {
                     $0.props.username == username
                 }) {

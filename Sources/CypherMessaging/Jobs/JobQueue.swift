@@ -12,7 +12,7 @@ public final class JobQueue: ObservableObject {
     public private(set) var runningJobs = false
     public private(set) var hasOutstandingTasks = true
     private var pausing: EventLoopPromise<Void>?
-    private var jobs = [DecryptedModel<Job>]()
+    private var jobs = [DecryptedModel<JobModel>]()
     private static var taskDecoders = [TaskKey: TaskDecoder]()
 
     init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) {
@@ -38,12 +38,12 @@ public final class JobQueue: ObservableObject {
         }
     }
     
-    func cancelJob(_ job: DecryptedModel<Job>) -> EventLoopFuture<Void> {
+    func cancelJob(_ job: DecryptedModel<JobModel>) -> EventLoopFuture<Void> {
         // TODO: What if the job is cancelled while executing and succeeding?
         return dequeueJob(job)
     }
     
-    func dequeueJob(_ job: DecryptedModel<Job>) -> EventLoopFuture<Void> {
+    func dequeueJob(_ job: DecryptedModel<JobModel>) -> EventLoopFuture<Void> {
         return database.removeJob(job.encrypted).map {
             self.jobs.removeAll { $0.id == job.id }
         }
@@ -51,7 +51,7 @@ public final class JobQueue: ObservableObject {
     
     public func queueTask<T: Task>(_ task: T) -> EventLoopFuture<Void> {
         do {
-            let job = try Job(
+            let job = try JobModel(
                 props: .init(task: task),
                 encryptionKey: databaseEncryptionKey
             )
@@ -85,7 +85,7 @@ public final class JobQueue: ObservableObject {
         runningJobs = true
 
         @discardableResult
-        func next(in jobs: [DecryptedModel<Job>]) -> EventLoopFuture<Void> {
+        func next(in jobs: [DecryptedModel<JobModel>]) -> EventLoopFuture<Void> {
             debugLog("Looking for next task")
             if jobs.isEmpty {
                 debugLog("No more tasks")
@@ -199,7 +199,7 @@ public final class JobQueue: ObservableObject {
         case success, delayed, failed
     }
 
-    private func runNextJob(in jobs: inout [DecryptedModel<Job>]) -> EventLoopFuture<TaskResult> {
+    private func runNextJob(in jobs: inout [DecryptedModel<JobModel>]) -> EventLoopFuture<TaskResult> {
         var index = 0
         let initialJob = jobs[0]
 

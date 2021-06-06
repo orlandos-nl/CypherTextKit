@@ -61,6 +61,8 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
     public let transportLayerIdentifier = "_ipv6-tcp"
     let eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     
+    public init() {}
+    
     public func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
         guard
             let host = metadata["ip"] as? String,

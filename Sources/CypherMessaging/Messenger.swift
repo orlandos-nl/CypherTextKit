@@ -51,7 +51,7 @@ internal struct P2PSession {
     let client: P2PClient
     
     init(
-        deviceIdentity: DecryptedModel<DeviceIdentity>,
+        deviceIdentity: DecryptedModel<DeviceIdentityModel>,
         transport: P2PTransportClient,
         client: P2PClient
     ) {
@@ -67,6 +67,7 @@ internal struct P2PSession {
 public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate {
     public let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
+    private let appPassword: String
     private var config: _CypherMessengerConfig
     private var p2pFactories = [P2PTransportClientFactory]()
     private var p2pSessions = [P2PSession]()
@@ -83,6 +84,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     private init(
         eventLoop: EventLoop,
+        appPassword: String,
         eventHandler: CypherMessengerEventHandler,
         config: _CypherMessengerConfig,
         database: CypherMessengerStore,
@@ -96,6 +98,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         self.transport = transport
         self.databaseEncryptionKey = SymmetricKey(data: config.databaseEncryptionKey)
         self.p2pFactories = p2pFactories
+        self.appPassword = appPassword
         self.transport.delegate = self
         self.jobQueue = JobQueue(messenger: self, database: self.cachedStore, databaseEncryptionKey: self.databaseEncryptionKey)
         
@@ -160,6 +163,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                     // Existing config found, this is a new device that needs to be registered
                     let messenger = CypherMessenger(
                         eventLoop: eventLoop,
+                        appPassword: appPassword,
                         eventHandler: eventHandler,
                         config: config,
                         database: database,
@@ -193,6 +197,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                     }.map {
                         CypherMessenger(
                             eventLoop: eventLoop,
+                            appPassword: appPassword,
                             eventHandler: eventHandler,
                             config: config,
                             database: database,
@@ -298,6 +303,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                 return createTransport(transportRequest).map { transport in
                     CypherMessenger(
                         eventLoop: eventLoop,
+                        appPassword: appPassword,
                         eventHandler: eventHandler,
                         config: config,
                         database: database,
@@ -459,7 +465,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     func _createMultiRecipientMessage(
         encrypting message: CypherMessage,
-        forDevices devices: [DecryptedModel<DeviceIdentity>]
+        forDevices devices: [DecryptedModel<DeviceIdentityModel>]
     ) -> EventLoopFuture<MultiRecipientCypherMessage> {
         let key = SymmetricKey(size: .bits256)
         let keyData = key.withUnsafeBytes { buffer in
@@ -555,7 +561,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return eventLoop.makeSucceededFuture(config.custom)
     }
     
-    public func writeCustomConfig(_ custom: Document, appPassword: String) -> EventLoopFuture<Void> {
+    public func writeCustomConfig(_ custom: Document) -> EventLoopFuture<Void> {
         return verifyAppPassword(matches: appPassword).flatMap { matches -> EventLoopFuture<String> in
             guard matches else {
                 return self.eventLoop.makeFailedFuture(CypherSDKError.incorrectAppPassword)
@@ -564,7 +570,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             return self.cachedStore.readLocalDeviceSalt()
         }.flatMap { salt in
             do {
-                let appEncryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+                let appEncryptionKey = Self.formAppEncryptionKey(appPassword: self.appPassword, salt: salt)
                 var newConfig = self.config
                 newConfig.custom = custom
                 let encryptedConfig = try Encrypted(newConfig, encryptionKey: appEncryptionKey)
@@ -578,7 +584,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     private func _writeWithRatchetEngine<T>(
-        ofDevice device: DecryptedModel<DeviceIdentity>,
+        ofDevice device: DecryptedModel<DeviceIdentityModel>,
         run: @escaping (inout DoubleRatchetHKDF<SHA512>, RekeyState) -> EventLoopFuture<T>
     ) -> EventLoopFuture<T> {
         var ratchet: DoubleRatchetHKDF<SHA512>
@@ -627,7 +633,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         ofUser username: Username,
         deviceId: DeviceId,
         message: RatchetedCypherMessage
-    ) -> EventLoopFuture<(Data, DecryptedModel<DeviceIdentity>)> {
+    ) -> EventLoopFuture<(Data, DecryptedModel<DeviceIdentityModel>)> {
         self._fetchDeviceIdentity(for: username, deviceId: deviceId).flatMap { device in
             func rekey() -> EventLoopFuture<Void> {
                 device.doubleRatchet = nil
@@ -744,13 +750,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     internal func _processP2PMessage(
         _ message: SingleCypherMessage,
         remoteMessageId: String,
-        sender device: DecryptedModel<DeviceIdentity>
+        sender device: DecryptedModel<DeviceIdentityModel>
     ) -> EventLoopFuture<Void> {
         var subType = message.messageSubtype ?? ""
         
-        assert(subType.hasPrefix("_/p2p/"))
+        assert(subType.hasPrefix("_/p2p/0/"))
         
-        subType.removeFirst("_/p2p/".count)
+        subType.removeFirst("_/p2p/0/".count)
         
         var components = subType.split(separator: "/")
         
@@ -778,6 +784,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
         
         return factory.receiveMessage(message.text, metadata: message.metadata, handle: handle).map { client in
+            // TODO: What is a P2P session already exists?
             if let client = client {
                 client.delegate = self
                 self.p2pSessions.append(
@@ -814,7 +821,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     internal func getEstablishedP2PConnection(
-        with device: DecryptedModel<DeviceIdentity>
+        with device: DecryptedModel<DeviceIdentityModel>
     ) -> EventLoopFuture<P2PClient?> {
         return eventLoop.makeSucceededFuture(
             p2pSessions.first(where: {
@@ -824,7 +831,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     internal func createP2PConnection(
-        with device: DecryptedModel<DeviceIdentity>,
+        with device: DecryptedModel<DeviceIdentityModel>,
         targetConversation: TargetConversation,
         preferredTransportIdentifier: String? = nil
     ) -> EventLoopFuture<Void> {
@@ -864,6 +871,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                 state: state
             )
         ).map { client in
+            // TODO: What is a P2P session already exists?
             if let client = client {
                 client.delegate = self
                 self.p2pSessions.append(

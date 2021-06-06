@@ -3,7 +3,7 @@ import BSON
 import Foundation
 import CypherProtocol
 
-public final class Conversation: Model {
+public final class ConversationModel: Model {
     public struct SecureProps: Codable {
         public var members: Set<Username>
         public var metadata: Document
@@ -33,7 +33,7 @@ public final class Conversation: Model {
     }
 }
 
-public final class DeviceIdentity: Model {
+public final class DeviceIdentityModel: Model {
     public struct SecureProps: Codable {
         let username: Username
         let deviceId: DeviceId
@@ -61,7 +61,7 @@ public final class DeviceIdentity: Model {
     }
 }
 
-public final class Contact: Model {
+public final class ContactModel: Model {
     public struct SecureProps: Codable {
         public let username: Username
         public internal(set) var config: UserConfig
@@ -90,7 +90,7 @@ public enum MarkMessageResult {
     case success, error, notModified
 }
 
-public final class ChatMessage: Model {
+public final class ChatMessageModel: Model {
     public enum DeliveryState: Int, Codable {
         case none = 0
         case undelivered = 1
@@ -202,7 +202,7 @@ public final class ChatMessage: Model {
     }
 }
 
-public final class Job: Model {
+public final class JobModel: Model {
     public struct SecureProps: Codable {
         private enum CodingKeys: String, CodingKey {
             case taskKey = "a"

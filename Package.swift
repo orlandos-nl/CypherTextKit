@@ -14,6 +14,9 @@ let package = Package(
         .library(
             name: "CypherMessaging",
             targets: ["CypherMessaging"]),
+        .library(
+            name: "MessagingHelpers",
+            targets: ["MessagingHelpers"]),
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
@@ -21,6 +24,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
         .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.0.0"),
         .package(url: "https://github.com/OpenKitten/BSON.git", from: "7.0.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(name: "fluent-sqlite-driver", url: "https://github.com/vapor/fluent-sqlite.git", from: "4.0.0"),
     ],
     targets: [
@@ -29,7 +33,13 @@ let package = Package(
         .target(
             name: "CypherMessaging",
             dependencies: [
-                .target(name: "CypherProtocol")
+                .target(name: "CypherProtocol"),
+                .product(name: "Logging", package: "swift-log"),
+            ]),
+        .target(
+            name: "MessagingHelpers",
+            dependencies: [
+                .target(name: "CypherMessaging"),
             ]),
         .target(
             name: "CypherProtocol",
@@ -41,7 +51,10 @@ let package = Package(
                 .product(name: "BSON", package: "BSON"),
             ]),
         .testTarget(
-            name: "CypherSDKTests",
+            name: "CypherMessagingTests",
             dependencies: ["CypherMessaging"]),
+        .testTarget(
+            name: "CypherMessagingHelpersTests",
+            dependencies: ["MessagingHelpers"]),
     ]
 )

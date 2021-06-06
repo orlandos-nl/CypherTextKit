@@ -7,7 +7,7 @@ enum CypherSDKError: Error {
     case invalidUserConfig
     case corruptUserConfig
     case badInput
-    case unknownGroup
+    case unknownChat, unknownGroup
     case invalidDeliveryStateTransition
     case appLocked
     case invalidGroupConfig

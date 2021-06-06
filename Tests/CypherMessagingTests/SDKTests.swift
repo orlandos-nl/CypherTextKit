@@ -2,7 +2,7 @@ import BSON
 import Crypto
 import NIO
 import XCTest
-@testable import CypherMessaging
+import CypherMessaging
 import SystemConfiguration
 import CypherProtocol
 
