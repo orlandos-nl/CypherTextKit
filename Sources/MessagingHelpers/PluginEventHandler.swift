@@ -57,7 +57,9 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         
         func next() -> EventLoopFuture<SendMessageAction> {
             guard let plugin = plugins.next() else {
-                return message.messenger.eventLoop.makeSucceededFuture(.saveAndSend)
+                return message.messenger.eventLoop.makeSucceededFuture(
+                    message.message.messageType == .magic ? .send : .saveAndSend
+                )
             }
             
             return plugin.onSendMessage(message).flatMap { result in

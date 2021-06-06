@@ -34,6 +34,7 @@ public struct FriendshipRuleset {
     public var ignoreWhenUndecided = true
     public var canIgnoreMagicPackets = true
     public var blockAffectsGroupChats = true
+    public var preventSendingDisallowedMessages = true
     
     public init() {}
 }
@@ -90,7 +91,6 @@ public struct FriendshipPlugin: Plugin {
                         return message.messenger.eventLoop.makeFailedFuture(error)
                     }
         
-                    
                     return message.messenger.createContact(byUsername: changedState.subject).flatMap { contact in
                         contact.modifyMetadata(
                             ofType: FriendshipMetadata.self,
@@ -147,7 +147,9 @@ public struct FriendshipPlugin: Plugin {
                         ruleset.canIgnoreMagicPackets ? .ignore : nil
                     )
                 } else {
-                    return message.messenger.eventLoop.makeSucceededFuture(.ignore)
+                    return message.messenger.eventLoop.makeSucceededFuture(
+                        ruleset.ignoreWhenUndecided ? .ignore : nil
+                    )
                 }
             case (.friend, .friend):
                 return message.messenger.eventLoop.makeSucceededFuture(nil)
@@ -158,7 +160,7 @@ public struct FriendshipPlugin: Plugin {
     }
     
     public func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction?> {
-        fatalError()
+        return message.messenger.eventLoop.makeSucceededFuture(nil)
     }
     
     public func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
