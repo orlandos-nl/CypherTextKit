@@ -4,7 +4,7 @@ import Foundation
 import NIO
 
 public struct Contact {
-    let messenger: CypherMessenger
+    public let messenger: CypherMessenger
     let model: DecryptedModel<ContactModel>
     public var eventLoop: EventLoop { messenger.eventLoop }
     public var username: Username { model.username }

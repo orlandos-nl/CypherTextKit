@@ -53,6 +53,37 @@ extension Contact {
     }
 }
 
+extension AnyConversation {
+    public func withMetadata<P: Plugin, C: Codable, Result>(
+        ofType type: C.Type,
+        forPlugin plugin: P.Type,
+        run: (inout C) throws -> Result
+    ) throws -> Result {
+        let pluginStorage = self.conversation.metadata[plugin.pluginIdentifier] ?? Document()
+        var metadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)
+        let result = try run(&metadata)
+        self.conversation.metadata[plugin.pluginIdentifier] = try BSONEncoder().encode(metadata)
+        
+        return result
+    }
+    
+    public func modifyMetadata<P: Plugin, C: Codable, Result>(
+        ofType type: C.Type,
+        forPlugin plugin: P.Type,
+        run: (inout C) throws -> Result
+    ) -> EventLoopFuture<Result> {
+        do {
+            let result = try withMetadata(ofType: type, forPlugin: plugin, run: run)
+            
+            return self.save().map {
+                result
+            }
+        } catch {
+            return self.messenger.eventLoop.makeFailedFuture(error)
+        }
+    }
+}
+
 extension CypherMessenger {
     public func withCustomConfig<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,

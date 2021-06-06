@@ -564,7 +564,10 @@ public struct GroupChat: AnyConversation {
         metadata.config
     }
     public var target: TargetConversation {
-        return .groupChat(GroupChatId(groupConfig.id))
+        return .groupChat(groupId)
+    }
+    public var groupId: GroupChatId {
+        GroupChatId(groupConfig.id)
     }
     
     public var resolvedTarget: TargetConversation.Resolved {
