@@ -359,12 +359,15 @@ extension AnyConversation {
     }
     
     private func getNextLocalOrder() -> EventLoopFuture<Int> {
-        let order = conversation.props.getNextLocalOrder()
-        return messenger.cachedStore.updateConversation(conversation.encrypted).map {
-            order
+        messenger.eventLoop.flatSubmit {
+            let order = conversation.props.getNextLocalOrder()
+            return messenger.cachedStore.updateConversation(conversation.encrypted).map {
+                order
+            }
         }
     }
     
+    @discardableResult
     public func sendRawMessage(
         type: CypherMessageType,
         messageSubtype: String? = nil,

@@ -11,11 +11,35 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
     let eventLoop: EventLoop
     
-    private var contacts: [ContactModel]?
-    private var deviceIdentities: [DeviceIdentityModel]?
-    private var messages = [UUID: ChatMessageModel]()
-    private var conversations: [ConversationModel]?
-    private var deviceConfig: Data?
+    private var contacts: [ContactModel]? {
+        willSet {
+            assert(eventLoop.inEventLoop)
+        }
+    }
+    
+    private var deviceIdentities: [DeviceIdentityModel]? {
+        willSet {
+            assert(eventLoop.inEventLoop)
+        }
+    }
+    
+    private var messages = [UUID: ChatMessageModel]() {
+        willSet {
+            assert(eventLoop.inEventLoop)
+        }
+    }
+    
+    private var conversations: [ConversationModel]? {
+        willSet {
+            assert(eventLoop.inEventLoop)
+        }
+    }
+    
+    private var deviceConfig: Data? {
+        willSet {
+            assert(eventLoop.inEventLoop)
+        }
+    }
     
     init(base: CypherMessengerStore, eventLoop: EventLoop) {
         self.base = base
@@ -23,6 +47,8 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func emptyCaches() {
+        assert(eventLoop.inEventLoop)
+        
         deviceConfig = nil
         contacts = nil
         conversations = nil
@@ -31,26 +57,30 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func fetchContacts() -> EventLoopFuture<[ContactModel]> {
-        if let users = contacts {
-            return eventLoop.makeSucceededFuture(users)
-        } else {
-            return base.fetchContacts().map { contacts in
-                self.contacts = contacts
-                return contacts
+        return eventLoop.flatSubmit {
+            if let users = self.contacts {
+                return self.eventLoop.makeSucceededFuture(users)
+            } else {
+                return self.base.fetchContacts().map { contacts in
+                    self.contacts = contacts
+                    return contacts
+                }
             }
         }
     }
     
     func createContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
-        if var users = contacts {
-            users.append(contact)
-            self.contacts = users
-            return base.createContact(contact)
-        } else {
-            return fetchContacts().map { contacts in
-                self.contacts = contacts + [contact]
-            }.flatMap {
-                self.base.createContact(contact)
+        return eventLoop.flatSubmit {
+            if var users = self.contacts {
+                users.append(contact)
+                self.contacts = users
+                return self.base.createContact(contact)
+            } else {
+                return self.fetchContacts().map { contacts in
+                    self.contacts = contacts + [contact]
+                }.flatMap {
+                    self.base.createContact(contact)
+                }
             }
         }
     }
@@ -62,47 +92,55 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessageModel> {
-        if let message = messages[messageId] {
-            return eventLoop.makeSucceededFuture(message)
-        } else {
-            return base.fetchChatMessage(byId: messageId).map { message in
-                self.messages[messageId] = message
-                return message
+        return eventLoop.flatSubmit {
+            if let message = self.messages[messageId] {
+                return self.eventLoop.makeSucceededFuture(message)
+            } else {
+                return self.base.fetchChatMessage(byId: messageId).map { message in
+                    self.messages[messageId] = message
+                    return message
+                }
             }
         }
     }
     
     func fetchChatMessage(byRemoteId remoteId: String) -> EventLoopFuture<ChatMessageModel> {
-        return base.fetchChatMessage(byRemoteId: remoteId).map { message in
-            if let cachedMessage = self.messages[message.id] {
-                return cachedMessage
-            } else {
-                return message
+        return eventLoop.flatSubmit {
+            return self.base.fetchChatMessage(byRemoteId: remoteId).map { message in
+                if let cachedMessage = self.messages[message.id] {
+                    return cachedMessage
+                } else {
+                    return message
+                }
             }
         }
     }
     
     func fetchConversations() -> EventLoopFuture<[ConversationModel]> {
-        if let conversations = conversations {
-            return eventLoop.makeSucceededFuture(conversations)
-        } else {
-            return base.fetchConversations().map { conversations in
-                self.conversations = conversations
-                return conversations
+        return eventLoop.flatSubmit {
+            if let conversations = self.conversations {
+                return self.eventLoop.makeSucceededFuture(conversations)
+            } else {
+                return self.base.fetchConversations().map { conversations in
+                    self.conversations = conversations
+                    return conversations
+                }
             }
         }
     }
     
     func createConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
-        if var conversations = conversations {
-            conversations.append(conversation)
-            self.conversations = conversations
-            return base.createConversation(conversation)
-        } else {
-            return fetchConversations().map { conversations in
-                self.conversations = conversations + [conversation]
-            }.flatMap {
-                self.base.createConversation(conversation)
+        return eventLoop.flatSubmit {
+            if var conversations = self.conversations {
+                conversations.append(conversation)
+                self.conversations = conversations
+                return self.base.createConversation(conversation)
+            } else {
+                return self.fetchConversations().map { conversations in
+                    self.conversations = conversations + [conversation]
+                }.flatMap {
+                    self.base.createConversation(conversation)
+                }
             }
         }
     }
@@ -114,23 +152,27 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func fetchDeviceIdentities() -> EventLoopFuture<[DeviceIdentityModel]> {
-        if let deviceIdentities = deviceIdentities {
-            return eventLoop.makeSucceededFuture(deviceIdentities)
-        } else {
-            return base.fetchDeviceIdentities().map { deviceIdentities in
-                self.deviceIdentities = deviceIdentities
-                return deviceIdentities
+        return eventLoop.flatSubmit {
+            if let deviceIdentities = self.deviceIdentities {
+                return self.eventLoop.makeSucceededFuture(deviceIdentities)
+            } else {
+                return self.base.fetchDeviceIdentities().map { deviceIdentities in
+                    self.deviceIdentities = deviceIdentities
+                    return deviceIdentities
+                }
             }
         }
     }
     
     func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
-        if var deviceIdentities = deviceIdentities {
-            deviceIdentities.append(deviceIdentity)
-            self.deviceIdentities = deviceIdentities
+        return eventLoop.flatSubmit {
+            if var deviceIdentities = self.deviceIdentities {
+                deviceIdentities.append(deviceIdentity)
+                self.deviceIdentities = deviceIdentities
+            }
+            
+            return self.base.createDeviceIdentity(deviceIdentity)
         }
-        
-        return base.createDeviceIdentity(deviceIdentity)
     }
     
     func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
@@ -140,8 +182,10 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func createChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
-        messages[message.id] = message
-        return base.createChatMessage(message)
+        return eventLoop.flatSubmit {
+            self.messages[message.id] = message
+            return self.base.createChatMessage(message)
+        }
     }
     
     func updateChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
@@ -166,7 +210,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
             maximumOrder: maximumOrder,
             offsetBy: offset,
             limit: limit
-        ).map { messages in
+        ).hop(to: eventLoop).map { messages in
             messages.map { message in
                 if let cachedMessage = self.messages[message.id] {
                     return cachedMessage
@@ -208,32 +252,40 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func removeContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
-        if let index = contacts?.firstIndex(where: { $0 === contact }) {
-            contacts?.remove(at: index)
+        return eventLoop.flatSubmit {
+            if let index = self.contacts?.firstIndex(where: { $0 === contact }) {
+                self.contacts?.remove(at: index)
+            }
+            
+            return self.base.removeContact(contact)
         }
-        
-        return base.removeContact(contact)
     }
     
     func removeConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
-        if let index = conversations?.firstIndex(where: { $0 === conversation }) {
-            conversations?.remove(at: index)
+        return eventLoop.flatSubmit {
+            if let index = self.conversations?.firstIndex(where: { $0 === conversation }) {
+                self.conversations?.remove(at: index)
+            }
+            
+            return self.base.removeConversation(conversation)
         }
-        
-        return base.removeConversation(conversation)
     }
     
     func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
-        if let index = deviceIdentities?.firstIndex(where: { $0 === deviceIdentity }) {
-            deviceIdentities?.remove(at: index)
+        return eventLoop.flatSubmit {
+            if let index = self.deviceIdentities?.firstIndex(where: { $0 === deviceIdentity }) {
+                self.deviceIdentities?.remove(at: index)
+            }
+            
+            return self.base.removeDeviceIdentity(deviceIdentity)
         }
-        
-        return base.removeDeviceIdentity(deviceIdentity)
     }
     
     func removeChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
-        messages[message.id] = nil
-        
-        return base.removeChatMessage(message)
+        return eventLoop.flatSubmit {
+            self.messages[message.id] = nil
+            
+            return self.base.removeChatMessage(message)
+        }
     }
 }

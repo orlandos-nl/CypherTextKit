@@ -8,6 +8,7 @@ let iterationSize = 50
 @available(macOS 12, iOS 15, *)
 fileprivate final class DeviceChatCursor {
     internal private(set) var messages = [AnyChatMessage]()
+    var offset = 0
     let target: TargetConversation
     let conversationId: UUID
     let messenger: CypherMessenger
@@ -71,13 +72,14 @@ fileprivate final class DeviceChatCursor {
             sortedBy: sortMode,
             minimumOrder: sortMode == .descending ? latestOrder : nil,
             maximumOrder: sortMode == .ascending ? latestOrder : nil,
-            offsetBy: 0,
+            offsetBy: self.offset,
             limit: limit
         ).map { messages in
             self.latestOrder = messages.last?.order ?? self.latestOrder
             
             self.drained = messages.count < limit
             
+            self.offset += messages.count
             self.messages.append(contentsOf: messages.map { message in
                 AnyChatMessage(
                     target: self.target,

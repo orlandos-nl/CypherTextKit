@@ -63,7 +63,59 @@ final class CypherSDKTests: XCTestCase {
         await XCTAssertThrowsAsyncError(try await m0.createPrivateChat(with: "m0"))
     }
     
-    func testP2P() async throws {
+    func testIPv6P2P() async throws {
+        XCTExpectFailure("Test may fail on ipv4 only networks")
+        try await runP2PTests(IPv6TCPP2PTransportClientFactory())
+    }
+    
+    func testInMemoryP2P() async throws {
+        try await runP2PTests(SpoofP2PTransportFactory())
+    }
+    
+    func testHeavyLoad() async throws {
+        let el = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+        let m0 = try await CypherMessenger.registerMessenger(
+            username: "m0",
+            authenticationMethod: .password("m0"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(eventLoop: el),
+            eventHandler: SpoofCypherEventHandler(),
+            on: el
+        )
+        
+        let m1 = try await CypherMessenger.registerMessenger(
+            username: "m1",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(eventLoop: el),
+            eventHandler: SpoofCypherEventHandler(),
+            on: el
+        )
+        
+        try el.executeAsync {
+            let chat = try await m0.createPrivateChat(with: "m1")
+            
+            for _ in 0..<1000 {
+                _ = el.executeAsync {
+                    _ = try await chat.sendRawMessage(type: .text, text: "Hello", preferredPushType: .none)
+                }
+            }
+        }.wait()
+        
+        var receivedAll = false
+        repeat {
+            sleep(1)
+            if let chat = try await m1.getPrivateChat(with: "m0") {
+                let count = try await chat.allMessages(sortedBy: .ascending).count
+                receivedAll = count >= 1000
+                print("Processed \(count)")
+            }
+        } while !receivedAll
+    }
+    
+    func runP2PTests<Factory: P2PTransportClientFactory>(_ factory: Factory) async throws {
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let eventLoop = elg.next()
         
@@ -73,7 +125,7 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             p2pFactories: [
-                IPv6TCPP2PTransportClientFactory()
+                factory
             ],
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
             eventHandler: SpoofCypherEventHandler(),
@@ -86,7 +138,7 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             p2pFactories: [
-                IPv6TCPP2PTransportClientFactory()
+                factory
             ],
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
             eventHandler: SpoofCypherEventHandler(),
