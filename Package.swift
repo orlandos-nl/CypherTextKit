@@ -45,6 +45,7 @@ let package = Package(
             name: "CypherProtocol",
             dependencies: [
                 .product(name: "NIO", package: "swift-nio"),
+                .product(name: "_NIOConcurrency", package: "swift-nio"),
                 .product(name: "NIOFoundationCompat", package: "swift-nio"),
                 .product(name: "NIOTransportServices", package: "swift-nio-transport-services"),
                 .product(name: "Crypto", package: "swift-crypto"),

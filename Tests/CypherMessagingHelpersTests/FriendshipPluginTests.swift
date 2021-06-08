@@ -2,6 +2,7 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
+@available(macOS 12, *)
 struct CustomMagicPacketPlugin: Plugin {
     static let pluginIdentifier = "custom-magic-packet"
     let onInput: () -> ()
@@ -48,12 +49,13 @@ struct CustomMagicPacketPlugin: Plugin {
     func onP2PClientClose(messenger: CypherMessenger) {}
 }
 
+@available(macOS 12, *)
 final class FriendshipPluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
     }
     
-    func testIgnoreUndecided() throws {
+    func testIgnoreUndecided() async throws {
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let eventLoop = elg.next()
         var ruleset = FriendshipRuleset()
@@ -62,7 +64,7 @@ final class FriendshipPluginTests: XCTestCase {
         ruleset.canIgnoreMagicPackets = false
         ruleset.preventSendingDisallowedMessages = false
         
-        let m0 = try CypherMessenger.registerMessenger(
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
@@ -72,9 +74,9 @@ final class FriendshipPluginTests: XCTestCase {
                 FriendshipPlugin(ruleset: ruleset)
             ]),
             on: eventLoop
-        ).wait()
+        ).get()
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
@@ -84,51 +86,51 @@ final class FriendshipPluginTests: XCTestCase {
                 FriendshipPlugin(ruleset: ruleset)
             ]),
             on: eventLoop
-        ).wait()
+        ).get()
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
-        let m0Contact = try m0.createContact(byUsername: "m1").wait()
+        let m0Chat = try await m0.createPrivateChat(with: "m1").get()
+        let m0Contact = try await m0.createContact(byUsername: "m1").get()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(3)
+        SpoofTransportClient.synchronize()
         
-        let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
-        let m1Contact = try m1.createContact(byUsername: "m0").wait()
+        let m1Chat = try await m1.getPrivateChat(with: "m0").get()!
+        let m1Contact = try await m1.createContact(byUsername: "m0").get()
         
-        sleep(2)
+        SpoofTransportClient.synchronize()
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 0)
         
-        try m0Contact.befriend().wait()
-        _ = try m0Chat.sendRawMessage(
+        try await m0Contact.befriend().get()
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         XCTAssertFalse(m0Contact.mutualFriendship)
         XCTAssertFalse(m0Contact.contactBlocked)
         
-        sleep(2)
+        SpoofTransportClient.synchronize()
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 2)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 0)
         
         XCTAssertFalse(m1Contact.mutualFriendship)
         XCTAssertFalse(m1Contact.contactBlocked)
-        try m1Contact.befriend().wait()
-        _ = try m0Chat.sendRawMessage(
+        try await m1Contact.befriend().get()
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(2)
+        SpoofTransportClient.synchronize()
         
         XCTAssertTrue(m0Contact.mutualFriendship)
         XCTAssertTrue(m1Contact.mutualFriendship)
@@ -139,69 +141,69 @@ final class FriendshipPluginTests: XCTestCase {
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
         
         // Now they block each other
-        try m0Contact.block().wait()
+        try await m0Contact.block().get()
         
         XCTAssertFalse(m0Contact.mutualFriendship)
         XCTAssertTrue(m0Contact.contactBlocked)
         
-        sleep(1)
+        SpoofTransportClient.synchronize()
         
         XCTAssertFalse(m1Contact.mutualFriendship)
         XCTAssertTrue(m1Contact.contactBlocked)
         
-        _ = try m1Chat.sendRawMessage(
+        _ = try await m1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 3)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 2)
         
-        try m1Contact.block().wait()
+        try await m1Contact.block().get()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(1)
+        SpoofTransportClient.synchronize()
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 4)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 2)
         
         // And now they need to unblock to reclaim friendship
         
-        try m0Contact.unblock().wait()
-        try m1Contact.unblock().wait()
+        try await m0Contact.unblock().get()
+        try await m1Contact.unblock().get()
         
-        sleep(1)
+        SpoofTransportClient.synchronize()
         
         XCTAssertTrue(m0Contact.mutualFriendship)
         XCTAssertTrue(m1Contact.mutualFriendship)
         XCTAssertFalse(m0Contact.contactBlocked)
         XCTAssertFalse(m1Contact.contactBlocked)
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        _ = try m1Chat.sendRawMessage(
+        _ = try await m1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(1)
+        SpoofTransportClient.synchronize()
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 6)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 4)
     }
     
-    func testBlockAffectsGroupChats() throws {
+    func testBlockAffectsGroupChats() async throws {
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let eventLoop = elg.next()
         var ruleset = FriendshipRuleset()
@@ -210,7 +212,7 @@ final class FriendshipPluginTests: XCTestCase {
         ruleset.canIgnoreMagicPackets = false
         ruleset.preventSendingDisallowedMessages = false
         
-        let m0 = try CypherMessenger.registerMessenger(
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
@@ -220,9 +222,9 @@ final class FriendshipPluginTests: XCTestCase {
                 FriendshipPlugin(ruleset: ruleset)
             ]),
             on: eventLoop
-        ).wait()
+        ).get()
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
@@ -232,55 +234,55 @@ final class FriendshipPluginTests: XCTestCase {
                 FriendshipPlugin(ruleset: ruleset)
             ]),
             on: eventLoop
-        ).wait()
+        ).get()
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
+        let m0Chat = try await m0.createPrivateChat(with: "m1").get()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(3)
+        SpoofTransportClient.synchronize()
         
-        let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
+        let m1Chat = try await m1.getPrivateChat(with: "m0").get()!
         
-        sleep(2)
+        SpoofTransportClient.synchronize()
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
         
-        let m0GroupChat = try m0.createGroupChat(with: ["m1"]).wait()
-        _ = try m0GroupChat.sendRawMessage(
+        let m0GroupChat = try await m0.createGroupChat(with: ["m1"]).get()
+        _ = try await m0GroupChat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(2)
+        SpoofTransportClient.synchronize()
         
-        let m1GroupChat = try m1.getGroupChat(byId: m0GroupChat.groupId).wait()!
+        let m1GroupChat = try await m1.getGroupChat(byId: m0GroupChat.groupId).get()!
         
         try XCTAssertEqual(m1GroupChat.allMessages(sortedBy: .descending).wait().count, 1)
         try XCTAssertEqual(m1GroupChat.allMessages(sortedBy: .descending).wait().count, 1)
         
-        let m1Contact = try m1.createContact(byUsername: "m0").wait()
-        try m1Contact.block().wait()
+        let m1Contact = try await m1.createContact(byUsername: "m0").get()
+        try await m1Contact.block().get()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        _ = try m0GroupChat.sendRawMessage(
+        _ = try await m0GroupChat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(2)
+        SpoofTransportClient.synchronize()
         
         try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 2)
         try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
@@ -289,7 +291,7 @@ final class FriendshipPluginTests: XCTestCase {
         try XCTAssertEqual(m1GroupChat.allMessages(sortedBy: .descending).wait().count, 1)
     }
     
-    func testBlockingCanPreventOtherPlugins() throws {
+    func testBlockingCanPreventOtherPlugins() async throws {
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let eventLoop = elg.next()
         var ruleset = FriendshipRuleset()
@@ -299,7 +301,7 @@ final class FriendshipPluginTests: XCTestCase {
         ruleset.preventSendingDisallowedMessages = false
         var inputCount = 0
         
-        let m0 = try CypherMessenger.registerMessenger(
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
@@ -312,9 +314,9 @@ final class FriendshipPluginTests: XCTestCase {
                 }, onOutput: {})
             ]),
             on: eventLoop
-        ).wait()
+        ).get()
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
@@ -327,36 +329,36 @@ final class FriendshipPluginTests: XCTestCase {
                 }, onOutput: {})
             ]),
             on: eventLoop
-        ).wait()
+        ).get()
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
-        let m0Contact = try m0.createContact(byUsername: "m1").wait()
+        let m0Chat = try await m0.createPrivateChat(with: "m1").get()
+        let m0Contact = try await m0.createContact(byUsername: "m1").get()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .magic,
             messageSubtype: "custom-magic-packet",
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(3)
+        SpoofTransportClient.synchronize()
         
         XCTAssertEqual(inputCount, 0)
-        let m1Contact = try m1.createContact(byUsername: "m0").wait()
+        let m1Contact = try await m1.createContact(byUsername: "m0").get()
         
-        try m0Contact.befriend().wait()
-        try m1Contact.befriend().wait()
+        try await m0Contact.befriend().get()
+        try await m1Contact.befriend().get()
         
-        sleep(1)
+        SpoofTransportClient.synchronize()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .magic,
             messageSubtype: "custom-magic-packet",
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        ).get()
         
-        sleep(2)
+        SpoofTransportClient.synchronize()
         
         XCTAssertEqual(inputCount, 1)
         _ = m0

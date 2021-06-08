@@ -4,7 +4,7 @@ import NIO
 
 fileprivate final class SpoofServer {
     fileprivate let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-    private var onlineDevices = [SpoofTransportClient]()
+    fileprivate var onlineDevices = [SpoofTransportClient]()
     private var backlog = [DeviceId: [CypherServerEvent]]()
     private var userDevices = [Username: Set<DeviceId>]()
     fileprivate var publicKeys = [Username: UserConfig]()
@@ -14,6 +14,12 @@ fileprivate final class SpoofServer {
     fileprivate static let local = SpoofServer()
     
     private init() {}
+    
+    fileprivate var hasBacklog: Bool {
+        !self.backlog.values.map(\.isEmpty).reduce(true) {
+            $0 && $1
+        }
+    }
     
     fileprivate func reset() {
         onlineDevices = []
@@ -77,6 +83,17 @@ fileprivate final class SpoofServer {
 }
 
 public final class SpoofTransportClient: ConnectableCypherTransportClient {
+    public static func synchronize() {
+        let server = SpoofServer.local
+        
+        repeat {
+            usleep(100)
+        } while server.hasBacklog
+        
+        // Job queue needs to be processed, TODO
+        sleep(1)
+    }
+    
     let username: Username
     let deviceId: DeviceId
     let eventLoop: EventLoop

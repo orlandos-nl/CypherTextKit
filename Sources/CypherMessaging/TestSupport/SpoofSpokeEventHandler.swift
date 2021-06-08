@@ -12,11 +12,11 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     }
     
     public func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction> {
-        eventLoop.makeSucceededFuture(.saveAndSend)
+        eventLoop.makeSucceededFuture(message.message.messageType == .magic ? .send : .saveAndSend)
     }
     
     public func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction> {
-        eventLoop.makeSucceededFuture(.save)
+        eventLoop.makeSucceededFuture(message.message.messageType == .magic ? .ignore : .save)
     }
     
     public func createPrivateChatMetadata(

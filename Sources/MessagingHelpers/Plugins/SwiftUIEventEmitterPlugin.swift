@@ -1,8 +1,5 @@
-//
-//  File.swift
-//  
-//
-//  Created by Joannis Orlandos on 04/06/2021.
-//
+#if canImport(SwiftUI)
+import SwiftUI
 
-import Foundation
+
+#endif
