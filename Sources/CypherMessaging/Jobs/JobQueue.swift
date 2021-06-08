@@ -4,6 +4,7 @@ import Foundation
 import SwiftUI
 import NIO
 
+@available(macOS 12, iOS 15, *)
 public final class JobQueue: ObservableObject {
     public let eventLoop: EventLoop
     unowned private(set) var messenger: CypherMessenger!

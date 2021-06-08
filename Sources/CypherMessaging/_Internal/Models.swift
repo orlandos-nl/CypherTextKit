@@ -90,6 +90,7 @@ public enum MarkMessageResult {
     case success, error, notModified
 }
 
+@available(macOS 12, iOS 15, *)
 public final class ChatMessageModel: Model {
     public enum DeliveryState: Int, Codable {
         case none = 0
@@ -202,6 +203,7 @@ public final class ChatMessageModel: Model {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public final class JobModel: Model {
     public struct SecureProps: Codable {
         private enum CodingKeys: String, CodingKey {

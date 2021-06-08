@@ -1,3 +1,4 @@
+@available(macOS 12, iOS 15, *)
 public struct AnyChatMessage {
     public let target: TargetConversation
     public var id: UUID { raw.id }
@@ -14,15 +15,15 @@ public struct AnyChatMessage {
         raw.deliveryState
     }
     
-    public func markAsRead() -> EventLoopFuture<Void> {
+    public func markAsRead() async throws {
         if raw.deliveryState == .read {
-            return messenger.eventLoop.makeSucceededVoidFuture()
+            return
         }
         
-        return messenger._markMessage(byId: raw.id, as: .read).map { _ in }
+        return try await messenger._markMessage(byId: raw.id, as: .read).map { _ in }.get()
     }
     
-    public func destroy() -> EventLoopFuture<Void> {
-        messenger.cachedStore.removeChatMessage(raw.encrypted)
+    public func destroy() async throws {
+        try await messenger.cachedStore.removeChatMessage(raw.encrypted).get()
     }
 }

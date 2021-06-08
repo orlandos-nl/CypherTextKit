@@ -2,7 +2,7 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
-@available(macOS 12, *)
+@available(macOS 12, iOS 15, *)
 final class ChatActivityPluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
@@ -22,7 +22,7 @@ final class ChatActivityPluginTests: XCTestCase {
                 ChatActivityPlugin()
             ]),
             on: eventLoop
-        ).get()
+        )
         
         let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -34,21 +34,21 @@ final class ChatActivityPluginTests: XCTestCase {
                 ChatActivityPlugin()
             ]),
             on: eventLoop
-        ).get()
+        )
         
-        let m0Chat = try await m0.createPrivateChat(with: "m1").get()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
         XCTAssertNil(m0Chat.lastActivity)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         XCTAssertNotNil(m0Chat.lastActivity)
         
         SpoofTransportClient.synchronize()
         
-        let m1Chat = try await m1.getPrivateChat(with: "m0").get()!
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
         XCTAssertNotNil(m1Chat.lastActivity)
     }
     
@@ -66,7 +66,7 @@ final class ChatActivityPluginTests: XCTestCase {
                 ChatActivityPlugin()
             ]),
             on: eventLoop
-        ).get()
+        )
         
         let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -78,21 +78,21 @@ final class ChatActivityPluginTests: XCTestCase {
                 ChatActivityPlugin()
             ]),
             on: eventLoop
-        ).get()
+        )
         
-        let m0Chat = try await m0.createGroupChat(with: ["m1"]).get()
+        let m0Chat = try await m0.createGroupChat(with: ["m1"])
         XCTAssertNil(m0Chat.lastActivity)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         XCTAssertNotNil(m0Chat.lastActivity)
         
         SpoofTransportClient.synchronize()
         
-        let m1Chat = try await m1.getGroupChat(byId: m0Chat.groupId).get()!
+        let m1Chat = try await m1.getGroupChat(byId: m0Chat.groupId)!
         XCTAssertNotNil(m1Chat.lastActivity)
     }
 }

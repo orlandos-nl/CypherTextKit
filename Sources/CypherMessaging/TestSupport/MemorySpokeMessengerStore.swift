@@ -5,6 +5,7 @@ public enum MemoryCypherMessengerStoreError: Error {
     case notFound
 }
 
+@available(macOS 12, iOS 15, *)
 public final class MemoryCypherMessengerStore: CypherMessengerStore {
     public let eventLoop: EventLoop
     private let salt = UUID().uuidString

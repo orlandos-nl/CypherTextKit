@@ -1,36 +1,29 @@
 import NIO
 
+@available(macOS 12, iOS 15, *)
 public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
-    public let eventLoop: EventLoop
+    public init() {}
     
-    public init(eventLoop: EventLoop) {
-        self.eventLoop = eventLoop
+    public func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws {}
+    
+    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {
+        try await messenger.addDevice(config)
     }
     
-    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.addDevice(config)
+    public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction {
+        message.message.messageType == .magic ? .ignore : .save
     }
     
-    public func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction> {
-        eventLoop.makeSucceededFuture(message.message.messageType == .magic ? .send : .saveAndSend)
+    public func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction {
+        message.message.messageType == .magic ? .send : .saveAndSend
     }
     
-    public func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction> {
-        eventLoop.makeSucceededFuture(message.message.messageType == .magic ? .ignore : .save)
+    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document {
+        [:]
     }
     
-    public func createPrivateChatMetadata(
-        withUser otherUser: Username,
-        messenger: CypherMessenger
-    ) -> EventLoopFuture<Document> {
-        eventLoop.makeSucceededFuture([:])
-    }
-    
-    public func createContactMetadata(
-        for username: Username,
-        messenger: CypherMessenger
-    ) -> EventLoopFuture<Document> {
-        eventLoop.makeSucceededFuture([:])
+    public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document {
+        [:]
     }
     
     public func onCreateConversation(_ conversation: AnyConversation) {}
@@ -46,8 +39,4 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
     
     public func onP2PClientClose(messenger: CypherMessenger) {}
-    
-    public func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        eventLoop.makeSucceededVoidFuture()
-    }
 }

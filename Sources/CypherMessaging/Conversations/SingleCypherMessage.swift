@@ -10,6 +10,7 @@ public enum CypherMessageType: String, Codable {
     case text, media, magic
 }
 
+@available(macOS 12, iOS 15, *)
 public enum TargetConversation {
     case currentUser
     case otherUser(Username)
@@ -17,28 +18,22 @@ public enum TargetConversation {
     
     public func resolve(
         in messenger: CypherMessenger
-    ) -> EventLoopFuture<TargetConversation.Resolved> {
+    ) async throws -> TargetConversation.Resolved {
         switch self {
         case .currentUser:
-            return messenger.getInternalConversation().map {
-                .internalChat($0)
-            }
+            return try await .internalChat(messenger.getInternalConversation())
         case .otherUser(let username):
-            return messenger.getPrivateChat(with: username).flatMapThrowing { chat in
-                if let chat = chat {
-                    return .privateChat(chat)
-                }
-                
-                throw CypherSDKError.unknownChat
+            if let chat = try await messenger.getPrivateChat(with: username) {
+                return .privateChat(chat)
             }
+            
+            throw CypherSDKError.unknownChat
         case .groupChat(let groupId):
-            return messenger.getGroupChat(byId: groupId).flatMapThrowing { chat in
-                if let chat = chat {
-                    return .groupChat(chat)
-                }
-                
-                throw CypherSDKError.unknownGroup
+            if let chat = try await messenger.getGroupChat(byId: groupId) {
+                return .groupChat(chat)
             }
+            
+            throw CypherSDKError.unknownGroup
         }
     }
     
@@ -125,6 +120,7 @@ public enum TargetConversation {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public struct ConversationTarget: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {
@@ -154,6 +150,7 @@ public struct ConversationTarget: Codable {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public struct SingleCypherMessage: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {

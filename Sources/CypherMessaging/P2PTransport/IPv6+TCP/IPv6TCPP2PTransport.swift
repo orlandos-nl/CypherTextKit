@@ -5,6 +5,7 @@ enum IPv6TCPP2PError: Error {
     case reconnectFailed, timeout, socketCreationFailed
 }
 
+@available(macOS 12, iOS 15, *)
 private final class BufferHandler: ChannelInboundHandler {
     typealias InboundIn = ByteBuffer
     private weak var client: IPv6TCPP2PTransportClient?
@@ -26,6 +27,7 @@ private final class BufferHandler: ChannelInboundHandler {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 final class IPv6TCPP2PTransportClient: P2PTransportClient {
     public weak var delegate: P2PTransportClientDelegate?
     public private(set) var connected = ConnectionState.connected
@@ -57,6 +59,7 @@ final class IPv6TCPP2PTransportClient: P2PTransportClient {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
     public let transportLayerIdentifier = "_ipv6-tcp"
     let eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()

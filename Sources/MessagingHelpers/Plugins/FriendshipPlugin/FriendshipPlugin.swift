@@ -44,6 +44,7 @@ fileprivate struct ChangeFriendshipState: Codable {
     let subject: Username
 }
 
+@available(macOS 12, iOS 15, *)
 public struct FriendshipPlugin: Plugin {
     public static let pluginIdentifier = "@/contacts/friendship"
     public let ruleset: FriendshipRuleset
@@ -52,26 +53,25 @@ public struct FriendshipPlugin: Plugin {
         self.ruleset = ruleset
     }
     
-    public func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction?> {
+    public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         let senderUsername = message.sender.username
         
         if case .groupChat = message.conversation.target {
             if ruleset.blockAffectsGroupChats, senderUsername != message.messenger.username {
-                return message.messenger.createContact(byUsername: senderUsername).flatMap { contact in
-                    if contact.contactBlocked {
-                        return message.messenger.eventLoop.makeSucceededFuture(.ignore)
-                    } else {
-                        return message.messenger.eventLoop.makeSucceededFuture(nil)
-                    }
+                let contact = try await message.messenger.createContact(byUsername: senderUsername)
+                if contact.contactBlocked {
+                    return .ignore
+                } else {
+                    return nil
                 }
             }
             
-            return message.messenger.eventLoop.makeSucceededFuture(nil)
+            return nil
         }
         
         if senderUsername == message.messenger.username {
             guard case .currentUser = message.conversation.target else {
-                return message.messenger.eventLoop.makeSucceededFuture(nil)
+                return nil
             }
             
             if
@@ -83,108 +83,84 @@ public struct FriendshipPlugin: Plugin {
                 
                 switch subType {
                 case "change-state":
-                    let changedState: ChangeFriendshipState
+                    let changedState = try BSONDecoder().decode(ChangeFriendshipState.self, from: message.message.metadata)
                     
-                    do {
-                        changedState = try BSONDecoder().decode(ChangeFriendshipState.self, from: message.message.metadata)
-                    } catch {
-                        return message.messenger.eventLoop.makeFailedFuture(error)
-                    }
-        
-                    return message.messenger.createContact(byUsername: changedState.subject).flatMap { contact in
-                        contact.modifyMetadata(
-                            ofType: FriendshipMetadata.self,
-                            forPlugin: Self.self
-                        ) { metadata in
-                            metadata.ourState = changedState.newState
-                            return .ignore
-                        }
+                    let contact = try await message.messenger.createContact(byUsername: changedState.subject)
+                    return try await contact.modifyMetadata(
+                        ofType: FriendshipMetadata.self,
+                        forPlugin: Self.self
+                    ) { metadata in
+                        metadata.ourState = changedState.newState
+                        return .ignore
                     }
                 default:
                     ()
                 }
                 
-                return message.messenger.eventLoop.makeSucceededFuture(.ignore)
+                return .ignore
             }
         }
         
-        return message.messenger.createContact(byUsername: senderUsername).flatMap { contact in
-            if
-                message.message.messageType == .magic,
-                var subType = message.message.messageSubtype,
-                subType.hasPrefix("@/contacts/friendship/")
-            {
-                subType.removeFirst("@/contacts/friendship/".count)
+        let contact = try await message.messenger.createContact(byUsername: senderUsername)
+        
+        if
+            message.message.messageType == .magic,
+            var subType = message.message.messageSubtype,
+            subType.hasPrefix("@/contacts/friendship/")
+        {
+            subType.removeFirst("@/contacts/friendship/".count)
+            
+            switch subType {
+            case "change-state":
+                let changedState = try BSONDecoder().decode(ChangeFriendshipState.self, from: message.message.metadata)
                 
-                switch subType {
-                case "change-state":
-                    let changedState: ChangeFriendshipState
-                    
-                    do {
-                        changedState = try BSONDecoder().decode(ChangeFriendshipState.self, from: message.message.metadata)
-                    } catch {
-                        return message.messenger.eventLoop.makeFailedFuture(error)
-                    }
-                    
-                    return contact.modifyMetadata(
-                        ofType: FriendshipMetadata.self,
-                        forPlugin: Self.self
-                    ) { metadata in
-                        metadata.theirState = changedState.newState
-                        return .ignore
-                    }
-                default:
-                    return message.messenger.eventLoop.makeSucceededFuture(.ignore)
+                return try await contact.modifyMetadata(
+                    ofType: FriendshipMetadata.self,
+                    forPlugin: Self.self
+                ) { metadata in
+                    metadata.theirState = changedState.newState
+                    return .ignore
                 }
+            default:
+                return .ignore
             }
-            
-            switch (contact.ourState, contact.theirState) {
-            case (.blocked, _), (_, .blocked):
-                return message.messenger.eventLoop.makeSucceededFuture(.ignore)
-            case (.undecided, _), (_, .undecided):
-                if message.message.messageType == .magic {
-                    return message.messenger.eventLoop.makeSucceededFuture(
-                        ruleset.canIgnoreMagicPackets ? .ignore : nil
-                    )
-                } else {
-                    return message.messenger.eventLoop.makeSucceededFuture(
-                        ruleset.ignoreWhenUndecided ? .ignore : nil
-                    )
-                }
-            case (.friend, .friend):
-                return message.messenger.eventLoop.makeSucceededFuture(nil)
-            case (.notFriend, _), (_, .notFriend):
-                return message.messenger.eventLoop.makeSucceededFuture(.ignore)
+        }
+        
+        switch (contact.ourState, contact.theirState) {
+        case (.blocked, _), (_, .blocked):
+            return .ignore
+        case (.undecided, _), (_, .undecided):
+            if message.message.messageType == .magic {
+                return ruleset.canIgnoreMagicPackets ? .ignore : nil
+            } else {
+                return ruleset.ignoreWhenUndecided ? .ignore : nil
             }
+        case (.friend, .friend):
+            return nil
+        case (.notFriend, _), (_, .notFriend):
+            return .ignore
         }
     }
     
-    public func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction?> {
-        return message.messenger.eventLoop.makeSucceededFuture(nil)
-    }
+    public func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction? { nil }
     
-    public func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        do {
-            let metadata = FriendshipMetadata(
-                ourState: .undecided,
-                theirState: .undecided
-            )
-            
-            let document = try BSONEncoder().encode(metadata)
-            return messenger.eventLoop.makeSucceededFuture(document)
-        } catch {
-            return messenger.eventLoop.makeFailedFuture(error)
-        }
+    public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document {
+        let metadata = FriendshipMetadata(
+            ourState: .undecided,
+            theirState: .undecided
+        )
+        
+        return try BSONEncoder().encode(metadata)
     }
     
     // Uninteresting events
     
-    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
+    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document{
         // We don't store any metadata in PrivateChat right now
         // Contact is used instead
-        messenger.eventLoop.makeSucceededFuture([:])
+        return [:]
     }
-    
+
     public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) { }
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
     public func onMessageChange(_ message: AnyChatMessage) { }
@@ -192,16 +168,11 @@ public struct FriendshipPlugin: Plugin {
     public func onCreateChatMessage(_ conversation: AnyChatMessage) { }
     public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) { }
     public func onP2PClientClose(messenger: CypherMessenger) { }
-    
-    public func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
-    }
-    
-    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
-    }
+    public func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws { }
+    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws { }
 }
 
+@available(macOS 12, iOS 15, *)
 extension Contact {
     public var ourState: FriendshipStatus {
         (try? self.withMetadata(
@@ -235,21 +206,21 @@ extension Contact {
         )) ?? false
     }
     
-    public func block() -> EventLoopFuture<Void> {
-        changeOurState(to: .blocked)
+    public func block() async throws {
+        try await changeOurState(to: .blocked)
     }
     
-    public func befriend() -> EventLoopFuture<Void> {
-        changeOurState(to: .friend)
+    public func befriend() async throws {
+        try await changeOurState(to: .friend)
     }
     
-    public func unfriend() -> EventLoopFuture<Void> {
-        changeOurState(to: .notFriend)
+    public func unfriend() async throws {
+        try await changeOurState(to: .notFriend)
     }
     
-    public func unblock() -> EventLoopFuture<Void> {
+    public func unblock() async throws {
         guard ourState == .blocked else {
-            return self.eventLoop.makeSucceededVoidFuture()
+            return
         }
         
         let oldState = (try? self.withMetadata(
@@ -258,11 +229,11 @@ extension Contact {
             run: \.ourPreBlockedState
         )) ?? .undecided
         
-        return changeOurState(to: oldState)
+        return try await changeOurState(to: oldState)
     }
     
-    fileprivate func changeOurState(to newState: FriendshipStatus) -> EventLoopFuture<Void> {
-        self.modifyMetadata(
+    fileprivate func changeOurState(to newState: FriendshipStatus) async throws {
+        try await self.modifyMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self
         ) { metadata in
@@ -275,33 +246,31 @@ extension Contact {
             }
             
             metadata.ourState = newState
-        }.flatMapThrowing { () -> Document in
-            try BSONEncoder().encode(
-                ChangeFriendshipState(
-                    newState: newState,
-                    subject: self.username
-                )
-            )
-        }.flatMap { message -> EventLoopFuture<Void> in
-            self.messenger.getInternalConversation().flatMap { internalChat -> EventLoopFuture<Void> in
-                internalChat.sendRawMessage(
-                    type: .magic,
-                    messageSubtype: "@/contacts/friendship/change-state",
-                    text: "",
-                    metadata: message,
-                    preferredPushType: .none
-                ).map { _ in }
-            }.flatMap {
-                self.messenger.createPrivateChat(with: self.username).flatMap { privateChat -> EventLoopFuture<Void> in
-                    privateChat.sendRawMessage(
-                        type: .magic,
-                        messageSubtype: "@/contacts/friendship/change-state",
-                        text: "",
-                        metadata: message,
-                        preferredPushType: .none
-                    ).map { _ in }
-                }
-            }
         }
+        
+        let message = try BSONEncoder().encode(
+            ChangeFriendshipState(
+                newState: newState,
+                subject: self.username
+            )
+        )
+        
+        let internalChat = try await self.messenger.getInternalConversation()
+        _ = try await internalChat.sendRawMessage(
+            type: .magic,
+            messageSubtype: "@/contacts/friendship/change-state",
+            text: "",
+            metadata: message,
+            preferredPushType: .none
+        )
+        
+        let privateChat = try await self.messenger.createPrivateChat(with: self.username)
+        _ = try await privateChat.sendRawMessage(
+            type: .magic,
+            messageSubtype: "@/contacts/friendship/change-state",
+            text: "",
+            metadata: message,
+            preferredPushType: .none
+        )
     }
 }

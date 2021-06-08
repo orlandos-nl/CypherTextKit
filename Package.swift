@@ -21,7 +21,8 @@ let package = Package(
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         .package(url: "https://github.com/apple/swift-crypto.git", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
+//        .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
+        .package(name: "swift-nio", path: "/Users/joannisorlandos/Project/swift-nio/"),
         .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.0.0"),
         .package(url: "https://github.com/OpenKitten/BSON.git", from: "7.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),

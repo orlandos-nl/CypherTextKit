@@ -42,6 +42,7 @@ public struct TransportCreationRequest {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 internal struct P2PSession {
     let username: Username
     let deviceId: DeviceId
@@ -64,6 +65,7 @@ internal struct P2PSession {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate {
     public let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
@@ -115,7 +117,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
-    ) -> EventLoopFuture<CypherMessenger> {
+    ) async throws -> CypherMessenger {
         let deviceId = DeviceId()
         let databaseEncryptionKey = SymmetricKey(size: .bits256)
         let databaseEncryptionKeyData = databaseEncryptionKey.withUnsafeBytes { buffer in
@@ -131,7 +133,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             deviceIdentityId: .random(in: 1 ..< .max)
         )
         
-        return database.readLocalDeviceSalt().map { salt -> SymmetricKey in
+        return try await database.readLocalDeviceSalt().map { salt -> SymmetricKey in
             Self.formAppEncryptionKey(
                 appPassword: appPassword,
                 salt: salt
@@ -207,7 +209,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                     }
                 }
             }
-        }
+        }.get()
     }
     
     public static func registerMessenger<
@@ -221,8 +223,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
-    ) -> EventLoopFuture<CypherMessenger> {
-        Self.registerMessenger(
+    ) async throws -> CypherMessenger {
+        try await Self.registerMessenger(
             username: username,
             appPassword: appPassword,
             usingTransport: { request in
@@ -253,8 +255,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
-    ) -> EventLoopFuture<CypherMessenger> {
-        resumeMessenger(
+    ) async throws -> CypherMessenger {
+        try await resumeMessenger(
             appPassword: appPassword,
             usingTransport: { request in
                 Transport.login(
@@ -282,8 +284,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         database: CypherMessengerStore,
         eventHandler: CypherMessengerEventHandler,
         on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
-    ) -> EventLoopFuture<CypherMessenger> {
-        return database.readLocalDeviceSalt().flatMap { salt -> EventLoopFuture<_CypherMessengerConfig> in
+    ) async throws -> CypherMessenger {
+        return try await database.readLocalDeviceSalt().flatMap { salt -> EventLoopFuture<_CypherMessengerConfig> in
             let encryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
             
             return database.readLocalDeviceConfig().flatMapThrowing { data -> _CypherMessengerConfig in
@@ -314,7 +316,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             } catch {
                 return eventLoop.makeFailedFuture(error)
             }
-        }
+        }.get()
     }
     
     fileprivate static func formAppEncryptionKey(appPassword: String, salt: String) -> SymmetricKey {
@@ -329,8 +331,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return SymmetricKey(data: SHA256.hash(data: key.data(using: .utf8)!))
     }
     
-    public func verifyAppPassword(matches appPassword: String) -> EventLoopFuture<Bool> {
-        return self.cachedStore.readLocalDeviceSalt().flatMap { salt -> EventLoopFuture<Bool> in
+    public func verifyAppPassword(matches appPassword: String) async throws -> Bool {
+        return try await self.cachedStore.readLocalDeviceSalt().flatMap { salt -> EventLoopFuture<Bool> in
             let encryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
             
             return self.cachedStore.readLocalDeviceConfig().map { data -> Bool in
@@ -343,7 +345,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                     return false
                 }
             }
-        }
+        }.get()
     }
     
     public func changeAppPassword(to appPassword: String) -> EventLoopFuture<Void> {
@@ -416,7 +418,9 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                 return eventLoop.makeFailedFuture(CypherSDKError.notMasterDevice)
             }
             
-            return eventHandler.onDeviceRegisteryRequest(deviceConfig, messenger: self)
+            return eventLoop.executeAsync {
+                try await self.eventHandler.onDeviceRegisteryRequest(deviceConfig, messenger: self)
+            }
         }
     }
     
@@ -424,43 +428,31 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         cachedStore.emptyCaches()
     }
     
-    public func addDevice(_ deviceConfig: UserDeviceConfig) -> EventLoopFuture<Void> {
-        return transport.readKeyBundle(forUsername: self.username).flatMap { config in
-            guard config.identity.data == self.config.deviceKeys.identity.publicKey.data else {
-                return self.eventLoop.makeFailedFuture(CypherSDKError.corruptUserConfig)
-            }
-            
-            do {
-                var config = config
-                try config.addDeviceConfig(deviceConfig, signedWith: self.config.deviceKeys.identity)
-                return self.transport.publishKeyBundle(config).flatMap { () -> EventLoopFuture<Void> in
-                    self.getInternalConversation().flatMap { internalConversation in
-                        do {
-                            let metadata = try BSONEncoder().encode(deviceConfig)
-                            return self._createDeviceIdentity(
-                                from: deviceConfig,
-                                forUsername: self.username
-                            ).flatMap { _ -> EventLoopFuture<Void> in
-                                return internalConversation.sendInternalMessage(
-                                    SingleCypherMessage(
-                                        messageType: .magic,
-                                        messageSubtype: "_/devices/announce",
-                                        text: deviceConfig.deviceId.raw,
-                                        metadata: metadata,
-                                        order: 0,
-                                        target: .currentUser
-                                    )
-                                )
-                            }
-                        } catch {
-                            return self.eventLoop.makeFailedFuture(error)
-                        }
-                    }
-                }
-            } catch {
-                return self.eventLoop.makeFailedFuture(error)
-            }
+    public func addDevice(_ deviceConfig: UserDeviceConfig) async throws {
+        var config = try await transport.readKeyBundle(forUsername: self.username).get()
+        guard config.identity.data == self.config.deviceKeys.identity.publicKey.data else {
+            throw CypherSDKError.corruptUserConfig
         }
+        
+        try config.addDeviceConfig(deviceConfig, signedWith: self.config.deviceKeys.identity)
+        try await self.transport.publishKeyBundle(config).get()
+        let internalConversation = try await self.getInternalConversation()
+        let metadata = try BSONEncoder().encode(deviceConfig)
+        _ = try await self._createDeviceIdentity(
+            from: deviceConfig,
+            forUsername: self.username
+        ).get()
+        
+        return try await internalConversation.sendInternalMessage(
+            SingleCypherMessage(
+                messageType: .magic,
+                messageSubtype: "_/devices/announce",
+                text: deviceConfig.deviceId.raw,
+                metadata: metadata,
+                order: 0,
+                target: .currentUser
+            )
+        )
     }
     
     func _createMultiRecipientMessage(
@@ -557,30 +549,22 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
     }
     
-    public func readCustomConfig() -> EventLoopFuture<Document> {
-        return eventLoop.makeSucceededFuture(config.custom)
+    public func readCustomConfig() async throws -> Document {
+        return config.custom
     }
     
-    public func writeCustomConfig(_ custom: Document) -> EventLoopFuture<Void> {
-        return verifyAppPassword(matches: appPassword).flatMap { matches -> EventLoopFuture<String> in
-            guard matches else {
-                return self.eventLoop.makeFailedFuture(CypherSDKError.incorrectAppPassword)
-            }
-            
-            return self.cachedStore.readLocalDeviceSalt()
-        }.flatMap { salt in
-            do {
-                let appEncryptionKey = Self.formAppEncryptionKey(appPassword: self.appPassword, salt: salt)
-                var newConfig = self.config
-                newConfig.custom = custom
-                let encryptedConfig = try Encrypted(newConfig, encryptionKey: appEncryptionKey)
-                return self.cachedStore.writeLocalDeviceConfig(try BSONEncoder().encode(encryptedConfig).makeData()).map {
-                    self.config = newConfig
-                }
-            } catch {
-                return self.eventLoop.makeFailedFuture(error)
-            }
+    public func writeCustomConfig(_ custom: Document) async throws {
+        guard try await verifyAppPassword(matches: appPassword) else {
+            throw CypherSDKError.incorrectAppPassword
         }
+            
+        let salt = try await self.cachedStore.readLocalDeviceSalt().get()
+        let appEncryptionKey = Self.formAppEncryptionKey(appPassword: self.appPassword, salt: salt)
+        var newConfig = self.config
+        newConfig.custom = custom
+        let encryptedConfig = try Encrypted(newConfig, encryptionKey: appEncryptionKey)
+        try await self.cachedStore.writeLocalDeviceConfig(try BSONEncoder().encode(encryptedConfig).makeData()).get()
+        self.config = newConfig
     }
     
     private func _writeWithRatchetEngine<T>(
@@ -638,11 +622,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             func rekey() -> EventLoopFuture<Void> {
                 device.doubleRatchet = nil
                 
-                return self.eventHandler.onRekey(
-                    withUser: username,
-                    deviceId: deviceId,
-                    messenger: self
-                ).flatMap {
+                return self.eventLoop.executeAsync {
+                    try await self.eventHandler.onRekey(
+                        withUser: username,
+                        deviceId: deviceId,
+                        messenger: self
+                    )
+                }.flatMap {
                     self.cachedStore.updateDeviceIdentity(device.encrypted)
                 }.flatMap {
                     self._queueTask(

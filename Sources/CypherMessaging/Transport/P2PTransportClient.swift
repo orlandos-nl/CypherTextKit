@@ -17,6 +17,7 @@ public struct P2PFrameworkState {
 /// The client implementation defined below does not need to verify the identity of the other party.
 ///
 /// CypherTextKit may opt to use a direct connection as a _replacement_ for via-server communication, as to improve security, bandwidth AND latency.
+@available(macOS 12, iOS 15, *)
 public protocol P2PTransportClient: AnyObject {
     /// The delegate receives incoming data from the the remote peer. MUST be `weak` to prevent memory leaks.
     ///
@@ -45,6 +46,7 @@ public enum P2PTransportClosureOption {
     case reconnnectPossible
 }
 
+@available(macOS 12, iOS 15, *)
 public protocol P2PTransportClientDelegate: AnyObject {
     func p2pConnection(_ connection: P2PTransportClient, receivedMessage buffer: ByteBuffer) -> EventLoopFuture<Void>
     func p2pConnection(_ connection: P2PTransportClient, closedWithOptions: Set<P2PTransportClosureOption>) -> EventLoopFuture<Void>
@@ -54,6 +56,7 @@ public struct P2PTransportCreationRequest {
     public let state: P2PFrameworkState
 }
 
+@available(macOS 12, iOS 15, *)
 public typealias PeerToPeerConnectionBuilder = (P2PTransportCreationRequest) -> P2PTransportClient
 
 /// P2PTransportClientFactory is a _stateful_ factory that can instantiate new connections
@@ -63,6 +66,7 @@ public typealias PeerToPeerConnectionBuilder = (P2PTransportCreationRequest) -> 
 /// Example: Apple devices can use Multipeer Connectivity, possibly without making use of server-side communication.
 ///
 /// Example: WebRTC based implementations are likely to make use of the handle to send and receive SDPs. The factory can then make use of internal state for storing incomplete connections.
+@available(macOS 12, iOS 15, *)
 public protocol P2PTransportClientFactory {
     var transportLayerIdentifier: String { get }
     
@@ -84,6 +88,7 @@ public protocol P2PTransportClientFactory {
 }
 
 /// An interface through which can be communicated with the remote device
+@available(macOS 12, iOS 15, *)
 public struct P2PTransportFactoryHandle {
     internal let transportLayerIdentifier: String
     internal let messenger: CypherMessenger

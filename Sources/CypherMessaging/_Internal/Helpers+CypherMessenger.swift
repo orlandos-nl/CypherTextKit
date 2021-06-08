@@ -8,6 +8,7 @@ enum UserIdentityState {
     case consistent, newIdentity, changedIdentity
 }
 
+@available(macOS 12, iOS 15, *)
 internal extension CypherMessenger {
     func _markMessage(byRemoteId remoteId: String, updatedBy user: Username, as newState: ChatMessageModel.DeliveryState) -> EventLoopFuture<MarkMessageResult> {
         return cachedStore.fetchChatMessage(byRemoteId: remoteId).flatMapThrowing { message in
@@ -101,10 +102,12 @@ internal extension CypherMessenger {
                 }
             }
             
-            return self.eventHandler.createContactMetadata(
-                for: username,
-                messenger: self
-            ).flatMapThrowing { metadata in
+            return self.eventLoop.executeAsync {
+                try await self.eventHandler.createContactMetadata(
+                    for: username,
+                    messenger: self
+                )
+            }.flatMapThrowing { metadata in
                 try ContactModel(
                     props: ContactModel.SecureProps(
                         username: username,
@@ -260,11 +263,13 @@ internal extension CypherMessenger {
                     return self.eventLoop.makeSucceededVoidFuture()
                 }
                 
-                return self._processMessage(
-                    message: message,
-                    remoteMessageId: messageId,
-                    sender: deviceIdentity
-                )
+                return self.eventLoop.executeAsync {
+                    try await self._processMessage(
+                        message: message,
+                        remoteMessageId: messageId,
+                        sender: deviceIdentity
+                    )
+                }
             }
 
             switch message.box {
@@ -280,7 +285,7 @@ internal extension CypherMessenger {
         message: SingleCypherMessage,
         remoteMessageId: String,
         sender: DecryptedModel<DeviceIdentityModel>
-    ) -> EventLoopFuture<Void> {
+    ) async throws {
         switch message.target {
         case .currentUser:
             guard
@@ -288,201 +293,187 @@ internal extension CypherMessenger {
                     sender.props.deviceId != self.deviceId
                 // TODO: Check if `sender` is a master device
             else {
-                return self.eventLoop.makeFailedFuture(CypherSDKError.badInput)
+                throw CypherSDKError.badInput
             }
             
             switch (message.messageType, message.messageSubtype ?? "") {
             case (.magic, "_/devices/announce"):
-                do {
-                    let deviceConfig = try BSONDecoder().decode(
-                        UserDeviceConfig.self,
-                        from: message.metadata
-                    )
-                    
-                    if deviceConfig.deviceId == self.deviceId {
-                        // We're not going to add ourselves as a conversation partner
-                        return eventLoop.makeSucceededVoidFuture()
-                    }
-                    
-                    return self._createDeviceIdentity(
-                        from: deviceConfig,
-                        forUsername: self.username
-                    ).map { _ in }
-                } catch {
-                    debugLog(error)
-                    return eventLoop.makeFailedFuture(error)
+                let deviceConfig = try BSONDecoder().decode(
+                    UserDeviceConfig.self,
+                    from: message.metadata
+                )
+                
+                if deviceConfig.deviceId == self.deviceId {
+                    // We're not going to add ourselves as a conversation partner
+                    return
                 }
+                
+                _ = try await self._createDeviceIdentity(
+                    from: deviceConfig,
+                    forUsername: self.username
+                ).get()
+                return
             case (.magic, let subType) where subType.hasPrefix("_/p2p/0/"):
                 if
                     let sentDate = message.sentDate,
                     abs(sentDate.timeIntervalSince(Date())) >= 15
                 {
                     // Other client is likely not waiting for P2P anymore
-                    return eventLoop.makeSucceededVoidFuture()
+                    return
                 }
                 
-                return _processP2PMessage(
+                return try await _processP2PMessage(
                     message,
                     remoteMessageId: remoteMessageId,
                     sender: sender
-                )
+                ).get()
             default:
                 guard message.messageSubtype?.hasPrefix("_/") != true else {
                     debugLog("Unknown message subtype in cypher messenger namespace")
-                    return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+                    throw CypherSDKError.badInput
                 }
                 
-                return self.getInternalConversation().map { conversation in
-                    ReceivedMessageContext(
-                        sender: DeviceReference(
-                            username: sender.props.username,
-                            deviceId: sender.props.deviceId
+                let conversation = try await self.getInternalConversation()
+                let context = ReceivedMessageContext(
+                    sender: DeviceReference(
+                        username: sender.props.username,
+                        deviceId: sender.props.deviceId
+                    ),
+                    messenger: self,
+                    message: message,
+                    conversation: .internalChat(conversation)
+                )
+                
+                switch try await self.eventHandler.onReceiveMessage(context).raw {
+                case .ignore:
+                    return
+                case .save:
+                    let conversation = try await self.getInternalConversation()
+                    return try await conversation._saveMessage(
+                        senderId: sender.props.senderId,
+                        order: message.order,
+                        props: .init(
+                            receiving: message,
+                            sentAt: message.sentDate ?? Date(),
+                            senderUser: sender.props.username,
+                            senderDeviceId: sender.props.deviceId
                         ),
-                        messenger: self,
-                        message: message,
-                        conversation: .internalChat(conversation)
-                    )
-                }.flatMap { context in
-                    self.eventHandler.onReceiveMessage(context).flatMap { action in
-                        switch action.raw {
-                        case .ignore:
-                            return self.eventLoop.makeSucceededVoidFuture()
-                        case .save:
-                            return self.getInternalConversation().flatMap { conversation in
-                                conversation._saveMessage(
-                                    senderId: sender.props.senderId,
-                                    order: message.order,
-                                    props: .init(
-                                        receiving: message,
-                                        sentAt: message.sentDate ?? Date(),
-                                        senderUser: sender.props.username,
-                                        senderDeviceId: sender.props.deviceId
-                                    ),
-                                    remoteId: remoteMessageId
+                        remoteId: remoteMessageId
+                    ).flatMap { chatMessage in
+                        return self.jobQueue.queueTask(
+                            CypherTask.sendMessageDeliveryStateChangeTask(
+                                SendMessageDeliveryStateChangeTask(
+                                    localId: chatMessage.id,
+                                    messageId: chatMessage.encrypted.remoteId,
+                                    recipient: chatMessage.props.senderUser,
+                                    deviceId: nil, // All devices should receive this change
+                                    newState: .received
                                 )
-                            }.flatMap { chatMessage in
-                                return self.jobQueue.queueTask(
-                                    CypherTask.sendMessageDeliveryStateChangeTask(
-                                        SendMessageDeliveryStateChangeTask(
-                                            localId: chatMessage.id,
-                                            messageId: chatMessage.encrypted.remoteId,
-                                            recipient: chatMessage.props.senderUser,
-                                            deviceId: nil, // All devices should receive this change
-                                            newState: .received
-                                        )
-                                    )
-                                )
-                            }
-                        }
-                    }
+                            )
+                        )
+                    }.get()
                 }
             }
         case .groupChat(let groupId):
             guard message.messageSubtype?.hasPrefix("_/") != true else {
                 debugLog("Unknown message subtype in cypher messenger namespace")
-                return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+                throw CypherSDKError.badInput
             }
             
-            return self._openGroupChat(byId: groupId).flatMap { group in
-                let context = ReceivedMessageContext(
-                    sender: DeviceReference(
-                        username: sender.props.username,
-                        deviceId: sender.props.deviceId
-                    ),
-                    messenger: self,
-                    message: message,
-                    conversation: .groupChat(group)
-                )
+            let group = try await self._openGroupChat(byId: groupId).get()
+            let context = ReceivedMessageContext(
+                sender: DeviceReference(
+                    username: sender.props.username,
+                    deviceId: sender.props.deviceId
+                ),
+                messenger: self,
+                message: message,
+                conversation: .groupChat(group)
+            )
                 
-                return self.eventHandler.onReceiveMessage(context).flatMap { action in
-                    switch action.raw {
-                    case .ignore:
-                        return self.eventLoop.makeSucceededVoidFuture()
-                    case .save:
-                        return group._saveMessage(
-                            senderId: sender.props.senderId,
-                            order: message.order,
-                            props: .init(
-                                receiving: message,
-                                sentAt: message.sentDate ?? Date(),
-                                senderUser: sender.props.username,
-                                senderDeviceId: sender.props.deviceId
-                            ),
-                            remoteId: remoteMessageId
-                        ).flatMap { chatMessage in
-                            self.jobQueue.queueTask(
-                                CypherTask.sendMessageDeliveryStateChangeTask(
-                                    SendMessageDeliveryStateChangeTask(
-                                        localId: chatMessage.id,
-                                        messageId: chatMessage.encrypted.remoteId,
-                                        recipient: chatMessage.props.senderUser,
-                                        deviceId: nil, // All devices should receive this change
-                                        newState: .received
-                                    )
-                                )
+            switch try await self.eventHandler.onReceiveMessage(context).raw {
+            case .ignore:
+                return
+            case .save:
+                return try await group._saveMessage(
+                    senderId: sender.props.senderId,
+                    order: message.order,
+                    props: .init(
+                        receiving: message,
+                        sentAt: message.sentDate ?? Date(),
+                        senderUser: sender.props.username,
+                        senderDeviceId: sender.props.deviceId
+                    ),
+                    remoteId: remoteMessageId
+                ).flatMap { chatMessage in
+                    self.jobQueue.queueTask(
+                        CypherTask.sendMessageDeliveryStateChangeTask(
+                            SendMessageDeliveryStateChangeTask(
+                                localId: chatMessage.id,
+                                messageId: chatMessage.encrypted.remoteId,
+                                recipient: chatMessage.props.senderUser,
+                                deviceId: nil, // All devices should receive this change
+                                newState: .received
                             )
-                        }
-                    }
-                }
+                        )
+                    )
+                }.get()
             }
         case .otherUser(let recipient):
             switch (message.messageType, message.messageSubtype ?? "") {
             case (.magic, let subType) where subType.hasPrefix("_/p2p/0/"):
-                return _processP2PMessage(
+                return try await _processP2PMessage(
                     message,
                     remoteMessageId: remoteMessageId,
                     sender: sender
-                )
+                ).get()
             case (.magic, let subType), (.media, let subType), (.text, let subType):
                 if subType.hasPrefix("_/") {
                     debugLog("Unknown message subtype in cypher messenger namespace")
-                    return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+                    throw CypherSDKError.badInput
                 }
             }
             
             let chatName = sender.props.username == self.username ? recipient : sender.props.username
             
-            return self.createPrivateChat(with: chatName).flatMap { privateChat in
-                let context = ReceivedMessageContext(
-                    sender: DeviceReference(
-                        username: sender.props.username,
-                        deviceId: sender.props.deviceId
+            let privateChat = try await self.createPrivateChat(with: chatName)
+            let context = ReceivedMessageContext(
+                sender: DeviceReference(
+                    username: sender.props.username,
+                    deviceId: sender.props.deviceId
+                ),
+                messenger: self,
+                message: message,
+                conversation: .privateChat(privateChat)
+            )
+            
+            switch try await self.eventHandler.onReceiveMessage(context).raw {
+            case .ignore:
+                return
+            case .save:
+                return try await privateChat._saveMessage(
+                    senderId: sender.props.senderId,
+                    order: message.order,
+                    props: .init(
+                        receiving: message,
+                        sentAt: message.sentDate ?? Date(),
+                        senderUser: sender.props.username,
+                        senderDeviceId: sender.props.deviceId
                     ),
-                    messenger: self,
-                    message: message,
-                    conversation: .privateChat(privateChat)
-                )
-                
-                return self.eventHandler.onReceiveMessage(context).flatMap { action in
-                    switch action.raw {
-                    case .ignore:
-                        return self.eventLoop.makeSucceededVoidFuture()
-                    case .save:
-                        return privateChat._saveMessage(
-                            senderId: sender.props.senderId,
-                            order: message.order,
-                            props: .init(
-                                receiving: message,
-                                sentAt: message.sentDate ?? Date(),
-                                senderUser: sender.props.username,
-                                senderDeviceId: sender.props.deviceId
-                            ),
-                            remoteId: remoteMessageId
-                        ).flatMap { chatMessage in
-                            self.jobQueue.queueTask(
-                                CypherTask.sendMessageDeliveryStateChangeTask(
-                                    SendMessageDeliveryStateChangeTask(
-                                        localId: chatMessage.id,
-                                        messageId: chatMessage.encrypted.remoteId,
-                                        recipient: chatMessage.props.senderUser,
-                                        deviceId: nil, // All devices should receive this change
-                                        newState: .received
-                                    )
-                                )
+                    remoteId: remoteMessageId
+                ).flatMap { chatMessage in
+                    self.jobQueue.queueTask(
+                        CypherTask.sendMessageDeliveryStateChangeTask(
+                            SendMessageDeliveryStateChangeTask(
+                                localId: chatMessage.id,
+                                messageId: chatMessage.encrypted.remoteId,
+                                recipient: chatMessage.props.senderUser,
+                                deviceId: nil, // All devices should receive this change
+                                newState: .received
                             )
-                        }
-                    }
-                }
+                        )
+                    )
+                }.get()
             }
         }
     }

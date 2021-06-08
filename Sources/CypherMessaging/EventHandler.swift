@@ -6,6 +6,7 @@ public struct DeviceReference {
     public let deviceId: DeviceId
 }
 
+@available(macOS 12, iOS 15, *)
 public struct ReceivedMessageContext {
     public let sender: DeviceReference
     public let messenger: CypherMessenger
@@ -13,6 +14,7 @@ public struct ReceivedMessageContext {
     public let conversation: TargetConversation.Resolved
 }
 
+@available(macOS 12, iOS 15, *)
 public struct SentMessageContext {
     public let recipients: Set<Username>
     public let messenger: CypherMessenger
@@ -42,14 +44,15 @@ public struct ProcessMessageAction {
     public static let save = ProcessMessageAction(raw: .save)
 }
 
+@available(macOS 12, iOS 15, *)
 public protocol CypherMessengerEventHandler {
-    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void>
-    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void>
-    func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction>
-    func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction>
+    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws
+    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws
+    func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction
+    func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction
+    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document
+    func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document
     func onMessageChange(_ message: AnyChatMessage)
-    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) -> EventLoopFuture<Document>
-    func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document>
     func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger)
     func onCreateConversation(_ conversation: AnyConversation)
     func onCreateChatMessage(_ conversation: AnyChatMessage)

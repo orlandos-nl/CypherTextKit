@@ -5,6 +5,7 @@ public enum SortMode {
     case ascending, descending
 }
 
+@available(macOS 12, iOS 15, *)
 public protocol CypherMessengerStore {
     func fetchContacts() -> EventLoopFuture<[ContactModel]>
     func createContact(_ contact: ContactModel) -> EventLoopFuture<Void>

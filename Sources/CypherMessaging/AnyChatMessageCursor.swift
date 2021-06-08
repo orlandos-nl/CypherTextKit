@@ -5,6 +5,7 @@ import NIO
 
 let iterationSize = 50
 
+@available(macOS 12, iOS 15, *)
 fileprivate final class DeviceChatCursor {
     internal private(set) var messages = [AnyChatMessage]()
     let target: TargetConversation
@@ -88,6 +89,7 @@ fileprivate final class DeviceChatCursor {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public final class AnyChatMessageCursor {
     let messenger: CypherMessenger
     private let devices: [DeviceChatCursor]
@@ -162,23 +164,22 @@ public final class AnyChatMessageCursor {
         }
     }
     
-    public func getMore(_ max: Int) -> EventLoopFuture<[AnyChatMessage]> {
+    public func getMore(_ max: Int) async throws -> [AnyChatMessage] {
         let resultSet = ResultSet()
         if max <= 500 {
             resultSet.messages.reserveCapacity(max)
         }
-        return _getMore(max, joinedWith: resultSet).map {
-            resultSet.messages
-        }
+        try await _getMore(max, joinedWith: resultSet).get()
+        return resultSet.messages
     }
     
     public static func readingConversation<Conversation: AnyConversation>(
         _ conversation: Conversation,
         sortMode: SortMode = .descending
-    ) -> EventLoopFuture<AnyChatMessageCursor> {
+    ) async throws -> AnyChatMessageCursor {
         assert(sortMode == .descending, "Unsupported ascending")
         
-        return conversation.memberDevices().map { devices in
+        return try await conversation.memberDevices().map { devices in
             var devices = devices.map { device in
                 DeviceChatCursor(
                     target: conversation.target,
@@ -204,6 +205,6 @@ public final class AnyChatMessageCursor {
                 devices: devices,
                 sortMode: sortMode
             )
-        }
+        }.get()
     }
 }

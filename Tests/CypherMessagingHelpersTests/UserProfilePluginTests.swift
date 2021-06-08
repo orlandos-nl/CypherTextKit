@@ -2,33 +2,54 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
-@available(macOS 12, *)
+func XCTAssertThrowsAsyncError<T>(_ run: @autoclosure () async throws -> T) async {
+    do {
+        _ = try await run()
+        XCTFail("Expected test to throw error")
+    } catch {}
+}
+
+func XCTAssertAsyncNil<T>(_ run: @autoclosure () async throws -> T?) async {
+    do {
+        let value = try await run()
+        XCTAssertNil(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncNotNil<T>(_ run: @autoclosure () async throws -> T?) async {
+    do {
+        let value = try await run()
+        XCTAssertNotNil(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncEqual<T: Equatable>(_ run: @autoclosure () async throws -> T, _ otherValue: T) async {
+    do {
+        let value = try await run()
+        XCTAssertEqual(value, otherValue)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+@available(macOS 12, iOS 15, *)
 struct AcceptAllDeviceRegisteriesPlugin: Plugin {
     static let pluginIdentifier = "accept-all-device-registeries"
     
-    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
+    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws { }
+    
+    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {
+        try await messenger.addDevice(config)
     }
     
-    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.addDevice(config)
-    }
-    
-    func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction?> {
-        message.messenger.eventLoop.makeSucceededFuture(nil)
-    }
-    
-    func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction?> {
-        message.messenger.eventLoop.makeSucceededFuture(nil)
-    }
-    
-    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
-    
-    func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
+    func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? { nil }
+    func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction? { nil }
+    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
+    func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
     
     func onMessageChange(_ message: AnyChatMessage) {}
     func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {}
@@ -39,7 +60,7 @@ struct AcceptAllDeviceRegisteriesPlugin: Plugin {
     func onP2PClientClose(messenger: CypherMessenger) {}
 }
 
-@available(macOS 12, *)
+@available(macOS 12, iOS 15, *)
 final class UserProfilePluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
@@ -60,7 +81,7 @@ final class UserProfilePluginTests: XCTestCase {
                 AcceptAllDeviceRegisteriesPlugin()
             ]),
             on: eventLoop
-        ).get()
+        )
         
         let m0_2 = try await CypherMessenger.registerMessenger(
             username: "m0",
@@ -72,7 +93,7 @@ final class UserProfilePluginTests: XCTestCase {
                 UserProfilePlugin(),
             ]),
             on: eventLoop
-        ).get()
+        )
         
         let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -84,37 +105,37 @@ final class UserProfilePluginTests: XCTestCase {
                 UserProfilePlugin()
             ]),
             on: eventLoop
-        ).get()
+        )
         
-        let m0Chat = try await m0.createPrivateChat(with: "m1").get()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         SpoofTransportClient.synchronize()
         
-        let m1Chat = try await m1.getPrivateChat(with: "m0").get()!
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
         
         SpoofTransportClient.synchronize()
         
-        try  XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
         
-        let contact = try await m1.getContact(byUsername: "m0").get()
+        let contact = try await m1.getContact(byUsername: "m0")
         
-        XCTAssertEqual(contact?.status, nil)
-        XCTAssertEqual(try m0.readProfileMetadata().wait().status, nil)
-        XCTAssertEqual(try m0_2.readProfileMetadata().wait().status, nil)
+        await XCTAssertAsyncEqual(contact?.status, nil)
+        await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, nil)
+        await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, nil)
         
-        try await m0.changeProfileStatus(to: "Available").get()
+        try await m0.changeProfileStatus(to: "Available")
         
         SpoofTransportClient.synchronize()
         
-        XCTAssertEqual(contact?.status, "Available")
-        XCTAssertEqual(try m0.readProfileMetadata().wait().status, "Available")
-        XCTAssertEqual(try m0_2.readProfileMetadata().wait().status, "Available")
+        await XCTAssertAsyncEqual(contact?.status, "Available")
+        await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, "Available")
+        await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, "Available")
     }
 }

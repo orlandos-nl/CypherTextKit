@@ -1,5 +1,6 @@
 import CypherMessaging
 
+@available(macOS 12, iOS 15, *)
 public struct PluginEventHandler: CypherMessengerEventHandler {
     private var plugins: [Plugin]
     
@@ -8,70 +9,56 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
     }
     
     public func onRekey(
-        withUser: Username,
+        withUser username: Username,
         deviceId: DeviceId,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
+    ) async throws {
+        for plugin in plugins {
+            try await plugin.onRekey(withUser: username, deviceId: deviceId, messenger: messenger)
+        }
     }
     
     public func onDeviceRegisteryRequest(
         _ config: UserDeviceConfig,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Void> {
-        let done = plugins.map { plugin in
-            plugin.onDeviceRegisteryRequest(config, messenger: messenger)
+    ) async throws {
+        for plugin in plugins {
+            try await plugin.onDeviceRegisteryRequest(config, messenger: messenger)
         }
-        
-        return EventLoopFuture.andAllSucceed(done, on: messenger.eventLoop)
     }
     
     public func onReceiveMessage(
         _ message: ReceivedMessageContext
-    ) -> EventLoopFuture<ProcessMessageAction> {
-        var plugins = self.plugins.makeIterator()
-        
-        func next() -> EventLoopFuture<ProcessMessageAction> {
-            guard let plugin = plugins.next() else {
-                return message.messenger.eventLoop.makeSucceededFuture(
-                    message.message.messageType == .magic ? .ignore : .save
-                )
-            }
-            
-            return plugin.onReceiveMessage(message).flatMap { result in
-                if let result = result {
-                    return message.messenger.eventLoop.makeSucceededFuture(result)
-                }
-                
-                return next()
+    ) async throws -> ProcessMessageAction {
+        for plugin in plugins {
+            if let result = try await plugin.onReceiveMessage(message) {
+                return result
             }
         }
         
-        return next()
+        switch message.message.messageType {
+        case .magic:
+            return .ignore
+        case .text, .media:
+            return .save
+        }
     }
     
     public func onSendMessage(
         _ message: SentMessageContext
-    ) -> EventLoopFuture<SendMessageAction> {
-        var plugins = self.plugins.makeIterator()
-        
-        func next() -> EventLoopFuture<SendMessageAction> {
-            guard let plugin = plugins.next() else {
-                return message.messenger.eventLoop.makeSucceededFuture(
-                    message.message.messageType == .magic ? .send : .saveAndSend
-                )
-            }
-            
-            return plugin.onSendMessage(message).flatMap { result in
-                if let result = result {
-                    return message.messenger.eventLoop.makeSucceededFuture(result)
-                }
-                
-                return next()
+    ) async throws -> SendMessageAction {
+        for plugin in plugins {
+            if let result = try await plugin.onSendMessage(message) {
+                return result
             }
         }
         
-        return next()
+        switch message.message.messageType {
+        case .magic:
+            return .send
+        case .text, .media:
+            return .saveAndSend
+        }
     }
     
     public func onMessageChange(_ message: AnyChatMessage) {
@@ -83,14 +70,15 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
     public func createPrivateChatMetadata(
         withUser otherUser: Username,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Document> {
+    ) async throws -> Document {
         let metadata = plugins.map { plugin -> EventLoopFuture<(String, Document)> in
-            plugin.createPrivateChatMetadata(withUser: otherUser, messenger: messenger).map { document in
+            messenger.eventLoop.executeAsync {
+                let document = try await plugin.createPrivateChatMetadata(withUser: otherUser, messenger: messenger)
                 return (plugin.pluginIdentifier, document)
             }
         }
         
-        return EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
+        return try await EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
             var document = Document()
             
             for (key, value) in results {
@@ -98,20 +86,21 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
             }
             
             return document
-        }
+        }.get()
     }
     
     public func createContactMetadata(
         for otherUser: Username,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Document> {
+    ) async throws -> Document {
         let metadata = plugins.map { plugin -> EventLoopFuture<(String, Document)> in
-            plugin.createContactMetadata(for: otherUser, messenger: messenger).map { document in
+            messenger.eventLoop.executeAsync {
+                let document = try await plugin.createContactMetadata(for: otherUser, messenger: messenger)
                 return (plugin.pluginIdentifier, document)
             }
         }
         
-        return EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
+        return try await EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
             var document = Document()
             
             for (key, value) in results {
@@ -119,7 +108,7 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
             }
             
             return document
-        }
+        }.get()
     }
     
     public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {

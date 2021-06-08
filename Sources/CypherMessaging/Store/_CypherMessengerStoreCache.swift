@@ -6,6 +6,7 @@ struct Weak<O: AnyObject> {
     weak var object: O?
 }
 
+@available(macOS 12, iOS 15, *)
 internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
     let eventLoop: EventLoop

@@ -1,6 +1,7 @@
 import NIO
 import BSON
 
+@available(macOS 12, iOS 15, *)
 public final class P2PClient {
     private weak var messenger: CypherMessenger?
     private let client: P2PTransportClient
@@ -72,9 +73,9 @@ public final class P2PClient {
     public func updateStatus(
         flags: P2PStatusMessage.StatusFlags,
         metadata: Document = [:]
-    ) -> EventLoopFuture<Void> {
+    ) async throws {
         guard let messenger = messenger else {
-            return eventLoop.makeSucceededVoidFuture()
+            return
         }
         
         self.lastActivity = Date()
@@ -87,7 +88,7 @@ public final class P2PClient {
             )
         )
         
-        return messenger._writeWithRatchetEngine(
+        return try await messenger._writeWithRatchetEngine(
             ofUser: client.state.username,
             deviceId: client.state.deviceId
         ) { ratchetEngine, rekey -> EventLoopFuture<Void> in
@@ -101,7 +102,7 @@ public final class P2PClient {
             } catch {
                 return self.eventLoop.makeFailedFuture(error)
             }
-        }
+        }.get()
     }
     
     public func disconnect() -> EventLoopFuture<Void> {

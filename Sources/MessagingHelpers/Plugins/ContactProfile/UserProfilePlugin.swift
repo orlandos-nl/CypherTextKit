@@ -9,6 +9,7 @@ public struct ContactMetadata: Codable {
 // TODO: Use synchronisation framework for own devices
 // TODO: Select contacts to share the profile changes with
 // TODO: Broadcast to a user that doesn't have a private chat
+@available(macOS 12, iOS 15, *)
 public struct UserProfilePlugin: Plugin {
     enum RekeyAction {
         case none, resetProfile
@@ -22,24 +23,20 @@ public struct UserProfilePlugin: Plugin {
         withUser username: Username,
         deviceId: DeviceId,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Void> {
-        messenger.createContact(byUsername: username).flatMap { contact in
-            contact.metadata[self.pluginIdentifier] = Document()
-            return contact.save()
-        }
+    ) async throws {
+        let contact = try await messenger.createContact(byUsername: username)
+        contact.metadata[self.pluginIdentifier] = Document()
+        try await contact.save()
     }
     
-    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
-    }
     
-    public func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction?> {
+    public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         guard
             message.message.messageType == .magic,
             var subType = message.message.messageSubtype,
             subType.hasPrefix("@/contacts/profile/")
         else {
-            return message.messenger.eventLoop.makeSucceededFuture(nil)
+            return nil
         }
         
         subType.removeFirst("@/contacts/profile/".count)
@@ -49,7 +46,7 @@ public struct UserProfilePlugin: Plugin {
         switch subType {
         case "status/update":
             if sender == messenger.username {
-                return messenger.modifyCustomConfig(
+                return try await messenger.modifyCustomConfig(
                     ofType: ContactMetadata.self,
                     forPlugin: Self.self
                 ) { metadata in
@@ -58,24 +55,23 @@ public struct UserProfilePlugin: Plugin {
                 }
             }
             
-            return messenger.createContact(byUsername: sender).flatMap { contact in
-                contact.modifyMetadata(
-                    ofType: ContactMetadata.self,
-                    forPlugin: Self.self
-                ) { metadata in
-                    metadata.status = message.message.text
-                    return .ignore
-                }
+            let contact = try await messenger.createContact(byUsername: sender)
+            return try await contact.modifyMetadata(
+                ofType: ContactMetadata.self,
+                forPlugin: Self.self
+            ) { metadata in
+                metadata.status = message.message.text
+                return .ignore
             }
         case "picture/update":
             guard let imageBlob = message.message.metadata["blob"] as? Binary else {
-                return messenger.eventLoop.makeSucceededFuture(.ignore)
+                return .ignore
             }
             
             let image = imageBlob.data
             
             if sender == messenger.username {
-                return messenger.modifyCustomConfig(
+                return try await messenger.modifyCustomConfig(
                     ofType: ContactMetadata.self,
                     forPlugin: Self.self
                 ) { metadata in
@@ -84,42 +80,36 @@ public struct UserProfilePlugin: Plugin {
                 }
             }
             
-            return messenger.createContact(byUsername: sender).flatMap { contact in
-                contact.modifyMetadata(
-                    ofType: ContactMetadata.self,
-                    forPlugin: Self.self
-                ) { metadata in
-                    metadata.image = image
-                    return .ignore
-                }
+            let contact = try await messenger.createContact(byUsername: sender)
+            return try await contact.modifyMetadata(
+                ofType: ContactMetadata.self,
+                forPlugin: Self.self
+            ) { metadata in
+                metadata.image = image
+                return .ignore
             }
         default:
-            return messenger.eventLoop.makeSucceededFuture(.ignore)
+            return .ignore
         }
     }
     
     public func onSendMessage(
         _ message: SentMessageContext
-    ) -> EventLoopFuture<SendMessageAction?> {
+    ) async throws -> SendMessageAction? {
         guard
             message.message.messageType == .magic,
             let subType = message.message.messageSubtype,
             subType.hasPrefix("@/contacts/profile/")
         else {
-            return message.messenger.eventLoop.makeSucceededFuture(nil)
+            return nil
         }
         
-        return message.messenger.eventLoop.makeSucceededFuture(.send)
+        return .send
     }
     
-    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
-    
-    public func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
-    
+    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
+    public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
+    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {}
     public func onMessageChange(_ message: AnyChatMessage) { }
     public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) { }
     public func onCreateConversation(_ conversation: AnyConversation) { }
@@ -129,6 +119,7 @@ public struct UserProfilePlugin: Plugin {
     public func onP2PClientClose(messenger: CypherMessenger) { }
 }
 
+@available(macOS 12, iOS 15, *)
 extension Contact {
     public var status: String? {
         try? self.withMetadata(
@@ -140,93 +131,74 @@ extension Contact {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 extension CypherMessenger {
     public func changeProfileStatus(
         to status: String
-    ) -> EventLoopFuture<Void> {
-        listContacts().flatMap { contacts in
-            var done = contacts.map { contact in
-                // TODO: Don't create private chat, but still emit change
-                return self.createPrivateChat(with: contact.username).flatMap { chat in
-                    chat.sendRawMessage(
-                        type: .magic,
-                        messageSubtype: "@/contacts/profile/status/update",
-                        text: status,
-                        preferredPushType: .none
-                    )
-                }
-            }
-            
-            // TODO: Use synchronisation framework
-            done.append(
-                self.getInternalConversation().flatMap { chat in
-                    chat.sendRawMessage(
-                        type: .magic,
-                        messageSubtype: "@/contacts/profile/status/update",
-                        text: status,
-                        preferredPushType: .none
-                    )
-                }
+    ) async throws {
+        for contact in try await listContacts() {
+            let chat = try await createPrivateChat(with: contact.username)
+            _ = try await chat.sendRawMessage(
+                type: .magic,
+                messageSubtype: "@/contacts/profile/status/update",
+                text: status,
+                preferredPushType: .none
             )
-            
-            return EventLoopFuture.andAllSucceed(done, on: self.eventLoop)
-        }.flatMap {
-            self.modifyCustomConfig(
-                ofType: ContactMetadata.self,
-                forPlugin: UserProfilePlugin.self
-            ) { metadata in
-                metadata.status = status
-            }
+        }
+        
+        let chat = try await getInternalConversation()
+        _ = try await chat.sendRawMessage(
+            type: .magic,
+            messageSubtype: "@/contacts/profile/status/update",
+            text: status,
+            preferredPushType: .none
+        )
+        
+        try await self.modifyCustomConfig(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self
+        ) { metadata in
+            metadata.status = status
         }
     }
     
     public func changeProfilePicture(
         to data: Data
-    ) -> EventLoopFuture<Void> {
-        listContacts().flatMap { contacts in
-            var done = contacts.map { contact in
-                // TODO: Don't create private chat, but still emit change
-                return self.createPrivateChat(with: contact.username).flatMap { chat in
-                    chat.sendRawMessage(
-                        type: .magic,
-                        messageSubtype: "@/contacts/profile/status/update",
-                        text: "",
-                        metadata: [
-                            "blob": data
-                        ],
-                        preferredPushType: .none
-                    )
-                }
-            }
-            
-            // TODO: Use synchronisation framework
-            done.append(
-                self.getInternalConversation().flatMap { chat in
-                    chat.sendRawMessage(
-                        type: .magic,
-                        messageSubtype: "@/contacts/profile/status/update",
-                        text: "",
-                        metadata: [
-                            "blob": data
-                        ],
-                        preferredPushType: .none
-                    )
-                }
+    ) async throws {
+        for contact in try await listContacts() {
+            let chat = try await createPrivateChat(with: contact.username)
+            _ = try await chat.sendRawMessage(
+                type: .magic,
+                messageSubtype: "@/contacts/profile/picture/update",
+                text: "",
+                metadata: [
+                    "blob": data
+                ],
+                preferredPushType: .none
             )
-            
-            return EventLoopFuture.andAllSucceed(done, on: self.eventLoop)
-        }.flatMap {
-            self.modifyCustomConfig(
-                ofType: ContactMetadata.self,
-                forPlugin: UserProfilePlugin.self
-            ) { metadata in
-                metadata.image = data
-            }
+        }
+        
+        let chat = try await getInternalConversation()
+        _ = try await chat.sendRawMessage(
+            type: .magic,
+            messageSubtype: "@/contacts/profile/picture/update",
+            text: "",
+            metadata: [
+                "blob": data
+            ],
+            preferredPushType: .none
+        )
+        
+        try await self.modifyCustomConfig(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self
+        ) { metadata in
+            metadata.image = data
         }
     }
     
-    public func readProfileMetadata() -> EventLoopFuture<ContactMetadata> {
-        withCustomConfig(
+    public func readProfileMetadata() async throws -> ContactMetadata {
+        try await withCustomConfig(
             ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self
         ) { $0 }

@@ -6,7 +6,41 @@ import CypherMessaging
 import SystemConfiguration
 import CypherProtocol
 
-@available(macOS 12, *)
+func XCTAssertThrowsAsyncError<T>(_ run: @autoclosure () async throws -> T) async {
+    do {
+        _ = try await run()
+        XCTFail("Expected test to throw error")
+    } catch {}
+}
+
+func XCTAssertAsyncNil<T>(_ run: @autoclosure () async throws -> T?) async {
+    do {
+        let value = try await run()
+        XCTAssertNil(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncNotNil<T>(_ run: @autoclosure () async throws -> T?) async {
+    do {
+        let value = try await run()
+        XCTAssertNotNil(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncEqual<T: Equatable>(_ run: @autoclosure () async throws -> T, _ otherValue: T) async {
+    do {
+        let value = try await run()
+        XCTAssertEqual(value, otherValue)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+@available(macOS 12, iOS 15, *)
 final class CypherSDKTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
@@ -22,11 +56,11 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
-        XCTAssertThrowsError(try m0.createPrivateChat(with: "m0").wait())
+        await XCTAssertThrowsAsyncError(try await m0.createPrivateChat(with: "m0"))
     }
     
     func testP2P() async throws {
@@ -42,9 +76,9 @@ final class CypherSDKTests: XCTestCase {
                 IPv6TCPP2PTransportClientFactory()
             ],
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -55,61 +89,61 @@ final class CypherSDKTests: XCTestCase {
                 IPv6TCPP2PTransportClientFactory()
             ],
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
-        let m0Chat = try await m0.createPrivateChat(with: "m1").get()
-        
-        _ = try await m0Chat.sendRawMessage(
-            type: .text,
-            text: "Hello",
-            preferredPushType: .none
-        ).get()
-        
-        SpoofTransportClient.synchronize()
-        
-        let m1Chat = try await m1.getPrivateChat(with: "m0").get()!
-        
-        SpoofTransportClient.synchronize()
-        
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
+        
+        SpoofTransportClient.synchronize()
+        
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
+        
+        SpoofTransportClient.synchronize()
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
         
         _ = try await m1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         SpoofTransportClient.synchronize()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 3)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 3)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 3)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 3)
         
-        try await m0Chat.buildP2PConnections().get()
+        try await m0Chat.buildP2PConnections()
         
         SpoofTransportClient.synchronize()
         
-        try XCTAssertEqual(m0Chat.listOpenP2PConnections().wait().count, 1)
-        try XCTAssertEqual(m1Chat.listOpenP2PConnections().wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0Chat.listOpenP2PConnections().count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.listOpenP2PConnections().count, 1)
         
-        let p2pConnection = try await m1Chat.listOpenP2PConnections().get()[0]
-        XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), nil)
+        let p2pConnection = try await m1Chat.listOpenP2PConnections()[0]
+        await XCTAssertAsyncEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), nil)
         
-        for connection in try await m0Chat.listOpenP2PConnections().get() {
-            try await connection.updateStatus(flags: .isTyping).get()
+        for connection in try await m0Chat.listOpenP2PConnections() {
+            try await connection.updateStatus(flags: .isTyping)
         }
         
         SpoofTransportClient.synchronize()
         
-        XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
+        await XCTAssertAsyncEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
     }
     
     func testGroupChat() async throws {
@@ -122,9 +156,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m0_2 = try await CypherMessenger.registerMessenger(
             username: "m0",
@@ -132,9 +166,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -142,9 +176,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m1_2 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -152,9 +186,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m2 = try await CypherMessenger.registerMessenger(
             username: "m2",
@@ -162,9 +196,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m3 = try await CypherMessenger.registerMessenger(
             username: "m3",
@@ -172,60 +206,60 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
-        let m0Chat = try await m0.createGroupChat(with: ["m1", "m2"]).get()
+        let m0Chat = try await m0.createGroupChat(with: ["m1", "m2"])
         let groupId = GroupChatId(m0Chat.groupConfig.id)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         SpoofTransportClient.synchronize()
         
-        let m0_2Chat = try await m0_2.getGroupChat(byId: groupId).get()!
-        let m1Chat = try await m1.getGroupChat(byId: groupId).get()!
-        let m1_2Chat = try await m1_2.getGroupChat(byId: groupId).get()!
-        let m2Chat = try await m2.getGroupChat(byId: groupId).get()!
-        XCTAssertNil(try m3.getGroupChat(byId: groupId).wait())
+        let m0_2Chat = try await m0_2.getGroupChat(byId: groupId)!
+        let m1Chat = try await m1.getGroupChat(byId: groupId)!
+        let m1_2Chat = try await m1_2.getGroupChat(byId: groupId)!
+        let m2Chat = try await m2.getGroupChat(byId: groupId)!
+        await XCTAssertAsyncNil(try await m3.getGroupChat(byId: groupId))
         
         SpoofTransportClient.synchronize()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m0_2Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1_2Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m2Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m0_2Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1_2Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m2Chat.allMessages(sortedBy: .descending).count, 1)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         _ = try await m1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         _ = try await m2Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         SpoofTransportClient.synchronize()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 4)
-        try XCTAssertEqual(m0_2Chat.allMessages(sortedBy: .descending).wait().count, 4)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 4)
-        try XCTAssertEqual(m1_2Chat.allMessages(sortedBy: .descending).wait().count, 4)
-        try XCTAssertEqual(m2Chat.allMessages(sortedBy: .descending).wait().count, 4)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 4)
+        await XCTAssertAsyncEqual(try await m0_2Chat.allMessages(sortedBy: .descending).count, 4)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 4)
+        await XCTAssertAsyncEqual(try await m1_2Chat.allMessages(sortedBy: .descending).count, 4)
+        await XCTAssertAsyncEqual(try await m2Chat.allMessages(sortedBy: .descending).count, 4)
     }
     
     func testPrivateChat() async throws {
@@ -238,9 +272,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -248,43 +282,43 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
-        let m0Chat = try await m0.createPrivateChat(with: "m1").get()
-        
-        _ = try await m0Chat.sendRawMessage(
-            type: .text,
-            text: "Hello",
-            preferredPushType: .none
-        ).get()
-        
-        SpoofTransportClient.synchronize()
-        
-        let m1Chat = try await m1.getPrivateChat(with: "m0").get()!
-        
-        SpoofTransportClient.synchronize()
-        
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
+        
+        SpoofTransportClient.synchronize()
+        
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
+        
+        SpoofTransportClient.synchronize()
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
         
         _ = try await m1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         SpoofTransportClient.synchronize()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 3)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 3)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 3)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 3)
     }
     
     func testMultiDevicePrivateChat() async throws {
@@ -297,9 +331,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m0d1 = try await CypherMessenger.registerMessenger(
             username: "m0",
@@ -307,9 +341,9 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         let m1d0 = try await CypherMessenger.registerMessenger(
             username: "m1",
@@ -317,47 +351,47 @@ final class CypherSDKTests: XCTestCase {
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
             database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(eventLoop: eventLoop),
+            eventHandler: SpoofCypherEventHandler(),
             on: eventLoop
-        ).get()
+        )
         
         print("Clients setup - Starting interactions")
         
-        let m0d1Chat = try await m0d1.createPrivateChat(with: "m1").get()
+        let m0d1Chat = try await m0d1.createPrivateChat(with: "m1")
         
         _ = try await m0d1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         SpoofTransportClient.synchronize()
         
-        let m0d0Chat = try await m0d0.getPrivateChat(with: "m1").get()!
-        let m1d0Chat = try await m1d0.getPrivateChat(with: "m0").get()!
+        let m0d0Chat = try await m0d0.getPrivateChat(with: "m1")!
+        let m1d0Chat = try await m1d0.getPrivateChat(with: "m0")!
         
         SpoofTransportClient.synchronize()
         
-        try XCTAssertEqual(m0d0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m0d1Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1d0Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0d0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m0d1Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1d0Chat.allMessages(sortedBy: .descending).count, 1)
         
         _ = try await m1d0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         _ = try await m0d0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).get()
+        )
         
         SpoofTransportClient.synchronize()
         
-        try XCTAssertEqual(m0d0Chat.allMessages(sortedBy: .descending).wait().count, 3)
-        try XCTAssertEqual(m0d1Chat.allMessages(sortedBy: .descending).wait().count, 3)
-        try XCTAssertEqual(m1d0Chat.allMessages(sortedBy: .descending).wait().count, 3)
+        await XCTAssertAsyncEqual(try await m0d0Chat.allMessages(sortedBy: .descending).count, 3)
+        await XCTAssertAsyncEqual(try await m0d1Chat.allMessages(sortedBy: .descending).count, 3)
+        await XCTAssertAsyncEqual(try await m1d0Chat.allMessages(sortedBy: .descending).count, 3)
     }
 }
