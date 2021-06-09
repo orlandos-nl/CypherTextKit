@@ -6,13 +6,8 @@ import NIO
 @available(macOS 12, iOS 15, *)
 public struct Contact {
     public let messenger: CypherMessenger
-    let model: DecryptedModel<ContactModel>
+    public let model: DecryptedModel<ContactModel>
     public var eventLoop: EventLoop { messenger.eventLoop }
-    public var username: Username { model.username }
-    public var metadata: Document {
-        get { model.metadata }
-        nonmutating set { model.metadata = newValue }
-    }
     
     public func save() async throws {
         try await messenger.cachedStore.updateContact(model.encrypted)
@@ -31,7 +26,13 @@ extension CypherMessenger {
     }
     
     public func getContact(byUsername username: Username) async throws -> Contact? {
-        try await listContacts().first { $0.username == username }
+        for contact in try await listContacts() {
+            if await contact.model.username == username {
+                return contact
+            }
+        }
+        
+        return nil
     }
     
     public func createContact(byUsername username: Username)  async throws -> Contact {

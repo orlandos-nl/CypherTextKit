@@ -21,11 +21,12 @@ final class JobQueue: ObservableObject {
         self.messenger = messenger
         self.database = database
         self.databaseEncryptionKey = databaseEncryptionKey
-        self.jobs = try await database.readJobs().map { job in
-            job.decrypted(using: databaseEncryptionKey)
+        self.jobs = try await database.readJobs().asyncMap { job -> (Date, DecryptedModel<JobModel>) in
+            let job = job.decrypted(using: databaseEncryptionKey)
+            return await (job.scheduledAt, job)
         }.sorted { lhs, rhs in
-            lhs.scheduledAt < rhs.scheduledAt
-        }
+            lhs.0 < rhs.0
+        }.map(\.1)
     }
     
     static func registerTask<T: Task>(_ task: T.Type, forKey key: TaskKey) {
@@ -41,7 +42,12 @@ final class JobQueue: ObservableObject {
     
     func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
         try await database.removeJob(job.encrypted)
-        self.jobs.removeAll { $0.id == job.id }
+        for i in 0..<self.jobs.count {
+            if await self.jobs[i].id == job.id {
+                self.jobs.remove(at: i)
+                return
+            }
+        }
     }
     
     public func queueTask<T: Task>(_ task: T) async throws {
@@ -74,96 +80,96 @@ final class JobQueue: ObservableObject {
         debugLog("Job queue started")
         runningJobs = true
 
-        @discardableResult
-        func next(in jobs: [DecryptedModel<JobModel>]) -> EventLoopFuture<Void> {
+        func next(in jobs: [DecryptedModel<JobModel>]) async throws {
             debugLog("Looking for next task")
             if jobs.isEmpty {
                 debugLog("No more tasks")
                 self.runningJobs = false
                 self.hasOutstandingTasks = false
-                return self.eventLoop.makeSucceededVoidFuture()
+                return
             }
 
             var jobs = jobs
 
-            return runNextJob(in: &jobs).recover { _ in
-                return .failed
-            }.flatMap { result in
-                if let pausing = self.pausing {
-                    debugLog("Job finished, pausing started. Stopping further processing")
-                    self.runningJobs = false
-                    pausing.succeed(())
-                    return self.eventLoop.makeSucceededVoidFuture()
-                } else {
-                    switch result {
-                    case .success, .delayed:
-                        return next(in: jobs)
-                    case .failed:
-                        let done = jobs.map { job -> EventLoopFuture<Void> in
-                            let task: Task
-                            
-                            do {
-                                let taskKey = TaskKey(rawValue: job.props.taskKey)
-                                if let decoder = Self.taskDecoders[taskKey] {
-                                    task = try decoder(job.props.task)
-                                } else {
-                                    task = try BSONDecoder().decode(CypherTask.self, from: job.task)
-                                }
-                            } catch {
-                                return self.eventLoop.makeFailedFuture(error)
+            let result = (try? await runNextJob(in: &jobs)) ?? .failed
+            
+            if let pausing = self.pausing {
+                debugLog("Job finished, pausing started. Stopping further processing")
+                self.runningJobs = false
+                pausing.succeed(())
+                return
+            } else {
+                switch result {
+                case .success, .delayed:
+                    return try await next(in: jobs)
+                case .failed:
+                    let done = await jobs.asyncMap { job -> EventLoopFuture<Void> in
+                        let task: Task
+                        
+                        do {
+                            let taskKey = await TaskKey(rawValue: job.taskKey)
+                            if let decoder = Self.taskDecoders[taskKey] {
+                                task = try await decoder(job.task)
+                            } else {
+                                task = try await BSONDecoder().decode(CypherTask.self, from: job.task)
                             }
-                            
-                            return self.messenger.eventLoop.executeAsync {
-                                try await task.onDelayed(on: self.messenger)
-                            }
+                        } catch {
+                            return self.eventLoop.makeFailedFuture(error)
                         }
-
-                        debugLog("Task failed or none found, stopping processing")
-                        self.runningJobs = false
-                        return EventLoopFuture.andAllComplete(done, on: self.eventLoop)
+                        
+                        return self.messenger.eventLoop.executeAsync {
+                            try await task.onDelayed(on: self.messenger)
+                        }
                     }
+
+                    debugLog("Task failed or none found, stopping processing")
+                    self.runningJobs = false
+                    return try await EventLoopFuture.andAllComplete(done, on: self.eventLoop).get()
                 }
             }
         }
 
-        // Lock in the current queue
-        let jobs = self.jobs
-        if self.jobs.isEmpty {
-            debugLog("No jobs to run")
-            self.hasOutstandingTasks = false
-            self.runningJobs = false
-        } else {
-            var hasUsefulTasks = false
-            
-            findUsefulTasks: for job in jobs {
-                if let delayedUntil = job.delayedUntil, delayedUntil >= Date() {
-                    if !job.props.isBackgroundTask {
-                        break findUsefulTasks
-                    }
-                    
-                    continue findUsefulTasks
-                }
-                
-                hasUsefulTasks = true
-                break findUsefulTasks
-            }
-            
-            guard hasUsefulTasks else {
-                debugLog("All jobs are delayed")
+        _ = eventLoop.executeAsync {
+            // Lock in the current queue
+            let jobs = self.jobs
+            if self.jobs.isEmpty {
+                debugLog("No jobs to run")
                 self.hasOutstandingTasks = false
                 self.runningJobs = false
-                return
-            }
-            
-            next(in: jobs).map {
-                // If offline, don't restart this. That can cause infinite loops
-                if self.messenger?.transport.authenticated == .authenticated {
-                    self.startRunningTasks()
+            } else {
+                var hasUsefulTasks = false
+                
+                findUsefulTasks: for job in jobs {
+                    if let delayedUntil = await job.delayedUntil, delayedUntil >= Date() {
+                        if await !job.props.isBackgroundTask {
+                            break findUsefulTasks
+                        }
+                        
+                        continue findUsefulTasks
+                    }
+                    
+                    hasUsefulTasks = true
+                    break findUsefulTasks
                 }
-            }.whenFailure { error in
-                debugLog("Job queue error", error)
-                self.runningJobs = false
-                self.pausing?.succeed(())
+                
+                guard hasUsefulTasks else {
+                    debugLog("All jobs are delayed")
+                    self.hasOutstandingTasks = false
+                    self.runningJobs = false
+                    return
+                }
+                
+                do {
+                    try await next(in: jobs)
+                    // If offline, don't restart this. That can cause infinite loops
+                    if self.messenger?.transport.authenticated == .authenticated {
+                        self.startRunningTasks()
+                    }
+                } catch {
+                    debugLog("Job queue error", error)
+                    self.runningJobs = false
+                    self.pausing?.succeed(())
+                }
             }
         }
     }
@@ -191,14 +197,14 @@ final class JobQueue: ObservableObject {
         case success, delayed, failed
     }
 
-    private func runNextJob(in jobs: inout [DecryptedModel<JobModel>]) -> EventLoopFuture<TaskResult> {
+    private func runNextJob(in jobs: inout [DecryptedModel<JobModel>]) async throws -> TaskResult {
         var index = 0
         let initialJob = jobs[0]
 
-        if initialJob.props.isBackgroundTask, jobs.count > 1 {
+        if await initialJob.props.isBackgroundTask, jobs.count > 1 {
             findBetterTask: for newIndex in 1..<jobs.count {
                 let newJob = jobs[newIndex]
-                if !newJob.props.isBackgroundTask {
+                if await !newJob.props.isBackgroundTask {
                     index = newIndex
                     break findBetterTask
                 }
@@ -207,69 +213,54 @@ final class JobQueue: ObservableObject {
 
         let job = jobs.remove(at: index)
 
-        debugLog("Running job", job.props)
+        debugLog("Running job", await job.props)
 
-        if let delayedUntil = job.delayedUntil, delayedUntil >= Date() {
+        if let delayedUntil = await job.delayedUntil, delayedUntil >= Date() {
             debugLog("Task was delayed into the future")
-            return self.eventLoop.makeSucceededFuture(.delayed)
+            return .delayed
         }
         
         let task: Task
         
-        do {
-            let taskKey = TaskKey(rawValue: job.props.taskKey)
-            if let decoder = Self.taskDecoders[taskKey] {
-                task = try decoder(job.props.task)
-            } else {
-                task = try BSONDecoder().decode(CypherTask.self, from: job.task)
-            }
-        } catch {
-            return self.eventLoop.makeFailedFuture(error)
+        let taskKey = await TaskKey(rawValue: job.props.taskKey)
+        if let decoder = Self.taskDecoders[taskKey] {
+            task = try await decoder(job.props.task)
+        } else {
+            task = try await BSONDecoder().decode(CypherTask.self, from: job.task)
         }
         
         guard let messenger = self.messenger else {
-            return self.eventLoop.makeFailedFuture(CypherSDKError.appLocked)
+            throw CypherSDKError.appLocked
         }
         
         if task.requiresConnectivity, messenger.transport.authenticated != .authenticated {
-            return self.eventLoop.makeFailedFuture(CypherSDKError.offline)
+            throw CypherSDKError.offline
         }
 
-        return eventLoop.executeAsync {
+        do {
             try await task.execute(on: messenger)
-        }.flatMap {
-            self.eventLoop.executeAsync {
-                try await self.dequeueJob(job)
-            }.map {
-                TaskResult.success
-            }
-        }.flatMapError { error -> EventLoopFuture<JobQueue.TaskResult> in
+            try await self.dequeueJob(job)
+            return .success
+        } catch {
             debugLog("Job error", error)
 
             switch task.retryMode.raw {
             case .retryAfter(let retryDelay, let maxAttempts):
                 debugLog("Delaying task for an hour")
-                job.delayedUntil = Date().addingTimeInterval(retryDelay)
-                job.attempts += 1
+                await job.didRetry(retryDelay: retryDelay)
                 
-                if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {
-                    return self.eventLoop.executeAsync {
-                        try await self.cancelJob(job)
-                        return .success
-                    }
+                if let maxAttempts = maxAttempts, await job.attempts >= maxAttempts {
+                    try await self.cancelJob(job)
+                    return .success
                 }
 
-                return self.eventLoop.executeAsync {
-                    try await self.database.updateJob(job.encrypted)
-                    return .delayed
-                }
+                try await self.database.updateJob(job.encrypted)
+                return .delayed
             case .always:
-                return self.eventLoop.makeSucceededFuture(.delayed)
+                return .delayed
             case .never:
-                return self.eventLoop.executeAsync {
-                    try await self.dequeueJob(job)
-                    return .failed
-                }
+                try await self.dequeueJob(job)
+                return .failed
             }
         }
     }

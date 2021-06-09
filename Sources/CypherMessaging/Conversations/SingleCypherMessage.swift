@@ -42,24 +42,26 @@ public enum TargetConversation {
         case groupChat(GroupChat)
         case internalChat(InternalConversation)
         
-        init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
-            guard conversation.members.contains(messenger.username) else {
+        init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) async {
+            let members = await conversation.members
+            guard members.contains(messenger.username) else {
                 return nil
             }
             
-            switch conversation.members.count {
+            let metadata = await conversation.metadata
+            switch members.count {
             case ..<0:
                 return nil
             case 1:
                 self = .internalChat(InternalConversation(conversation: conversation, messenger: messenger))
-            case 2 where conversation.metadata["_type"] as? String != "group":
+            case 2 where metadata["_type"] as? String != "group":
                 self = .privateChat(PrivateChat(conversation: conversation, messenger: messenger))
             default:
-                if conversation.metadata["_type"] as? String == "group" {
+                if metadata["_type"] as? String == "group" {
                     do {
                         let groupMetadata = try BSONDecoder().decode(
                             GroupMetadata.self,
-                            from: conversation.metadata
+                            from: metadata
                         )
                         
                         self = .groupChat(GroupChat(conversation: conversation, messenger: messenger, metadata: groupMetadata))
@@ -94,15 +96,19 @@ public enum TargetConversation {
             }
         }
         
-        public var target: TargetConversation {
+        public func getTarget() async -> TargetConversation {
             switch self {
             case .privateChat(let chat):
-                return chat.target
+                return await chat.getTarget()
             case .groupChat(let chat):
-                return chat.target
+                return await chat.getTarget()
             case .internalChat(let chat):
-                return chat.target
+                return await chat.getTarget()
             }
+        }
+        
+        public func resolveTarget() async -> TargetConversation.Resolved {
+            self
         }
         
         public var cache: Cache {
@@ -115,8 +121,6 @@ public enum TargetConversation {
                 return chat.cache
             }
         }
-        
-        public var resolvedTarget: TargetConversation.Resolved { self }
     }
 }
 

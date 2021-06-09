@@ -14,12 +14,12 @@ internal extension CypherMessenger {
         let message = try await cachedStore.fetchChatMessage(byRemoteId: remoteId)
         let decryptedMessage = message.decrypted(using: self.databaseEncryptionKey)
         
-        guard decryptedMessage.props.senderUser == self.username else {
+        guard await decryptedMessage.props.senderUser == self.username else {
             throw CypherSDKError.badInput
         }
         
-        let result = decryptedMessage.deliveryState.transition(to: newState)
-        self._updateChatMessage(decryptedMessage)
+        let result = await decryptedMessage.transitionDeliveryState(to: newState)
+        await self._updateChatMessage(decryptedMessage)
         return result
     }
     
@@ -31,14 +31,14 @@ internal extension CypherMessenger {
         let message = try await cachedStore.fetchChatMessage(byId: id)
         let decryptedMessage = self.decrypt(message)
         
-        let result = decryptedMessage.deliveryState.transition(to: newState)
+        let result = await decryptedMessage.transitionDeliveryState(to: newState)
         
-        self._updateChatMessage(decryptedMessage)
+        await self._updateChatMessage(decryptedMessage)
         return result
     }
     
-    func _updateChatMessage(_ message: DecryptedModel<ChatMessageModel>) {
-        self.eventHandler.onMessageChange(
+    func _updateChatMessage(_ message: DecryptedModel<ChatMessageModel>) async {
+        await self.eventHandler.onMessageChange(
             AnyChatMessage(
                 target: message.props.message.target,
                 messenger: self,
@@ -64,7 +64,7 @@ internal extension CypherMessenger {
         
         try await cachedStore.createConversation(conversation)
         let decrypted = self.decrypt(conversation)
-        guard let resolved = TargetConversation.Resolved(conversation: decrypted, messenger: self) else {
+        guard let resolved = await TargetConversation.Resolved(conversation: decrypted, messenger: self) else {
             throw CypherSDKError.internalError
         }
         
@@ -81,14 +81,14 @@ internal extension CypherMessenger {
         for contact in contacts {
             let contact = self.decrypt(contact)
             
-            guard contact.props.username == username else {
+            guard await contact.props.username == username else {
                 continue
             }
             
-            if contact.config.identity.data == config.identity.data {
+            if await contact.config.identity.data == config.identity.data {
                 return .consistent
             } else {
-                contact.config = config
+                await contact.updateConfig(to: config)
                 try await self.cachedStore.updateContact(contact.encrypted)
                 return .changedIdentity
             }
@@ -118,8 +118,8 @@ internal extension CypherMessenger {
             let deviceIdentity = self.decrypt(deviceIdentity)
             
             if
-                deviceIdentity.props.username == username,
-                deviceIdentity.props.deviceId == device.deviceId
+                await deviceIdentity.props.username == username,
+                await deviceIdentity.props.deviceId == device.deviceId
             {
                 return deviceIdentity
             }
@@ -166,10 +166,10 @@ internal extension CypherMessenger {
             var models = [DecryptedModel<DeviceIdentityModel>]()
             
             for device in try userConfig.readAndValidateDevices() {
-                if let knownDevice = knownDevices.first(where: { $0.props.deviceId == device.deviceId }) {
+                if let knownDevice = await knownDevices.asyncFirst(where: { await $0.props.deviceId == device.deviceId }) {
                     // Known device, check that everything is consistent
                     // To prevent tampering
-                    guard knownDevice.props.publicKey == device.publicKey else {
+                    guard await knownDevice.props.publicKey == device.publicKey else {
                         throw CypherSDKError.invalidUserConfig
                     }
                     
@@ -223,7 +223,7 @@ internal extension CypherMessenger {
             
             let key = SymmetricKey(data: data)
             
-            message = try multiRecipientContainer.readAndValidate(
+            message = try await multiRecipientContainer.readAndValidate(
                 type: CypherMessage.self,
                 usingIdentity: deviceIdentity.props.identity,
                 decryptingWith: key
@@ -263,8 +263,8 @@ internal extension CypherMessenger {
         switch message.target {
         case .currentUser:
             guard
-                sender.props.username == self.username &&
-                    sender.props.deviceId != self.deviceId
+                await sender.username == self.username,
+                await sender.deviceId != self.deviceId
                 // TODO: Check if `sender` is a master device
             else {
                 throw CypherSDKError.badInput
@@ -308,7 +308,7 @@ internal extension CypherMessenger {
                 }
                 
                 let conversation = try await self.getInternalConversation()
-                let context = ReceivedMessageContext(
+                let context = await ReceivedMessageContext(
                     sender: DeviceReference(
                         username: sender.props.username,
                         deviceId: sender.props.deviceId
@@ -355,7 +355,7 @@ internal extension CypherMessenger {
             }
             
             let group = try await self._openGroupChat(byId: groupId)
-            let context = ReceivedMessageContext(
+            let context = await ReceivedMessageContext(
                 sender: DeviceReference(
                     username: sender.props.username,
                     deviceId: sender.props.deviceId
@@ -408,10 +408,10 @@ internal extension CypherMessenger {
                 }
             }
             
-            let chatName = sender.props.username == self.username ? recipient : sender.props.username
+            let chatName = await sender.props.username == self.username ? recipient : sender.props.username
             
             let privateChat = try await self.createPrivateChat(with: chatName)
-            let context = ReceivedMessageContext(
+            let context = await ReceivedMessageContext(
                 sender: DeviceReference(
                     username: sender.props.username,
                     deviceId: sender.props.deviceId
@@ -454,10 +454,10 @@ internal extension CypherMessenger {
     func _fetchKnownDeviceIdentities(
         for username: Username
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
-        try await cachedStore.fetchDeviceIdentities().compactMap { deviceIdentity in
+        try await cachedStore.fetchDeviceIdentities().asyncCompactMap { deviceIdentity in
             let deviceIdentity = self.decrypt(deviceIdentity)
             
-            if deviceIdentity.props.username == username {
+            if await deviceIdentity.username == username {
                 return deviceIdentity
             } else {
                 return nil
@@ -470,12 +470,12 @@ internal extension CypherMessenger {
         deviceId: DeviceId
     ) async throws -> DecryptedModel<DeviceIdentityModel> {
         let knownDevices = try await self._fetchKnownDeviceIdentities(for: username)
-        if let device = knownDevices.first(where: { $0.props.deviceId == deviceId }) {
+        if let device = await knownDevices.asyncFirst(where: { await $0.props.deviceId == deviceId }) {
             return device
         }
         
         let rediscoveredDevices = try await self._rediscoverDeviceIdentities(for: username, knownDevices: knownDevices)
-        if let device = rediscoveredDevices.first(where: { $0.props.deviceId == deviceId }) {
+        if let device = await rediscoveredDevices.asyncFirst(where: { await $0.deviceId == deviceId }) {
             return device
         } else {
             throw CypherSDKError.cannotFindDeviceConfig
@@ -497,10 +497,10 @@ internal extension CypherMessenger {
         forUsers usernames: Set<Username>
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
         let devices = try await cachedStore.fetchDeviceIdentities()
-        let knownDevices = devices.compactMap { deviceIdentity -> DecryptedModel<DeviceIdentityModel>? in
+        let knownDevices = await devices.asyncCompactMap { deviceIdentity -> DecryptedModel<DeviceIdentityModel>? in
             let deviceIdentity = self.decrypt(deviceIdentity)
             
-            if usernames.contains(deviceIdentity.props.username) {
+            if await usernames.contains(deviceIdentity.username) {
                 return deviceIdentity
             } else {
                 return nil
@@ -509,8 +509,8 @@ internal extension CypherMessenger {
         
         var newDevices = [DecryptedModel<DeviceIdentityModel>]()
         for username in usernames {
-            if username != self.username && !knownDevices.contains(where: {
-                $0.props.username == username
+            if username != self.username, await !knownDevices.asyncContains(where: {
+                await $0.props.username == username
             }) {
                 let rediscovered = try await self._rediscoverDeviceIdentities(for: username, knownDevices: knownDevices)
                 newDevices.append(contentsOf: rediscovered)
@@ -520,9 +520,10 @@ internal extension CypherMessenger {
         var allDevices = knownDevices
         
         for newDevice in newDevices {
-            if !allDevices.contains(where: { device in
-                return device.props.username == newDevice.props.username
-                    && device.props.deviceId == newDevice.props.deviceId
+            if await !allDevices.asyncContains(where: { device in
+                async let sameUser = device.props.username == newDevice.props.username
+                let sameDevice = await device.props.deviceId == newDevice.props.deviceId
+                return await sameUser && sameDevice
             }) {
                 allDevices.append(newDevice)
             }

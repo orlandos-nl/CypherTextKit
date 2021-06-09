@@ -8,11 +8,6 @@ public final class ConversationModel: Model {
         public var members: Set<Username>
         public var metadata: Document
         public var localOrder: Int
-        
-        mutating func getNextLocalOrder() -> Int {
-            defer { localOrder += 1 }
-            return localOrder
-        }
     }
     
     public let id: UUID
@@ -31,6 +26,27 @@ public final class ConversationModel: Model {
         self.id = UUID()
         self.props = try .init(props, encryptionKey: encryptionKey)
     }
+}
+
+extension DecryptedModel where M == ConversationModel {
+    public var members: Set<Username> {
+        get { props.members }
+        set { props.members = newValue }
+    }
+    public var metadata: Document {
+        get { props.metadata }
+        set { props.metadata = newValue }
+    }
+    public var localOrder: Int {
+        get { props.localOrder }
+        set { props.localOrder = newValue }
+    }
+    
+    func getNextLocalOrder() async -> Int {
+        let order = localOrder
+        localOrder += 1
+        return order
+   }
 }
 
 public final class DeviceIdentityModel: Model {
@@ -61,6 +77,31 @@ public final class DeviceIdentityModel: Model {
     }
 }
 
+extension DecryptedModel where M == DeviceIdentityModel {
+    public var username: Username {
+        get { props.username }
+    }
+    public var deviceId: DeviceId {
+        get { props.deviceId }
+    }
+    public var senderId: Int {
+        get { props.senderId }
+    }
+    public var publicKey: PublicKey {
+        get { props.publicKey }
+    }
+    public var identity: PublicSigningKey {
+        get { props.identity }
+    }
+    public var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
+        get { props.doubleRatchet }
+        set { props.doubleRatchet = newValue }
+    }
+    func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) async {
+        self.doubleRatchet = newValue
+    }
+}
+
 public final class ContactModel: Model {
     public struct SecureProps: Codable {
         public let username: Username
@@ -83,6 +124,23 @@ public final class ContactModel: Model {
     ) throws {
         self.id = UUID()
         self.props = try .init(props, encryptionKey: encryptionKey)
+    }
+}
+
+extension DecryptedModel where M == ContactModel {
+    public var username: Username {
+        get { props.username }
+    }
+    public internal(set) var config: UserConfig {
+        get { props.config }
+        set { props.config = newValue }
+    }
+    public var metadata: Document {
+        get { props.metadata }
+        set { props.metadata = newValue }
+    }
+    func updateConfig(to newValue: UserConfig) async {
+        self.config = newValue
     }
 }
 
@@ -203,6 +261,34 @@ public final class ChatMessageModel: Model {
     }
 }
 
+extension DecryptedModel where M == ChatMessageModel {
+    public var sendDate: Date {
+        get { props.sendDate }
+    }
+    public var receiveDate: Date {
+        get { props.receiveDate }
+    }
+    public internal(set) var deliveryState: ChatMessageModel.DeliveryState {
+        get { props.deliveryState }
+        set { props.deliveryState = newValue }
+    }
+    public var message: SingleCypherMessage {
+        get { props.message }
+        set { props.message = newValue }
+    }
+    public var senderUser: Username {
+        get { props.senderUser }
+    }
+    public var senderDeviceId: DeviceId {
+        get { props.senderDeviceId }
+    }
+    
+    @discardableResult
+    func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) async -> MarkMessageResult {
+        deliveryState.transition(to: newState)
+    }
+}
+
 @available(macOS 12, iOS 15, *)
 public final class JobModel: Model {
     public struct SecureProps: Codable {
@@ -243,5 +329,34 @@ public final class JobModel: Model {
     internal init(props: SecureProps, encryptionKey: SymmetricKey) throws {
         self.id = UUID()
         self.props = try Encrypted(props, encryptionKey: encryptionKey)
+    }
+}
+
+extension DecryptedModel where M == JobModel {
+    public var taskKey: String {
+        get { props.taskKey }
+    }
+    public var task: Document {
+        get { props.task }
+        set { props.task = newValue }
+    }
+    public var delayedUntil: Date? {
+        get { props.delayedUntil }
+        set { props.delayedUntil = newValue }
+    }
+    public var scheduledAt: Date {
+        get { props.scheduledAt }
+        set { props.scheduledAt = newValue }
+    }
+    public var attempts: Int {
+        get { props.attempts }
+        set { props.attempts = newValue }
+    }
+    public var isBackgroundTask: Bool {
+        get { props.isBackgroundTask }
+    }
+    func didRetry(retryDelay: TimeInterval) async {
+        delayedUntil = Date().addingTimeInterval(retryDelay)
+        attempts += 1
     }
 }

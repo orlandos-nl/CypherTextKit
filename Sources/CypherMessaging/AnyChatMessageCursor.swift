@@ -117,25 +117,29 @@ public final class AnyChatMessageCursor {
             let message: AnyChatMessage
         }
         
-        var results = try await devices.asyncCompactMap { device -> CursorResult? in
-            try await device.peekNext().map { message in
-                CursorResult(
+        var results = try await devices.asyncCompactMap { device -> (Date, CursorResult)? in
+            if let message = try await device.peekNext() {
+                let result = CursorResult(
                     device: device,
                     message: message
                 )
+                
+                return await (message.raw.message.sentDate ?? Date(), result)
+            } else {
+                return nil
             }
         }
         
-        results.sort { lhs, rhs in
+        results.sort { lhs, rhs -> Bool in
             switch self.sortMode {
             case .ascending:
-                return lhs.message.sendDate < rhs.message.sendDate
+                return lhs.0 < rhs.0
             case .descending:
-                return lhs.message.sendDate > rhs.message.sendDate
+                return lhs.0 > rhs.0
             }
         }
         
-        guard let result = results.first else {
+        guard let result = results.first?.1 else {
             return nil
         }
         
@@ -171,18 +175,18 @@ public final class AnyChatMessageCursor {
     ) async throws -> AnyChatMessageCursor {
         assert(sortMode == .descending, "Unsupported ascending")
         
-        var devices = try await conversation.memberDevices().map { device in
-            DeviceChatCursor(
-                target: conversation.target,
+        var devices = try await conversation.memberDevices().asyncMap { device in
+            await DeviceChatCursor(
+                target: conversation.getTarget(),
                 conversationId: conversation.conversation.id,
                 messenger: conversation.messenger,
                 senderId: device.props.senderId,
                 sortMode: sortMode
             )
         }
-        devices.append(
+        await devices.append(
             DeviceChatCursor(
-                target: conversation.target,
+                target: conversation.getTarget(),
                 conversationId: conversation.conversation.id,
                 messenger: conversation.messenger,
                 senderId: conversation.messenger.deviceIdentityId,
@@ -190,7 +194,7 @@ public final class AnyChatMessageCursor {
             )
         )
         
-        return AnyChatMessageCursor(
+        return await AnyChatMessageCursor(
             conversationId: conversation.conversation.id,
             messenger: conversation.messenger,
             devices: devices,

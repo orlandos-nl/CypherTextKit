@@ -36,4 +36,26 @@ extension Array {
         
         return array
     }
+    
+    func asyncContains(where matches: (Element) async -> Bool) async -> Bool {
+        for i in 0..<self.count {
+            let element = self[i]
+            if await matches(element) {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    func asyncFirst(where matches: (Element) async -> Bool) async -> Element? {
+        for i in 0..<self.count {
+            let element = self[i]
+            if await matches(element) {
+                return element
+            }
+        }
+        
+        return nil
+    }
 }

@@ -55,11 +55,11 @@ internal struct P2PSession {
         deviceIdentity: DecryptedModel<DeviceIdentityModel>,
         transport: P2PTransportClient,
         client: P2PClient
-    ) {
-        self.username = deviceIdentity.username
-        self.deviceId = deviceIdentity.deviceId
-        self.publicKey = deviceIdentity.publicKey
-        self.identity = deviceIdentity.identity
+    ) async {
+        self.username = await deviceIdentity.username
+        self.deviceId = await deviceIdentity.deviceId
+        self.publicKey = await deviceIdentity.publicKey
+        self.identity = await deviceIdentity.identity
         self.transport = transport
         self.client = client
     }
@@ -450,7 +450,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             let keyMessage = try await self._writeWithRatchetEngine(ofDevice: device) { ratchetEngine, rekeyState -> MultiRecipientCypherMessage.ContainerKey in
                 let ratchetMessage = try ratchetEngine.ratchetEncrypt(keyData)
                 
-                return try MultiRecipientCypherMessage.ContainerKey(
+                return try await MultiRecipientCypherMessage.ContainerKey(
                     user: device.props.username,
                     deviceId: device.props.deviceId,
                     message: self._signRatchetMessage(
@@ -540,16 +540,16 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         var ratchet: DoubleRatchetHKDF<SHA512>
         let rekey: Bool
         
-        if let existingState = device.doubleRatchet {
+        if let existingState = await device.doubleRatchet {
             ratchet = DoubleRatchetHKDF(
                 state: existingState,
                 configuration: doubleRatchetConfig
             )
             rekey = false
         } else {
-            let secret = try self._formSharedSecret(with: device.props.publicKey)
+            let secret = try await self._formSharedSecret(with: device.props.publicKey)
             let symmetricKey = self._deriveSymmetricKey(from: secret, initiator: self.username)
-            ratchet = try DoubleRatchetHKDF.initializeSender(
+            ratchet = try await DoubleRatchetHKDF.initializeSender(
                 secretKey: symmetricKey,
                 contactingRemote: device.props.publicKey,
                 configuration: doubleRatchetConfig
@@ -558,7 +558,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
         
         let result = try await run(&ratchet, rekey ? .rekey : .next)
-        device.doubleRatchet = ratchet.state
+        await device.updateDoubleRatchetState(to: ratchet.state)
         
         try await self.cachedStore.updateDeviceIdentity(device.encrypted)
         return result
@@ -580,7 +580,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     ) async throws -> (Data, DecryptedModel<DeviceIdentityModel>) {
         let device = try await self._fetchDeviceIdentity(for: username, deviceId: deviceId)
         func rekey() async throws {
-            device.doubleRatchet = nil
+            await device.updateDoubleRatchetState(to: nil)
             
             try await self.eventHandler.onRekey(
                 withUser: username,
@@ -612,14 +612,14 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         
         let data: Data
         var ratchet: DoubleRatchetHKDF<SHA512>
-        if let existingState = device.doubleRatchet, !message.rekey {
+        if let existingState = await device.doubleRatchet, !message.rekey {
             ratchet = DoubleRatchetHKDF(
                 state: existingState,
                 configuration: doubleRatchetConfig
             )
             
             do {
-                let ratchetMessage = try message.readAndValidate(usingIdentity: device.props.identity)
+                let ratchetMessage = try await message.readAndValidate(usingIdentity: device.props.identity)
                 data = try ratchet.ratchetDecrypt(ratchetMessage)
             } catch {
                 try await rekey()
@@ -632,10 +632,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             }
             
             do {
-                let secret = try self._formSharedSecret(with: device.props.publicKey)
+                let secret = try await self._formSharedSecret(with: device.props.publicKey)
                 let symmetricKey = self._deriveSymmetricKey(from: secret, initiator: username)
-                let ratchetMessage = try message.readAndValidate(usingIdentity: device.props.identity)
-                (ratchet, data) = try DoubleRatchetHKDF.initializeRecipient(
+                let ratchetMessage = try await message.readAndValidate(usingIdentity: device.props.identity)
+                (ratchet, data) = try await DoubleRatchetHKDF.initializeRecipient(
                     secretKey: symmetricKey,
                     contactedBy: device.props.publicKey,
                     localPrivateKey: self.config.deviceKeys.privateKey,
@@ -649,7 +649,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             }
         }
         
-        device.doubleRatchet = ratchet.state
+        await device.updateDoubleRatchetState(to: ratchet.state)
         
         try await self.cachedStore.updateDeviceIdentity(device.encrypted)
         return (data, device)
@@ -711,7 +711,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             throw CypherSDKError.unsupportedTransport
         }
         
-        let handle = P2PTransportFactoryHandle(
+        let handle = await P2PTransportFactoryHandle(
             transportLayerIdentifier: transportId,
             messenger: self,
             targetConversation: message.target,
@@ -726,7 +726,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What is a P2P session already exists?
         if let client = client {
             client.delegate = self
-            self.p2pSessions.append(
+            await self.p2pSessions.append(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,
@@ -761,8 +761,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     internal func getEstablishedP2PConnection(
         with device: DecryptedModel<DeviceIdentityModel>
     ) async throws -> P2PClient? {
-        p2pSessions.first(where: {
-            $0.deviceId == device.deviceId && $0.username == device.username
+        await p2pSessions.asyncFirst(where: { user in
+            async let sameUser = user.username == device.username
+            let sameDevice = await user.deviceId == device.deviceId
+            
+            return await sameUser && sameDevice
         })?.client
     }
     
@@ -771,7 +774,12 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         targetConversation: TargetConversation,
         preferredTransportIdentifier: String? = nil
     ) async throws {
-        if p2pSessions.contains(where: { $0.deviceId == device.deviceId && $0.username == device.username }) {
+        if await p2pSessions.asyncContains(where: { user in
+            async let sameUser = user.username == device.username
+            let sameDevice = await user.deviceId == device.deviceId
+            
+            return await sameUser && sameDevice
+        }) {
             return
         }
         
@@ -793,7 +801,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             transportFactory = factory
         }
         
-        let state = P2PFrameworkState(
+        let state = await P2PFrameworkState(
             username: device.username,
             deviceId: device.deviceId,
             identity: device.identity
@@ -811,7 +819,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What if a P2P session already exists?
         if let client = client {
             client.delegate = self
-            self.p2pSessions.append(
+            await self.p2pSessions.append(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,

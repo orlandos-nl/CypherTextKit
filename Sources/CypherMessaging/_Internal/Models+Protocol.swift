@@ -11,8 +11,7 @@ public protocol Model: AnyObject, Codable {
 }
 
 // TODO: Re-enable cache, and reuse the cache globally
-@dynamicMemberLookup
-public struct DecryptedModel<M: Model> {
+public final actor DecryptedModel<M: Model> {
     public var encrypted: M
     private let encryptionKey: SymmetricKey
     
@@ -26,12 +25,15 @@ public struct DecryptedModel<M: Model> {
     
     private var propertyCache = DecryptedPropertyCache()
     
-    public func withProps<T>(run: (M.SecureProps) async throws -> T) async rethrows -> T {
-        try await run(props)
+    public func withProps<T>(get: (M.SecureProps) async throws -> T) async rethrows -> T {
+        try await get(props)
     }
     
     public func modifyProps<T>(run: (inout M.SecureProps) async throws -> T) async rethrows -> T {
-        try await run(&props)
+        var props = self.props
+        let value = try await run(&props)
+        self.props = props
+        return value
     }
     
     public var props: M.SecureProps {
@@ -48,7 +50,7 @@ public struct DecryptedModel<M: Model> {
                 }
 //            }
         }
-        nonmutating set {
+        set {
 //            propertyCache.props = newValue
             
             do {
@@ -62,19 +64,6 @@ public struct DecryptedModel<M: Model> {
     init(model: M, encryptionKey: SymmetricKey) {
         self.encrypted = model
         self.encryptionKey = encryptionKey
-    }
-    
-    public subscript<T>(dynamicMember keyPath: WritableKeyPath<M.SecureProps, T>) -> T {
-        get {
-            props[keyPath: keyPath]
-        }
-        nonmutating set {
-            props[keyPath: keyPath] = newValue
-        }
-    }
-    
-    public subscript<T>(dynamicMember keyPath: KeyPath<M.SecureProps, T>) -> T {
-        props[keyPath: keyPath]
     }
 }
 
