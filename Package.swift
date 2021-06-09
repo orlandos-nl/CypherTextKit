@@ -39,9 +39,6 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
             ], swiftSettings: [
                 .unsafeFlags([
-                    "-cross-module-optimization"
-                ], .when(configuration: .release)),
-                .unsafeFlags([
                     "-Xfrontend", "-enable-experimental-concurrency",
                     "-Xfrontend", "-disable-availability-checking",
                 ])
@@ -53,9 +50,6 @@ let package = Package(
                 .product(name: "JWTKit", package: "jwt-kit"),
                 .product(name: "WebSocketKit", package: "websocket-kit"),
             ], swiftSettings: [
-                .unsafeFlags([
-                    "-cross-module-optimization"
-                ], .when(configuration: .release)),
                 .unsafeFlags([
                     "-Xfrontend", "-enable-experimental-concurrency",
                     "-Xfrontend", "-disable-availability-checking",

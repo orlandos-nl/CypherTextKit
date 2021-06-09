@@ -195,6 +195,51 @@ final class FriendshipPluginTests: XCTestCase {
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 4)
     }
     
+    func testHeavyLoad() async throws {
+        let el = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+        let m0 = try await CypherMessenger.registerMessenger(
+            username: "m0",
+            appPassword: "",
+            usingTransport: { request in
+            try await VaporTransport.registerPlain(transportRequest: request, eventLoop: el)
+            },
+            database: MemoryCypherMessengerStore(eventLoop: el),
+            eventHandler: SpoofCypherEventHandler(),
+            on: el
+        )
+        
+        let m1 = try await CypherMessenger.registerMessenger(
+            username: "m1",
+            appPassword: "",
+            usingTransport: { request in
+                try await VaporTransport.registerPlain(transportRequest: request, eventLoop: el)
+            },
+            database: MemoryCypherMessengerStore(eventLoop: el),
+            eventHandler: SpoofCypherEventHandler(),
+            on: el
+        )
+        
+        try el.executeAsync {
+            let chat = try await m0.createPrivateChat(with: "m1")
+            
+            for _ in 0..<1000 {
+                _ = el.executeAsync {
+                    _ = try await chat.sendRawMessage(type: .text, text: "Hello", preferredPushType: .none)
+                }
+            }
+        }.wait()
+        
+        var receivedAll = false
+        repeat {
+            sleep(1)
+            if let chat = try await m1.getPrivateChat(with: "m0") {
+                let count = try await chat.allMessages(sortedBy: .ascending).count
+                receivedAll = count >= 1000
+                print("Processed \(count)")
+            }
+        } while !receivedAll
+    }
+    
     func testBlockAffectsGroupChats() async throws {
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let eventLoop = elg.next()

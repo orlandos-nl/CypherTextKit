@@ -6,14 +6,17 @@ public protocol Model: AnyObject, Codable {
     
     var id: UUID { get }
     var props: Encrypted<SecureProps> { get set }
+    
+//    func save(on store: CypherMessengerStore) async throws
 }
 
+// TODO: Re-enable cache, and reuse the cache globally
 @dynamicMemberLookup
 public struct DecryptedModel<M: Model> {
     public var encrypted: M
     private let encryptionKey: SymmetricKey
     
-    private final class DecryptedPropertyCache {
+    private final actor DecryptedPropertyCache {
         var props: M.SecureProps?
     }
     
@@ -23,22 +26,30 @@ public struct DecryptedModel<M: Model> {
     
     private var propertyCache = DecryptedPropertyCache()
     
+    public func withProps<T>(run: (M.SecureProps) async throws -> T) async rethrows -> T {
+        try await run(props)
+    }
+    
+    public func modifyProps<T>(run: (inout M.SecureProps) async throws -> T) async rethrows -> T {
+        try await run(&props)
+    }
+    
     public var props: M.SecureProps {
         get {
 //            if let cached = propertyCache.props {
 //                return cached
 //            } else {
                 do {
-                    let props = try encrypted.props.decrypt(using: encryptionKey)
-                    propertyCache.props = props
-                    return props
+                    return try encrypted.props.decrypt(using: encryptionKey)
+//                    propertyCache.props = props
+//                    return props
                 } catch {
                     fatalError("Props cannot be decrypted for \(M.self)")
                 }
 //            }
         }
         nonmutating set {
-            propertyCache.props = newValue
+//            propertyCache.props = newValue
             
             do {
                 encrypted.props = try Encrypted(newValue, encryptionKey: encryptionKey)

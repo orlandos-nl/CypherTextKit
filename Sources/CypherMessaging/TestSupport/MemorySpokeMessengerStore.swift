@@ -6,7 +6,7 @@ public enum MemoryCypherMessengerStoreError: Error {
 }
 
 @available(macOS 12, iOS 15, *)
-public final class MemoryCypherMessengerStore: CypherMessengerStore {
+public final actor MemoryCypherMessengerStore: CypherMessengerStore {
     public let eventLoop: EventLoop
     private let salt = UUID().uuidString
     private var localConfig: Data?

@@ -7,48 +7,22 @@ struct Weak<O: AnyObject> {
 }
 
 @available(macOS 12, iOS 15, *)
-internal final class _CypherMessengerStoreCache: CypherMessengerStore {
+internal final actor _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
     let eventLoop: EventLoop
     
-    private var contacts: [ContactModel]? {
-        willSet {
-            assert(eventLoop.inEventLoop)
-        }
-    }
-    
-    private var deviceIdentities: [DeviceIdentityModel]? {
-        willSet {
-            assert(eventLoop.inEventLoop)
-        }
-    }
-    
-    private var messages = [UUID: ChatMessageModel]() {
-        willSet {
-            assert(eventLoop.inEventLoop)
-        }
-    }
-    
-    private var conversations: [ConversationModel]? {
-        willSet {
-            assert(eventLoop.inEventLoop)
-        }
-    }
-    
-    private var deviceConfig: Data? {
-        willSet {
-            assert(eventLoop.inEventLoop)
-        }
-    }
+    private var contacts: [ContactModel]?
+    private var deviceIdentities: [DeviceIdentityModel]?
+    private var messages = [UUID: ChatMessageModel]()
+    private var conversations: [ConversationModel]?
+    private var deviceConfig: Data?
     
     init(base: CypherMessengerStore, eventLoop: EventLoop) {
         self.base = base
         self.eventLoop = eventLoop
     }
     
-    func emptyCaches() {
-        assert(eventLoop.inEventLoop)
-        
+    func emptyCaches() async {
         deviceConfig = nil
         contacts = nil
         conversations = nil

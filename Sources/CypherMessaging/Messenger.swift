@@ -401,8 +401,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
     }
     
-    public func emptyCaches() {
-        cachedStore.emptyCaches()
+    public func emptyCaches() async {
+        await cachedStore.emptyCaches()
     }
     
     public func addDevice(_ deviceConfig: UserDeviceConfig) async throws {
