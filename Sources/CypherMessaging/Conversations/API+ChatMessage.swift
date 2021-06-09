@@ -20,10 +20,10 @@ public struct AnyChatMessage {
             return
         }
         
-        return try await messenger._markMessage(byId: raw.id, as: .read).map { _ in }.get()
+        _ = try await messenger._markMessage(byId: raw.id, as: .read)
     }
     
     public func destroy() async throws {
-        try await messenger.cachedStore.removeChatMessage(raw.encrypted).get()
+        try await messenger.cachedStore.removeChatMessage(raw.encrypted)
     }
 }

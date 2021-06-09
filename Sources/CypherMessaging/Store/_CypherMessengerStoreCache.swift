@@ -56,141 +56,114 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         messages.removeAll(keepingCapacity: true)
     }
     
-    func fetchContacts() -> EventLoopFuture<[ContactModel]> {
-        return eventLoop.flatSubmit {
-            if let users = self.contacts {
-                return self.eventLoop.makeSucceededFuture(users)
-            } else {
-                return self.base.fetchContacts().map { contacts in
-                    self.contacts = contacts
-                    return contacts
-                }
-            }
+    func fetchContacts() async throws -> [ContactModel] {
+        if let contacts = self.contacts {
+            return contacts
+        } else {
+            let contacts = try await self.base.fetchContacts()
+            self.contacts = contacts
+            return contacts
         }
     }
     
-    func createContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            if var users = self.contacts {
-                users.append(contact)
-                self.contacts = users
-                return self.base.createContact(contact)
-            } else {
-                return self.fetchContacts().map { contacts in
-                    self.contacts = contacts + [contact]
-                }.flatMap {
-                    self.base.createContact(contact)
-                }
-            }
+    func createContact(_ contact: ContactModel) async throws {
+        if var users = self.contacts {
+            users.append(contact)
+            self.contacts = users
+            return try await self.base.createContact(contact)
+        } else {
+            let contacts = try await self.fetchContacts()
+            self.contacts = contacts + [contact]
+            return try await self.base.createContact(contact)
         }
     }
     
-    func updateContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
+    func updateContact(_ contact: ContactModel) async throws {
         assert(contacts?.contains(where: { $0 === contact }) != false)
         // Already saved in-memory, because it's a reference type
-        return base.updateContact(contact)
+        return try await base.updateContact(contact)
     }
     
-    func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessageModel> {
-        return eventLoop.flatSubmit {
-            if let message = self.messages[messageId] {
-                return self.eventLoop.makeSucceededFuture(message)
-            } else {
-                return self.base.fetchChatMessage(byId: messageId).map { message in
-                    self.messages[messageId] = message
-                    return message
-                }
-            }
+    func fetchChatMessage(byId messageId: UUID) async throws -> ChatMessageModel {
+        if let message = self.messages[messageId] {
+            return message
+        } else {
+            let message = try await self.base.fetchChatMessage(byId: messageId)
+            self.messages[messageId] = message
+            return message
         }
     }
     
-    func fetchChatMessage(byRemoteId remoteId: String) -> EventLoopFuture<ChatMessageModel> {
-        return eventLoop.flatSubmit {
-            return self.base.fetchChatMessage(byRemoteId: remoteId).map { message in
-                if let cachedMessage = self.messages[message.id] {
-                    return cachedMessage
-                } else {
-                    return message
-                }
-            }
+    func fetchChatMessage(byRemoteId remoteId: String) async throws -> ChatMessageModel {
+        let message = try await self.base.fetchChatMessage(byRemoteId: remoteId)
+        if let cachedMessage = self.messages[message.id] {
+            return cachedMessage
+        } else {
+            return message
         }
     }
     
-    func fetchConversations() -> EventLoopFuture<[ConversationModel]> {
-        return eventLoop.flatSubmit {
-            if let conversations = self.conversations {
-                return self.eventLoop.makeSucceededFuture(conversations)
-            } else {
-                return self.base.fetchConversations().map { conversations in
-                    self.conversations = conversations
-                    return conversations
-                }
-            }
+    func fetchConversations() async throws -> [ConversationModel] {
+        if let conversations = self.conversations {
+            return conversations
+        } else {
+            let conversations = try await self.base.fetchConversations()
+            self.conversations = conversations
+            return conversations
         }
     }
     
-    func createConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            if var conversations = self.conversations {
-                conversations.append(conversation)
-                self.conversations = conversations
-                return self.base.createConversation(conversation)
-            } else {
-                return self.fetchConversations().map { conversations in
-                    self.conversations = conversations + [conversation]
-                }.flatMap {
-                    self.base.createConversation(conversation)
-                }
-            }
+    func createConversation(_ conversation: ConversationModel) async throws {
+        if var conversations = self.conversations {
+            conversations.append(conversation)
+            self.conversations = conversations
+        } else {
+            let conversations = try await self.fetchConversations()
+            self.conversations = conversations + [conversation]
         }
+        
+        return try await self.base.createConversation(conversation)
     }
     
-    func updateConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
+    func updateConversation(_ conversation: ConversationModel) async throws {
         assert(conversations?.contains(where: { $0 === conversation }) != false)
         // Already saved in-memory, because it's a reference type
-        return base.updateConversation(conversation)
+        return try await base.updateConversation(conversation)
     }
     
-    func fetchDeviceIdentities() -> EventLoopFuture<[DeviceIdentityModel]> {
-        return eventLoop.flatSubmit {
-            if let deviceIdentities = self.deviceIdentities {
-                return self.eventLoop.makeSucceededFuture(deviceIdentities)
-            } else {
-                return self.base.fetchDeviceIdentities().map { deviceIdentities in
-                    self.deviceIdentities = deviceIdentities
-                    return deviceIdentities
-                }
-            }
+    func fetchDeviceIdentities() async throws -> [DeviceIdentityModel] {
+        if let deviceIdentities = self.deviceIdentities {
+            return deviceIdentities
+        } else {
+            let deviceIdentities = try await self.base.fetchDeviceIdentities()
+            self.deviceIdentities = deviceIdentities
+            return deviceIdentities
         }
     }
     
-    func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            if var deviceIdentities = self.deviceIdentities {
-                deviceIdentities.append(deviceIdentity)
-                self.deviceIdentities = deviceIdentities
-            }
-            
-            return self.base.createDeviceIdentity(deviceIdentity)
+    func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
+        if var deviceIdentities = self.deviceIdentities {
+            deviceIdentities.append(deviceIdentity)
+            self.deviceIdentities = deviceIdentities
         }
+        
+        return try await self.base.createDeviceIdentity(deviceIdentity)
     }
     
-    func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
+    func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
         assert(deviceIdentities?.contains(where: { $0 === deviceIdentity }) != false)
         // Already saved in-memory, because it's a reference type
-        return base.updateDeviceIdentity(deviceIdentity)
+        return try await base.updateDeviceIdentity(deviceIdentity)
     }
     
-    func createChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            self.messages[message.id] = message
-            return self.base.createChatMessage(message)
-        }
+    func createChatMessage(_ message: ChatMessageModel) async throws {
+        self.messages[message.id] = message
+        return try await self.base.createChatMessage(message)
     }
     
-    func updateChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
+    func updateChatMessage(_ message: ChatMessageModel) async throws {
         // Already saved in-memory, because it's a reference type
-        base.updateChatMessage(message)
+        try await base.updateChatMessage(message)
     }
     
     func listChatMessages(
@@ -201,8 +174,8 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         maximumOrder: Int?,
         offsetBy offset: Int,
         limit: Int
-    ) -> EventLoopFuture<[ChatMessageModel]> {
-        base.listChatMessages(
+    ) async throws -> [ChatMessageModel] {
+        try await base.listChatMessages(
             inConversation: conversation,
             senderId: senderId,
             sortedBy: sortMode,
@@ -210,82 +183,72 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
             maximumOrder: maximumOrder,
             offsetBy: offset,
             limit: limit
-        ).hop(to: eventLoop).map { messages in
-            messages.map { message in
-                if let cachedMessage = self.messages[message.id] {
-                    return cachedMessage
-                } else {
-                    self.messages[message.id] = message
-                    return message
-                }
+        ).map { message in
+            if let cachedMessage = self.messages[message.id] {
+                return cachedMessage
+            } else {
+                self.messages[message.id] = message
+                return message
             }
         }
     }
     
-    func readLocalDeviceConfig() -> EventLoopFuture<Data> {
-        base.readLocalDeviceConfig()
+    func readLocalDeviceConfig() async throws -> Data {
+        try await base.readLocalDeviceConfig()
     }
     
-    func writeLocalDeviceConfig(_ data: Data) -> EventLoopFuture<Void> {
-        base.writeLocalDeviceConfig(data)
+    func writeLocalDeviceConfig(_ data: Data) async throws {
+        try await base.writeLocalDeviceConfig(data)
     }
     
-    func readLocalDeviceSalt() -> EventLoopFuture<String> {
-        base.readLocalDeviceSalt()
+    func readLocalDeviceSalt() async throws -> String {
+        try await base.readLocalDeviceSalt()
     }
     
-    func readJobs() -> EventLoopFuture<[JobModel]> {
-        base.readJobs()
+    func readJobs() async throws -> [JobModel] {
+        try await base.readJobs()
     }
     
-    func createJob(_ job: JobModel) -> EventLoopFuture<Void> {
-        base.createJob(job)
+    func createJob(_ job: JobModel) async throws {
+        try await base.createJob(job)
     }
     
-    func updateJob(_ job: JobModel) -> EventLoopFuture<Void> {
+    func updateJob(_ job: JobModel) async throws {
         // Forwarded to DB, caching happens inside JobQueue
-        base.updateJob(job)
+        try await base.updateJob(job)
     }
     
-    func removeJob(_ job: JobModel) -> EventLoopFuture<Void> {
-        base.removeJob(job)
+    func removeJob(_ job: JobModel) async throws {
+        try await base.removeJob(job)
     }
     
-    func removeContact(_ contact: ContactModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            if let index = self.contacts?.firstIndex(where: { $0 === contact }) {
-                self.contacts?.remove(at: index)
-            }
-            
-            return self.base.removeContact(contact)
+    func removeContact(_ contact: ContactModel) async throws {
+        if let index = self.contacts?.firstIndex(where: { $0 === contact }) {
+            self.contacts?.remove(at: index)
         }
+        
+        return try await self.base.removeContact(contact)
     }
     
-    func removeConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            if let index = self.conversations?.firstIndex(where: { $0 === conversation }) {
-                self.conversations?.remove(at: index)
-            }
-            
-            return self.base.removeConversation(conversation)
+    func removeConversation(_ conversation: ConversationModel) async throws {
+        if let index = self.conversations?.firstIndex(where: { $0 === conversation }) {
+            self.conversations?.remove(at: index)
         }
+        
+        return try await self.base.removeConversation(conversation)
     }
     
-    func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            if let index = self.deviceIdentities?.firstIndex(where: { $0 === deviceIdentity }) {
-                self.deviceIdentities?.remove(at: index)
-            }
-            
-            return self.base.removeDeviceIdentity(deviceIdentity)
+    func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
+        if let index = self.deviceIdentities?.firstIndex(where: { $0 === deviceIdentity }) {
+            self.deviceIdentities?.remove(at: index)
         }
+        
+        return try await self.base.removeDeviceIdentity(deviceIdentity)
     }
     
-    func removeChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void> {
-        return eventLoop.flatSubmit {
-            self.messages[message.id] = nil
-            
-            return self.base.removeChatMessage(message)
-        }
+    func removeChatMessage(_ message: ChatMessageModel) async throws {
+        self.messages[message.id] = nil
+        
+        return try await self.base.removeChatMessage(message)
     }
 }

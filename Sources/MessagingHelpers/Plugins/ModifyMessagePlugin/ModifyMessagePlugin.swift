@@ -19,7 +19,7 @@ public struct ModifyMessagePlugin: Plugin {
         
         switch subType {
         case "revoke":
-            let message = try await message.conversation.message(byRemoteId: remoteId).get()
+            let message = try await message.conversation.message(byRemoteId: remoteId)
             if message.senderUser == sender {
                 // Message was sent by this user, so the action is permitted
                 try await message.destroy()

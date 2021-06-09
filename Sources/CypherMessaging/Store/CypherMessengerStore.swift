@@ -7,26 +7,26 @@ public enum SortMode {
 
 @available(macOS 12, iOS 15, *)
 public protocol CypherMessengerStore {
-    func fetchContacts() -> EventLoopFuture<[ContactModel]>
-    func createContact(_ contact: ContactModel) -> EventLoopFuture<Void>
-    func updateContact(_ contact: ContactModel) -> EventLoopFuture<Void>
-    func removeContact(_ contact: ContactModel) -> EventLoopFuture<Void>
+    func fetchContacts() async throws -> [ContactModel]
+    func createContact(_ contact: ContactModel) async throws
+    func updateContact(_ contact: ContactModel) async throws
+    func removeContact(_ contact: ContactModel) async throws
     
-    func fetchConversations() -> EventLoopFuture<[ConversationModel]>
-    func createConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void>
-    func updateConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void>
-    func removeConversation(_ conversation: ConversationModel) -> EventLoopFuture<Void>
+    func fetchConversations() async throws -> [ConversationModel]
+    func createConversation(_ conversation: ConversationModel) async throws
+    func updateConversation(_ conversation: ConversationModel) async throws
+    func removeConversation(_ conversation: ConversationModel) async throws
     
-    func fetchDeviceIdentities() -> EventLoopFuture<[DeviceIdentityModel]>
-    func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void>
-    func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void>
-    func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) -> EventLoopFuture<Void>
+    func fetchDeviceIdentities() async throws -> [DeviceIdentityModel]
+    func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws
+    func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws
+    func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws
     
-    func fetchChatMessage(byId messageId: UUID) -> EventLoopFuture<ChatMessageModel>
-    func fetchChatMessage(byRemoteId remoteId: String) -> EventLoopFuture<ChatMessageModel>
-    func createChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void>
-    func updateChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void>
-    func removeChatMessage(_ message: ChatMessageModel) -> EventLoopFuture<Void>
+    func fetchChatMessage(byId messageId: UUID) async throws -> ChatMessageModel
+    func fetchChatMessage(byRemoteId remoteId: String) async throws -> ChatMessageModel
+    func createChatMessage(_ message: ChatMessageModel) async throws
+    func updateChatMessage(_ message: ChatMessageModel) async throws
+    func removeChatMessage(_ message: ChatMessageModel) async throws
     func listChatMessages(
         inConversation: UUID,
         senderId: Int,
@@ -35,14 +35,14 @@ public protocol CypherMessengerStore {
         maximumOrder: Int?,
         offsetBy: Int,
         limit: Int
-    ) -> EventLoopFuture<[ChatMessageModel]>
+    ) async throws -> [ChatMessageModel]
     
-    func readLocalDeviceConfig() -> EventLoopFuture<Data>
-    func writeLocalDeviceConfig(_ data: Data) -> EventLoopFuture<Void>
-    func readLocalDeviceSalt() -> EventLoopFuture<String>
+    func readLocalDeviceConfig() async throws -> Data
+    func writeLocalDeviceConfig(_ data: Data) async throws
+    func readLocalDeviceSalt() async throws -> String
     
-    func readJobs() -> EventLoopFuture<[JobModel]>
-    func createJob(_ job: JobModel) -> EventLoopFuture<Void>
-    func updateJob(_ job: JobModel) -> EventLoopFuture<Void>
-    func removeJob(_ job: JobModel) -> EventLoopFuture<Void>
+    func readJobs() async throws -> [JobModel]
+    func createJob(_ job: JobModel) async throws
+    func updateJob(_ job: JobModel) async throws
+    func removeJob(_ job: JobModel) async throws
 }

@@ -12,7 +12,7 @@ public protocol CypherCallStateDelegate {
     func executeAction(
         _ action: CallDelegateAction<CallHandle>?,
         forEvent: CypherCallEvent<CallHandle>
-    ) -> EventLoopFuture<Void>
+    ) async throws
 }
 
 public final class CallManager<Delegate: CypherCallStateDelegate> {
@@ -23,7 +23,7 @@ public final class CallManager<Delegate: CypherCallStateDelegate> {
         self.delegate = delegate
     }
     
-    public func executeAction(_ action: UserCallAction<Delegate.CallHandle>) -> EventLoopFuture<Void> {
+    public func executeAction(_ action: UserCallAction<Delegate.CallHandle>) async throws {
         let oldState = state
         let delegateAction = state.executeAction(action)
         let newState = state
@@ -34,6 +34,6 @@ public final class CallManager<Delegate: CypherCallStateDelegate> {
             newState: newState
         )
         
-        return delegate.executeAction(delegateAction, forEvent: event)
+        return try await delegate.executeAction(delegateAction, forEvent: event)
     }
 }

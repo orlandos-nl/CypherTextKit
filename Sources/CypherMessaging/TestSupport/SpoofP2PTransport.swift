@@ -22,38 +22,33 @@ public final class SpoofP2PTransportClient: P2PTransportClient {
         self.eventLoop = eventLoop
     }
     
-    public func reconnect() -> EventLoopFuture<Void> {
+    public func reconnect() async throws {
         if otherClient == nil {
             self.connected = .disconnected
-            return eventLoop.makeFailedFuture(SpoofP2PTransportError.disconnected)
+            throw SpoofP2PTransportError.disconnected
         } else {
             self.connected = .connected
-            return eventLoop.makeSucceededVoidFuture()
         }
     }
     
-    public func disconnect() -> EventLoopFuture<Void> {
+    public func disconnect() async {
         self.connected = .disconnecting
         
         if let otherClient = otherClient {
-            return otherClient.disconnect().map {
-                self.connected = .disconnected
-            }
+            await otherClient.disconnect()
+            self.connected = .disconnected
         } else {
             self.connected = .disconnected
-            return eventLoop.makeSucceededVoidFuture()
         }
     }
     
-    public func sendMessage(_ buffer: ByteBuffer) -> EventLoopFuture<Void> {
+    public func sendMessage(_ buffer: ByteBuffer) async throws {
         guard connected == .connected, let otherClient = otherClient else {
-            return eventLoop.makeFailedFuture(SpoofP2PTransportError.disconnected)
+            throw SpoofP2PTransportError.disconnected
         }
         
         if let delegate = otherClient.delegate {
-            return delegate.p2pConnection(otherClient, receivedMessage: buffer)
-        } else {
-            return eventLoop.makeSucceededVoidFuture()
+            try await delegate.p2pConnection(otherClient, receivedMessage: buffer)
         }
     }
     
@@ -77,7 +72,7 @@ public final class SpoofP2PTransportFactory: P2PTransportClientFactory {
     
     public let transportLayerIdentifier = "_spoof"
     
-    public func createConnection(handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
+    public func createConnection(handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
         let localClient = SpoofP2PTransportClient(
             state: handle.state,
             eventLoop: handle.eventLoop,
@@ -87,17 +82,17 @@ public final class SpoofP2PTransportFactory: P2PTransportClientFactory {
         let id = UUID().uuidString
         SpoofTransportFactoryMedium.default.clients[id] = localClient
         
-        return handle.sendMessage(
+        try await handle.sendMessage(
             id,
             metadata: [:]
-        ).map {
-            return localClient
-        }
+        )
+        
+        return localClient
     }
     
-    public func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
+    public func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
         guard let client = SpoofTransportFactoryMedium.default.clients[text] else {
-            return handle.eventLoop.makeSucceededFuture(nil)
+            return nil
         }
         
         let localClient = SpoofP2PTransportClient(
@@ -108,6 +103,6 @@ public final class SpoofP2PTransportFactory: P2PTransportClientFactory {
         client.otherClient = localClient
         client.connected = .connected
         
-        return handle.eventLoop.makeSucceededFuture(localClient)
+        return localClient
     }
 }

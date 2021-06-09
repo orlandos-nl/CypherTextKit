@@ -33,13 +33,13 @@ public protocol P2PTransportClient: AnyObject {
     var state: P2PFrameworkState { get }
     
     /// (Re-)starts the connection(s).
-    func reconnect() -> EventLoopFuture<Void>
+    func reconnect() async throws
     
     /// Disconnects any active connections.
-    func disconnect() -> EventLoopFuture<Void>
+    func disconnect() async
     
     /// Sends a buffer to the remote. The remote, upon receiving, must call `delegate.receiveMessage`
-    func sendMessage(_ buffer: ByteBuffer) -> EventLoopFuture<Void>
+    func sendMessage(_ buffer: ByteBuffer) async throws
 }
 
 public enum P2PTransportClosureOption {
@@ -48,8 +48,8 @@ public enum P2PTransportClosureOption {
 
 @available(macOS 12, iOS 15, *)
 public protocol P2PTransportClientDelegate: AnyObject {
-    func p2pConnection(_ connection: P2PTransportClient, receivedMessage buffer: ByteBuffer) -> EventLoopFuture<Void>
-    func p2pConnection(_ connection: P2PTransportClient, closedWithOptions: Set<P2PTransportClosureOption>) -> EventLoopFuture<Void>
+    func p2pConnection(_ connection: P2PTransportClient, receivedMessage buffer: ByteBuffer) async throws
+    func p2pConnection(_ connection: P2PTransportClient, closedWithOptions: Set<P2PTransportClosureOption>) async throws
 }
 
 public struct P2PTransportCreationRequest {
@@ -74,7 +74,7 @@ public protocol P2PTransportClientFactory {
         _ text: String,
         metadata: Document,
         handle: P2PTransportFactoryHandle
-    ) -> EventLoopFuture<P2PTransportClient?>
+    ) async throws -> P2PTransportClient?
     
     /// Creates a new P2PConnection with a remote client. Any necessary communication _must_ go through `handle`.
     ///
@@ -84,7 +84,7 @@ public protocol P2PTransportClientFactory {
     /// `createConnection` _should_ complete after any current actions. It _may_ also delay the completion until a network related task completed, such as discovery on the local network or nearby BlueTooth devices. In which case the function _must_ implement a reasonable termination deadline.
     func createConnection(
         handle: P2PTransportFactoryHandle
-    ) -> EventLoopFuture<P2PTransportClient?>
+    ) async throws -> P2PTransportClient?
 }
 
 /// An interface through which can be communicated with the remote device
@@ -99,8 +99,8 @@ public struct P2PTransportFactoryHandle {
     public func sendMessage(
         _ text: String,
         metadata: Document = [:]
-    ) -> EventLoopFuture<Void> {
-        messenger._queueTask(
+    ) async throws {
+        try await messenger._queueTask(
             .sendMessage(
                 SendMessageTask(
                     message: CypherMessage(

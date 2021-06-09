@@ -10,8 +10,8 @@ public protocol Task: Codable {
     var priority: TaskPriority { get }
     var requiresConnectivity: Bool { get }
     
-    func execute(on messenger: CypherMessenger) -> EventLoopFuture<Void>
-    func onDelayed(on messenger: CypherMessenger) -> EventLoopFuture<Void>
+    func execute(on messenger: CypherMessenger) async throws
+    func onDelayed(on messenger: CypherMessenger) async throws
 }
 
 @available(macOS 12, iOS 15, *)

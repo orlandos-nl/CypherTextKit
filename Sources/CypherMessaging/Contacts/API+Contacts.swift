@@ -15,21 +15,19 @@ public struct Contact {
     }
     
     public func save() async throws {
-        try await messenger.cachedStore.updateContact(model.encrypted).get()
+        try await messenger.cachedStore.updateContact(model.encrypted)
     }
 }
 
 @available(macOS 12, iOS 15, *)
 extension CypherMessenger {
     public func listContacts() async throws -> [Contact] {
-        try await self.cachedStore.fetchContacts().map { contacts in
-            contacts.map { contact in
-                return Contact(
-                    messenger: self,
-                    model: self.decrypt(contact)
-                )
-            }
-        }.get()
+        try await self.cachedStore.fetchContacts().map { contact in
+            return Contact(
+                messenger: self,
+                model: self.decrypt(contact)
+            )
+        }
     }
     
     public func getContact(byUsername username: Username) async throws -> Contact? {
@@ -49,22 +47,21 @@ extension CypherMessenger {
                 messenger: self
             )
             
-            let contact = try await self.transport.readKeyBundle(
+            let userConfig = try await self.transport.readKeyBundle(
                 forUsername: username
-            ).flatMapThrowing { userConfig in
-                try ContactModel(
-                    props: ContactModel.SecureProps(
-                        username: username,
-                        config: userConfig,
-                        metadata: metadata
-                    ),
-                    encryptionKey: self.databaseEncryptionKey
-                )
-            }.get()
+            )
+            
+            let contact = try ContactModel(
+                props: ContactModel.SecureProps(
+                    username: username,
+                    config: userConfig,
+                    metadata: metadata
+                ),
+                encryptionKey: self.databaseEncryptionKey
+            )
                 
-            return try await self.cachedStore.createContact(contact).map {
-                Contact(messenger: self, model: self.decrypt(contact))
-            }.get()
+            try await self.cachedStore.createContact(contact)
+            return Contact(messenger: self, model: self.decrypt(contact))
         }
     }
 }

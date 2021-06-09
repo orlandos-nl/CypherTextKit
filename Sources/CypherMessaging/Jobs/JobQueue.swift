@@ -5,7 +5,7 @@ import SwiftUI
 import NIO
 
 @available(macOS 12, iOS 15, *)
-public final class JobQueue: ObservableObject {
+final class JobQueue: ObservableObject {
     public let eventLoop: EventLoop
     unowned private(set) var messenger: CypherMessenger!
     private let database: CypherMessengerStore
@@ -13,23 +13,18 @@ public final class JobQueue: ObservableObject {
     public private(set) var runningJobs = false
     public private(set) var hasOutstandingTasks = true
     private var pausing: EventLoopPromise<Void>?
-    private var jobs = [DecryptedModel<JobModel>]()
+    private var jobs: [DecryptedModel<JobModel>]
     private static var taskDecoders = [TaskKey: TaskDecoder]()
 
-    init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) {
+    init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) async throws {
         self.eventLoop = messenger.eventLoop
         self.messenger = messenger
         self.database = database
         self.databaseEncryptionKey = databaseEncryptionKey
-
-        database.readJobs().whenSuccess { jobs in
-            let jobs = jobs.map { job in
-                job.decrypted(using: databaseEncryptionKey)
-            }.sorted { lhs, rhs in
-                lhs.scheduledAt < rhs.scheduledAt
-            }
-            
-            self.jobs = jobs
+        self.jobs = try await database.readJobs().map { job in
+            job.decrypted(using: databaseEncryptionKey)
+        }.sorted { lhs, rhs in
+            lhs.scheduledAt < rhs.scheduledAt
         }
     }
     
@@ -39,32 +34,26 @@ public final class JobQueue: ObservableObject {
         }
     }
     
-    func cancelJob(_ job: DecryptedModel<JobModel>) -> EventLoopFuture<Void> {
+    func cancelJob(_ job: DecryptedModel<JobModel>) async throws {
         // TODO: What if the job is cancelled while executing and succeeding?
-        return dequeueJob(job)
+        try await dequeueJob(job)
     }
     
-    func dequeueJob(_ job: DecryptedModel<JobModel>) -> EventLoopFuture<Void> {
-        return database.removeJob(job.encrypted).map {
-            self.jobs.removeAll { $0.id == job.id }
-        }
+    func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
+        try await database.removeJob(job.encrypted)
+        self.jobs.removeAll { $0.id == job.id }
     }
     
-    public func queueTask<T: Task>(_ task: T) -> EventLoopFuture<Void> {
-        do {
-            let job = try JobModel(
-                props: .init(task: task),
-                encryptionKey: databaseEncryptionKey
-            )
-            
-            self.jobs.append(job.decrypted(using: databaseEncryptionKey))
-            return database.createJob(job).map {
-                if !self.runningJobs {
-                    self.startRunningTasks()
-                }
-            }
-        } catch {
-            return eventLoop.makeFailedFuture(error)
+    public func queueTask<T: Task>(_ task: T) async throws {
+        let job = try JobModel(
+            props: .init(task: task),
+            encryptionKey: databaseEncryptionKey
+        )
+        
+        self.jobs.append(job.decrypted(using: databaseEncryptionKey))
+        try await database.createJob(job)
+        if !self.runningJobs {
+            self.startRunningTasks()
         }
     }
 
@@ -110,7 +99,7 @@ public final class JobQueue: ObservableObject {
                     case .success, .delayed:
                         return next(in: jobs)
                     case .failed:
-                        let done = jobs.map { job -> EventLoopFuture<Void>in
+                        let done = jobs.map { job -> EventLoopFuture<Void> in
                             let task: Task
                             
                             do {
@@ -124,7 +113,9 @@ public final class JobQueue: ObservableObject {
                                 return self.eventLoop.makeFailedFuture(error)
                             }
                             
-                            return task.onDelayed(on: self.messenger)
+                            return self.messenger.eventLoop.executeAsync {
+                                try await task.onDelayed(on: self.messenger)
+                            }
                         }
 
                         debugLog("Task failed or none found, stopping processing")
@@ -244,10 +235,12 @@ public final class JobQueue: ObservableObject {
             return self.eventLoop.makeFailedFuture(CypherSDKError.offline)
         }
 
-        return task.execute(on: messenger).hop(
-            to: messenger.eventLoop
-        ).flatMap {
-            self.dequeueJob(job).map {
+        return eventLoop.executeAsync {
+            try await task.execute(on: messenger)
+        }.flatMap {
+            self.eventLoop.executeAsync {
+                try await self.dequeueJob(job)
+            }.map {
                 TaskResult.success
             }
         }.flatMapError { error -> EventLoopFuture<JobQueue.TaskResult> in
@@ -260,18 +253,21 @@ public final class JobQueue: ObservableObject {
                 job.attempts += 1
                 
                 if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {
-                    return self.cancelJob(job).map {
-                        return TaskResult.success
+                    return self.eventLoop.executeAsync {
+                        try await self.cancelJob(job)
+                        return .success
                     }
                 }
 
-                return self.database.updateJob(job.encrypted).map {
-                    return TaskResult.delayed
+                return self.eventLoop.executeAsync {
+                    try await self.database.updateJob(job.encrypted)
+                    return .delayed
                 }
             case .always:
                 return self.eventLoop.makeSucceededFuture(.delayed)
             case .never:
-                return self.dequeueJob(job).map {
+                return self.eventLoop.executeAsync {
+                    try await self.dequeueJob(job)
                     return .failed
                 }
             }

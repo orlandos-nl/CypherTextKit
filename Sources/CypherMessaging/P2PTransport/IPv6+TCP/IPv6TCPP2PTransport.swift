@@ -22,7 +22,11 @@ private final class BufferHandler: ChannelInboundHandler {
         }
         
         if let delegate = client.delegate {
-            _ = delegate.p2pConnection(client, receivedMessage: buffer)
+            context.eventLoop.executeAsync {
+                _ = try await delegate.p2pConnection(client, receivedMessage: buffer)
+            }.whenFailure { error in
+                context.fireErrorCaught(error)
+            }
         }
     }
 }
@@ -39,16 +43,18 @@ final class IPv6TCPP2PTransportClient: P2PTransportClient {
         self.channel = channel
     }
     
-    public func reconnect() -> EventLoopFuture<Void> {
-        channel.eventLoop.makeFailedFuture(IPv6TCPP2PError.reconnectFailed)
+    public func reconnect() async throws {
+        throw IPv6TCPP2PError.reconnectFailed
     }
     
-    public func disconnect() -> EventLoopFuture<Void> {
-        channel.close()
+    public func disconnect() async {
+        do {
+            try await channel.close()
+        } catch {}
     }
     
-    public func sendMessage(_ buffer: ByteBuffer) -> EventLoopFuture<Void> {
-        channel.writeAndFlush(buffer)
+    public func sendMessage(_ buffer: ByteBuffer) async throws {
+        try await channel.writeAndFlush(buffer)
     }
     
     static func initialize(state: P2PFrameworkState, channel: Channel) -> EventLoopFuture<IPv6TCPP2PTransportClient> {
@@ -66,23 +72,23 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
     
     public init() {}
     
-    public func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
+    public func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
         guard
             let host = metadata["ip"] as? String,
             let port = metadata["port"] as? Int
         else {
-            return eventLoop.makeFailedFuture(IPv6TCPP2PError.socketCreationFailed)
+            throw IPv6TCPP2PError.socketCreationFailed
         }
         
-        return ClientBootstrap(group: eventLoop)
+        return try await ClientBootstrap(group: eventLoop)
             .connectTimeout(.seconds(30))
             .connect(host: host, port: port)
             .flatMap { channel in
                 IPv6TCPP2PTransportClient.initialize(state: handle.state, channel: channel)
-            }.map { $0 }
+            }.get()
     }
     
-    public func createConnection(handle: P2PTransportFactoryHandle) -> EventLoopFuture<P2PTransportClient?> {
+    public func createConnection(handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
         let ipAddress: String
         
         findInterface: do {
@@ -104,7 +110,7 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
             
             throw IPv6TCPP2PError.socketCreationFailed
         } catch {
-            return eventLoop.makeFailedFuture(error)
+            throw error
         }
         
         let promise = handle.eventLoop.makePromise(of: Optional<P2PTransportClient>.self)
@@ -138,13 +144,15 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
                     return self.eventLoop.makeFailedFuture(IPv6TCPP2PError.socketCreationFailed)
                 }
                 
-                return handle.sendMessage("", metadata: [
-                    "ip": ipAddress,
-                    "port": port
-                ])
+                return channel.eventLoop.executeAsync {
+                    try await handle.sendMessage("", metadata: [
+                        "ip": ipAddress,
+                        "port": port
+                    ])
+                }
             }.cascadeFailure(to: promise)
         
-        return promise.futureResult
+        return try await promise.futureResult.get()
 //        #endif
     }
 }
