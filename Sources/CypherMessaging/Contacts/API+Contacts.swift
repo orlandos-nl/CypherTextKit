@@ -12,22 +12,26 @@ public struct Contact {
     public func save() async throws {
         try await messenger.cachedStore.updateContact(model.encrypted)
     }
+    
+    public var username: Username {
+        model.username
+    }
 }
 
 @available(macOS 12, iOS 15, *)
 extension CypherMessenger {
     public func listContacts() async throws -> [Contact] {
-        try await self.cachedStore.fetchContacts().map { contact in
-            return Contact(
+        try await self.cachedStore.fetchContacts().asyncMap { contact in
+            Contact(
                 messenger: self,
-                model: self.decrypt(contact)
+                model: try await self.decrypt(contact)
             )
         }
     }
     
     public func getContact(byUsername username: Username) async throws -> Contact? {
         for contact in try await listContacts() {
-            if await contact.model.username == username {
+            if contact.model.username == username {
                 return contact
             }
         }
@@ -62,7 +66,7 @@ extension CypherMessenger {
             )
                 
             try await self.cachedStore.createContact(contact)
-            return Contact(messenger: self, model: self.decrypt(contact))
+            return try await Contact(messenger: self, model: self.decrypt(contact))
         }
     }
 }

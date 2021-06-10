@@ -55,11 +55,12 @@ public struct FriendshipPlugin: Plugin {
     
     public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         let senderUsername = message.sender.username
+        let target = await message.conversation.getTarget()
         
-        if case .groupChat = message.conversation.target {
+        if case .groupChat = target {
             if ruleset.blockAffectsGroupChats, senderUsername != message.messenger.username {
                 let contact = try await message.messenger.createContact(byUsername: senderUsername)
-                if contact.contactBlocked {
+                if await contact.isContactBlocked() {
                     return .ignore
                 } else {
                     return nil
@@ -70,7 +71,7 @@ public struct FriendshipPlugin: Plugin {
         }
         
         if senderUsername == message.messenger.username {
-            guard case .currentUser = message.conversation.target else {
+            guard case .currentUser = target else {
                 return nil
             }
             
@@ -126,7 +127,7 @@ public struct FriendshipPlugin: Plugin {
             }
         }
         
-        switch (contact.ourState, contact.theirState) {
+        switch (await contact.getOurState(), await contact.getTheirState()) {
         case (.blocked, _), (_, .blocked):
             return .ignore
         case (.undecided, _), (_, .undecided):
@@ -174,32 +175,32 @@ public struct FriendshipPlugin: Plugin {
 
 @available(macOS 12, iOS 15, *)
 extension Contact {
-    public var ourState: FriendshipStatus {
-        (try? self.withMetadata(
+    public func getOurState() async -> FriendshipStatus {
+        await (try? self.model.withMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.ourState
         )) ?? .undecided
     }
     
-    public var theirState: FriendshipStatus {
-        (try? self.withMetadata(
+    public func getTheirState() async -> FriendshipStatus {
+        await (try? self.model.withMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.theirState
         )) ?? .undecided
     }
     
-    public var mutualFriendship: Bool {
-        (try? self.withMetadata(
+    public func isMutualFriendship() async -> Bool {
+        await (try? self.model.withMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.mutualFriendship
         )) ?? false
     }
     
-    public var contactBlocked: Bool {
-        (try? self.withMetadata(
+    public func isContactBlocked() async -> Bool {
+        await (try? self.model.withMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.contactBlocked
@@ -219,11 +220,11 @@ extension Contact {
     }
     
     public func unblock() async throws {
-        guard ourState == .blocked else {
+        guard await getOurState() == .blocked else {
             return
         }
         
-        let oldState = (try? self.withMetadata(
+        let oldState = (try? await self.model.withMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.ourPreBlockedState

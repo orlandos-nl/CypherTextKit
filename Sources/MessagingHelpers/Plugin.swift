@@ -25,26 +25,30 @@ extension Plugin {
 }
 
 @available(macOS 12, iOS 15, *)
-extension Contact {
+extension DecryptedModel where M == ContactModel {
     public func withMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
-    ) throws -> Result {
-        let pluginStorage = self.metadata[plugin.pluginIdentifier] ?? Document()
-        var metadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)
-        let result = try run(&metadata)
-        self.metadata[plugin.pluginIdentifier] = try BSONEncoder().encode(metadata)
+    ) async throws -> Result {
+        var metadata = self.metadata
+        let pluginStorage = metadata[plugin.pluginIdentifier] ?? Document()
+        var pluginMetadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)
+        let result = try run(&pluginMetadata)
+        metadata[plugin.pluginIdentifier] = try BSONEncoder().encode(pluginMetadata)
+        try await self.setProp(at: \.metadata, to: metadata)
         
         return result
     }
-    
+}
+
+extension Contact {
     public func modifyMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
     ) async throws -> Result {
-        let result = try withMetadata(ofType: type, forPlugin: plugin, run: run)
+        let result = try await model.withMetadata(ofType: type, forPlugin: plugin, run: run)
         
         try await self.save()
         return result
@@ -52,26 +56,30 @@ extension Contact {
 }
 
 @available(macOS 12, iOS 15, *)
-extension AnyConversation {
+extension DecryptedModel where M == ConversationModel {
     public func withMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
-    ) throws -> Result {
-        let pluginStorage = self.conversation.metadata[plugin.pluginIdentifier] ?? Document()
-        var metadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)
-        let result = try run(&metadata)
-        self.conversation.metadata[plugin.pluginIdentifier] = try BSONEncoder().encode(metadata)
+    ) async throws -> Result {
+        var metadata = self.metadata
+        let pluginStorage = metadata[plugin.pluginIdentifier] ?? Document()
+        var pluginMetadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)
+        let result = try run(&pluginMetadata)
+        metadata[plugin.pluginIdentifier] = try BSONEncoder().encode(pluginMetadata)
+        try await self.setProp(at: \.metadata, to: metadata)
         
         return result
     }
-    
+}
+
+extension AnyConversation {
     public func modifyMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
     ) async throws -> Result {
-        let result = try withMetadata(ofType: type, forPlugin: plugin, run: run)
+        let result = try await conversation.withMetadata(ofType: type, forPlugin: plugin, run: run)
         try await self.save()
         return result
     }

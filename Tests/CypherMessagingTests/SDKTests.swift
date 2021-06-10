@@ -6,6 +6,29 @@ import CypherMessaging
 import SystemConfiguration
 import CypherProtocol
 
+@available(macOS 12, iOS 15, *)
+struct Synchronisation {
+    let apps: [CypherMessenger]
+    
+    func synchronise() async throws {
+        var hasWork = true
+        
+        repeat {
+            hasWork = false
+            if
+                try await SpoofTransportClient.synchronize() == .synchronised {
+                hasWork = true
+            }
+            
+            for app in apps {
+                if try await app.processJobQueue() == .synchronised {
+                    hasWork = true
+                }
+            }
+        } while hasWork
+    }
+}
+
 func XCTAssertThrowsAsyncError<T>(_ run: @autoclosure () async throws -> T) async {
     do {
         _ = try await run()
@@ -102,6 +125,9 @@ final class CypherSDKTests: XCTestCase {
             on: eventLoop
         )
         
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
         let m0Chat = try await m0.createPrivateChat(with: "m1")
         
         _ = try await m0Chat.sendRawMessage(
@@ -110,11 +136,11 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         let m1Chat = try await m1.getPrivateChat(with: "m0")!
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
@@ -131,14 +157,15 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 3)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 3)
         
         try await m0Chat.buildP2PConnections()
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.listOpenP2PConnections().count, 1)
         await XCTAssertAsyncEqual(try await m1Chat.listOpenP2PConnections().count, 1)
@@ -150,7 +177,7 @@ final class CypherSDKTests: XCTestCase {
             try await connection.updateStatus(flags: .isTyping)
         }
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
     }
@@ -219,8 +246,11 @@ final class CypherSDKTests: XCTestCase {
             on: eventLoop
         )
         
+        let sync = Synchronisation(apps: [m0, m1, m2, m3])
+        try await sync.synchronise()
+        
         let m0Chat = try await m0.createGroupChat(with: ["m1", "m2"])
-        let groupId = GroupChatId(m0Chat.groupConfig.id)
+        let groupId = await m0Chat.getGroupId()
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
@@ -228,7 +258,7 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         let m0_2Chat = try await m0_2.getGroupChat(byId: groupId)!
         let m1Chat = try await m1.getGroupChat(byId: groupId)!
@@ -236,7 +266,8 @@ final class CypherSDKTests: XCTestCase {
         let m2Chat = try await m2.getGroupChat(byId: groupId)!
         await XCTAssertAsyncNil(try await m3.getGroupChat(byId: groupId))
         
-        SpoofTransportClient.synchronize()
+        
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
         await XCTAssertAsyncEqual(try await m0_2Chat.allMessages(sortedBy: .descending).count, 1)
@@ -262,7 +293,8 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 4)
         await XCTAssertAsyncEqual(try await m0_2Chat.allMessages(sortedBy: .descending).count, 4)
@@ -295,6 +327,9 @@ final class CypherSDKTests: XCTestCase {
             on: eventLoop
         )
         
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
         let m0Chat = try await m0.createPrivateChat(with: "m1")
         
         _ = try await m0Chat.sendRawMessage(
@@ -303,11 +338,11 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         let m1Chat = try await m1.getPrivateChat(with: "m0")!
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
@@ -324,7 +359,7 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 3)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 3)
@@ -364,6 +399,9 @@ final class CypherSDKTests: XCTestCase {
             on: eventLoop
         )
         
+        let sync = Synchronisation(apps: [m0d0, m0d1, m1d0])
+        try await sync.synchronise()
+        
         print("Clients setup - Starting interactions")
         
         let m0d1Chat = try await m0d1.createPrivateChat(with: "m1")
@@ -374,12 +412,18 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
-        let m0d0Chat = try await m0d0.getPrivateChat(with: "m1")!
-        let m1d0Chat = try await m1d0.getPrivateChat(with: "m0")!
+        guard let m0d0Chat = try await m0d0.getPrivateChat(with: "m1") else {
+            XCTFail()
+            return
+        }
+        guard let m1d0Chat = try await m1d0.getPrivateChat(with: "m0") else {
+            XCTFail()
+            return
+        }
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0d0Chat.allMessages(sortedBy: .descending).count, 1)
         await XCTAssertAsyncEqual(try await m0d1Chat.allMessages(sortedBy: .descending).count, 1)
@@ -397,7 +441,7 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0d0Chat.allMessages(sortedBy: .descending).count, 3)
         await XCTAssertAsyncEqual(try await m0d1Chat.allMessages(sortedBy: .descending).count, 3)

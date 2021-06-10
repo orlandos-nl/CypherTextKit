@@ -8,7 +8,7 @@ extension CypherMessenger {
     public func getConversation(byId id: UUID) async throws -> TargetConversation.Resolved? {
         let conversations = try await cachedStore.fetchConversations()
         for conversation in conversations {
-            let conversation = self.decrypt(conversation)
+            let conversation = try await self.decrypt(conversation)
             
             if await conversation.id == id {
                 return await TargetConversation.Resolved(
@@ -24,9 +24,9 @@ extension CypherMessenger {
     public func getInternalConversation() async throws -> InternalConversation {
         let conversations = try await cachedStore.fetchConversations()
         for conversation in conversations {
-            let conversation = self.decrypt(conversation)
+            let conversation = try await self.decrypt(conversation)
             
-            if await conversation.members == [self.username] {
+            if conversation.members == [self.username] {
                 return InternalConversation(conversation: conversation, messenger: self)
             }
         }
@@ -37,7 +37,7 @@ extension CypherMessenger {
         )
         
         return InternalConversation(
-            conversation: self.decrypt(conversation),
+            conversation: try await self.decrypt(conversation),
             messenger: self
         )
     }
@@ -77,7 +77,7 @@ extension CypherMessenger {
                 
                 try await self.cachedStore.createConversation(conversation)
                 return GroupChat(
-                    conversation: self.decrypt(conversation),
+                    conversation: try await self.decrypt(conversation),
                     messenger: self,
                     metadata: groupMetadata
                 )
@@ -90,16 +90,16 @@ extension CypherMessenger {
     public func getGroupChat(byId id: GroupChatId) async throws -> GroupChat? {
         let conversations = try await cachedStore.fetchConversations()
         nextConversation: for conversation in conversations {
-            let conversation = self.decrypt(conversation)
+            let conversation = try await self.decrypt(conversation)
             guard
-                await conversation.members.count >= 2,
-                await conversation.members.contains(self.username)
+                conversation.members.count >= 2,
+                conversation.members.contains(self.username)
             else {
                 continue nextConversation
             }
             
             do {
-                let groupMetadata = try await BSONDecoder().decode(
+                let groupMetadata = try BSONDecoder().decode(
                     GroupMetadata.self,
                     from: conversation.metadata
                 )
@@ -124,8 +124,8 @@ extension CypherMessenger {
     public func getPrivateChat(with otherUser: Username) async throws -> PrivateChat? {
         let conversations = try await cachedStore.fetchConversations()
         nextConversation: for conversation in conversations {
-            let conversation = self.decrypt(conversation)
-            let members = await conversation.members
+            let conversation = try await self.decrypt(conversation)
+            let members = conversation.members
             
             if
                 members.count != 2
@@ -175,7 +175,7 @@ extension CypherMessenger {
         )
         
         let chat = GroupChat(
-            conversation: self.decrypt(conversation),
+            conversation: try await self.decrypt(conversation),
             messenger: self,
             metadata: metadata
         )
@@ -207,8 +207,8 @@ extension CypherMessenger {
                 metadata: metadata
             )
             
-            return  PrivateChat(
-                conversation: self.decrypt(conversation),
+            return PrivateChat(
+                conversation: try await self.decrypt(conversation),
                 messenger: self
             )
         }
@@ -217,12 +217,12 @@ extension CypherMessenger {
     public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) async throws -> [PrivateChat] {
         let conversations = try await cachedStore.fetchConversations()
         return try await conversations.asyncCompactMap { conversation -> PrivateChat? in
-            let conversation = self.decrypt(conversation)
-            let members = await conversation.members
+            let conversation = try await self.decrypt(conversation)
+            let members = conversation.members
             guard
                 members.contains(self.username),
                 members.count == 2,
-                await conversation.metadata["_type"] as? String != "group"
+                conversation.metadata["_type"] as? String != "group"
             else {
                 return nil
             }
@@ -234,19 +234,19 @@ extension CypherMessenger {
     public func listGroupChats(increasingOrder: @escaping (GroupChat, GroupChat) throws -> Bool) async throws -> [GroupChat] {
         let conversations = try await cachedStore.fetchConversations()
         return try await conversations.asyncCompactMap { conversation -> GroupChat? in
-            let conversation = self.decrypt(conversation)
-            let members = await conversation.members
+            let conversation = try await self.decrypt(conversation)
+            let members = conversation.members
             
             guard
                 members.contains(self.username),
                 members.count >= 2,
-                await conversation.metadata["_type"] as? String == "group"
+                conversation.metadata["_type"] as? String == "group"
             else {
                 return nil
             }
             
             do {
-                let groupMetadata = try await BSONDecoder().decode(
+                let groupMetadata = try BSONDecoder().decode(
                     GroupMetadata.self,
                     from: conversation.metadata
                 )
@@ -265,7 +265,7 @@ extension CypherMessenger {
         let conversations = try await cachedStore.fetchConversations()
         
         return try await conversations.asyncCompactMap { conversation -> TargetConversation.Resolved? in
-            let conversation = self.decrypt(conversation)
+            let conversation = try await self.decrypt(conversation)
             let resolved = await TargetConversation.Resolved(conversation: conversation, messenger: self)
             
             if !includingInternalConversation, case .internalChat = resolved {
@@ -322,7 +322,7 @@ extension AnyConversation {
     }
     
     private func getNextLocalOrder() async throws -> Int {
-        let order = await conversation.getNextLocalOrder()
+        let order = try await conversation.getNextLocalOrder()
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         return order
     }
@@ -361,7 +361,7 @@ extension AnyConversation {
         props: ChatMessageModel.SecureProps,
         remoteId: String = UUID().uuidString
     ) async throws -> DecryptedModel<ChatMessageModel> {
-        let chatMessage = try await ChatMessageModel(
+        let chatMessage = try ChatMessageModel(
             conversationId: conversation.id,
             senderId: senderId,
             order: order,
@@ -372,7 +372,7 @@ extension AnyConversation {
         
         try await messenger.cachedStore.createChatMessage(chatMessage)
         
-        let message = self.messenger.decrypt(chatMessage)
+        let message = try await self.messenger.decrypt(chatMessage)
         
         await self.messenger.eventHandler.onCreateChatMessage(
             AnyChatMessage(
@@ -417,8 +417,8 @@ extension AnyConversation {
                     senderDeviceId: self.messenger.deviceId
                 )
             )
-            remoteId = await chatMessage.encrypted.remoteId
-            localId = await chatMessage.id
+            remoteId = chatMessage.encrypted.remoteId
+            localId = chatMessage.id
             _chatMessage = chatMessage
         }
         
@@ -476,7 +476,7 @@ extension AnyConversation {
         return await AnyChatMessage(
             target: self.getTarget(),
             messenger: self.messenger,
-            raw: self.messenger.decrypt(message)
+            raw: try await self.messenger.decrypt(message)
         )
     }
     
@@ -486,7 +486,7 @@ extension AnyConversation {
         return await AnyChatMessage(
             target: self.getTarget(),
             messenger: self.messenger,
-            raw: self.messenger.decrypt(message)
+            raw: try await self.messenger.decrypt(message)
         )
     }
     
@@ -515,6 +515,9 @@ public struct InternalConversation: AnyConversation {
     }
     
     public func sendInternalMessage(_ message: SingleCypherMessage) async throws {
+        // Refresh device identities
+        // TDOO: Rate limit
+        _ = try await self.messenger._fetchDeviceIdentities(for: messenger.username)
         try await self._writeMessage(message, to: [messenger.username])
     }
 }
@@ -563,7 +566,7 @@ public struct PrivateChat: AnyConversation {
     
     public func getConversationPartner() async -> Username {
         // PrivateChats always have exactly 2 members
-        var members = await conversation.members
+        var members = conversation.members
         members.remove(messenger.username)
         return members.first!
     }

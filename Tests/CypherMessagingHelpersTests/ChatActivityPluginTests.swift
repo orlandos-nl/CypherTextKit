@@ -35,21 +35,24 @@ final class ChatActivityPluginTests: XCTestCase {
             ]),
             on: eventLoop
         )
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
         
         let m0Chat = try await m0.createPrivateChat(with: "m1")
-        XCTAssertNil(m0Chat.lastActivity)
+        await XCTAssertAsyncNil(await m0Chat.getLastActivity())
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
         )
-        XCTAssertNotNil(m0Chat.lastActivity)
+        await         XCTAssertAsyncNotNil(await m0Chat.getLastActivity())
         
-        SpoofTransportClient.synchronize()
+        
+        try await sync.synchronise()
         
         let m1Chat = try await m1.getPrivateChat(with: "m0")!
-        XCTAssertNotNil(m1Chat.lastActivity)
+        await XCTAssertAsyncNotNil(await m1Chat.getLastActivity())
     }
     
     func testGroupChat() async throws {
@@ -80,19 +83,25 @@ final class ChatActivityPluginTests: XCTestCase {
             on: eventLoop
         )
         
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
         let m0Chat = try await m0.createGroupChat(with: ["m1"])
-        XCTAssertNil(m0Chat.lastActivity)
+        await XCTAssertAsyncNil(await m0Chat.getLastActivity())
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
         )
-        XCTAssertNotNil(m0Chat.lastActivity)
+        await XCTAssertAsyncNotNil(await m0Chat.getLastActivity())
         
-        SpoofTransportClient.synchronize()
+        try await sync.synchronise()
         
-        let m1Chat = try await m1.getGroupChat(byId: m0Chat.groupId)!
-        XCTAssertNotNil(m1Chat.lastActivity)
+        if let m1Chat = try await m1.getGroupChat(byId: m0Chat.getGroupId()) {
+            await XCTAssertAsyncNotNil(await m1Chat.getLastActivity())
+        } else {
+            XCTFail()
+        }
     }
 }

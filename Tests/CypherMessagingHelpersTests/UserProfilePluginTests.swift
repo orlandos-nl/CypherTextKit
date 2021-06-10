@@ -36,6 +36,24 @@ func XCTAssertAsyncEqual<T: Equatable>(_ run: @autoclosure () async throws -> T,
     }
 }
 
+func XCTAssertAsyncFalse(_ run: @autoclosure () async throws -> Bool) async {
+    do {
+        let value = try await run()
+        XCTAssertFalse(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncTrue(_ run: @autoclosure () async throws -> Bool) async {
+    do {
+        let value = try await run()
+        XCTAssertTrue(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
 @available(macOS 12, iOS 15, *)
 struct AcceptAllDeviceRegisteriesPlugin: Plugin {
     static let pluginIdentifier = "accept-all-device-registeries"
@@ -107,6 +125,9 @@ final class UserProfilePluginTests: XCTestCase {
             on: eventLoop
         )
         
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
         let m0Chat = try await m0.createPrivateChat(with: "m1")
         
         _ = try await m0Chat.sendRawMessage(
@@ -115,26 +136,29 @@ final class UserProfilePluginTests: XCTestCase {
             preferredPushType: .none
         )
         
-        SpoofTransportClient.synchronize()
+        
+        try await sync.synchronise()
         
         let m1Chat = try await m1.getPrivateChat(with: "m0")!
         
-        SpoofTransportClient.synchronize()
+        
+        try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
         
         let contact = try await m1.getContact(byUsername: "m0")
         
-        await XCTAssertAsyncEqual(contact?.status, nil)
+        await XCTAssertAsyncEqual(await contact?.getStatus(), nil)
         await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, nil)
         await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, nil)
         
         try await m0.changeProfileStatus(to: "Available")
         
-        SpoofTransportClient.synchronize()
         
-        await XCTAssertAsyncEqual(contact?.status, "Available")
+        try await sync.synchronise()
+        
+        await XCTAssertAsyncEqual(await contact?.getStatus(), "Available")
         await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, "Available")
         await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, "Available")
     }

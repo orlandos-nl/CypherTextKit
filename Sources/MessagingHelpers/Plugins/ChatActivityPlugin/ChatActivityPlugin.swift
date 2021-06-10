@@ -68,12 +68,11 @@ public struct ChatActivityPlugin: Plugin {
 
 @available(macOS 12, iOS 15, *)
 extension AnyConversation {
-    public var lastActivity: Date? {
-        try? self.withMetadata(
+    public func getLastActivity() async -> Date? {
+        try? await self.conversation.withMetadata(
             ofType: ChatActivityMetadata.self,
-            forPlugin: ChatActivityPlugin.self
-        ) { metadata in
-            metadata.lastActivity
-        }
+            forPlugin: ChatActivityPlugin.self,
+            run: \.lastActivity
+        )
     }
 }

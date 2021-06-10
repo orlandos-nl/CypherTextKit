@@ -7,7 +7,7 @@ struct Weak<O: AnyObject> {
 }
 
 @available(macOS 12, iOS 15, *)
-internal final actor _CypherMessengerStoreCache: CypherMessengerStore {
+internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
     let eventLoop: EventLoop
     

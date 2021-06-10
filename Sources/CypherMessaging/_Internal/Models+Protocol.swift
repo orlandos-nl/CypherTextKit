@@ -1,74 +1,50 @@
 import Foundation
 import Crypto
 
-public protocol Model: AnyObject, Codable {
+public protocol Model: Codable {
     associatedtype SecureProps: Codable
     
     var id: UUID { get }
     var props: Encrypted<SecureProps> { get set }
+//    func setProps(to props: Encrypted<SecureProps>) async
     
 //    func save(on store: CypherMessengerStore) async throws
 }
 
 // TODO: Re-enable cache, and reuse the cache globally
-public final actor DecryptedModel<M: Model> {
-    public var encrypted: M
+public struct DecryptedModel<M: Model> {
+    public let encrypted: M
+    public var id: UUID { encrypted.id }
+    public private(set) var props: M.SecureProps
     private let encryptionKey: SymmetricKey
     
-    private final actor DecryptedPropertyCache {
-        var props: M.SecureProps?
+    public func withProps<T>(get: (M.SecureProps) async throws -> T) async throws -> T {
+        let props = try encrypted.props.decrypt(using: encryptionKey)
+        return try await get(props)
     }
     
-    public var id: UUID {
-        encrypted.id
-    }
-    
-    private var propertyCache = DecryptedPropertyCache()
-    
-    public func withProps<T>(get: (M.SecureProps) async throws -> T) async rethrows -> T {
-        try await get(props)
-    }
-    
-    public func modifyProps<T>(run: (inout M.SecureProps) async throws -> T) async rethrows -> T {
-        var props = self.props
+    public func modifyProps<T>(run: (inout M.SecureProps) async throws -> T) async throws -> T {
+        var props = try encrypted.props.decrypt(using: encryptionKey)
         let value = try await run(&props)
-        self.props = props
+        try await encrypted.props.update(to: props, using: encryptionKey)
         return value
     }
     
-    public var props: M.SecureProps {
-        get {
-//            if let cached = propertyCache.props {
-//                return cached
-//            } else {
-                do {
-                    return try encrypted.props.decrypt(using: encryptionKey)
-//                    propertyCache.props = props
-//                    return props
-                } catch {
-                    fatalError("Props cannot be decrypted for \(M.self)")
-                }
-//            }
-        }
-        set {
-//            propertyCache.props = newValue
-            
-            do {
-                encrypted.props = try Encrypted(newValue, encryptionKey: encryptionKey)
-            } catch {
-                fatalError("Props cannot be encrypted for \(M.self)")
-            }
+    public func setProp<T>(at keyPath: WritableKeyPath<M.SecureProps, T>, to value: T) async throws {
+        try await modifyProps { props in
+            props[keyPath: keyPath] = value
         }
     }
     
-    init(model: M, encryptionKey: SymmetricKey) {
+    init(model: M, encryptionKey: SymmetricKey) async throws {
         self.encrypted = model
         self.encryptionKey = encryptionKey
+        self.props = try model.props.decrypt(using: encryptionKey)
     }
 }
 
 extension Model {
-    func decrypted(using symmetricKey: SymmetricKey) -> DecryptedModel<Self> {
-        DecryptedModel(model: self, encryptionKey: symmetricKey)
+    func decrypted(using symmetricKey: SymmetricKey) async throws -> DecryptedModel<Self> {
+        try await DecryptedModel(model: self, encryptionKey: symmetricKey)
     }
 }

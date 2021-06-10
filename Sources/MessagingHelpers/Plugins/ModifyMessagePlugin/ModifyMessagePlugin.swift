@@ -20,7 +20,7 @@ public struct ModifyMessagePlugin: Plugin {
         switch subType {
         case "revoke":
             let message = try await message.conversation.message(byRemoteId: remoteId)
-            if message.senderUser == sender {
+            if await message.getSender() == sender {
                 // Message was sent by this user, so the action is permitted
                 try await message.destroy()
             }
@@ -70,7 +70,7 @@ extension AnyChatMessage {
         _ = try await chat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/messaging/mutate-history/revoke",
-            text: self.remoteId,
+            text: self.raw.encrypted.remoteId,
             preferredPushType: .none
         )
         

@@ -9,7 +9,11 @@ public struct AnyChatMessage {
             return
         }
         
-        _ = try await messenger._markMessage(byId: raw.id, as: .read)
+        _ = try await messenger._markMessage(byId: raw.encrypted.id, as: .read)
+    }
+    
+    public func getSender() async -> Username {
+        await raw.senderUser
     }
     
     public func destroy() async throws {

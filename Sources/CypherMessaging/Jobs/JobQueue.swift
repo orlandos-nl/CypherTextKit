@@ -7,13 +7,17 @@ import NIO
 @available(macOS 12, iOS 15, *)
 final class JobQueue: ObservableObject {
     public let eventLoop: EventLoop
-    unowned private(set) var messenger: CypherMessenger!
+    weak private(set) var messenger: CypherMessenger?
     private let database: CypherMessengerStore
     private let databaseEncryptionKey: SymmetricKey
     public private(set) var runningJobs = false
     public private(set) var hasOutstandingTasks = true
     private var pausing: EventLoopPromise<Void>?
-    private var jobs: [DecryptedModel<JobModel>]
+    private var jobs: [DecryptedModel<JobModel>] {
+        didSet {
+            markAsDone()
+        }
+    }
     private static var taskDecoders = [TaskKey: TaskDecoder]()
 
     init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) async throws {
@@ -22,8 +26,8 @@ final class JobQueue: ObservableObject {
         self.database = database
         self.databaseEncryptionKey = databaseEncryptionKey
         self.jobs = try await database.readJobs().asyncMap { job -> (Date, DecryptedModel<JobModel>) in
-            let job = job.decrypted(using: databaseEncryptionKey)
-            return await (job.scheduledAt, job)
+            let job = try await job.decrypted(using: databaseEncryptionKey)
+            return (job.scheduledAt, job)
         }.sorted { lhs, rhs in
             lhs.0 < rhs.0
         }.map(\.1)
@@ -56,10 +60,35 @@ final class JobQueue: ObservableObject {
             encryptionKey: databaseEncryptionKey
         )
         
-        self.jobs.append(job.decrypted(using: databaseEncryptionKey))
+        try await self.jobs.append(job.decrypted(using: databaseEncryptionKey))
         try await database.createJob(job)
         if !self.runningJobs {
             self.startRunningTasks()
+        }
+    }
+    
+    fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
+    func awaitDoneProcessing() async throws -> SynchronisationResult {
+//        if runningJobs {
+//            return .busy
+//        } else
+        if runningJobs || hasOutstandingTasks {
+            let promise = eventLoop.makePromise(of: Void.self)
+            self.isDoneNotifications.append(promise)
+            startRunningTasks()
+            try await promise.futureResult.get()
+            return .synchronised
+        } else {
+            return .skipped
+        }
+    }
+    func markAsDone() {
+        if !hasOutstandingTasks && !isDoneNotifications.isEmpty {
+            for notification in isDoneNotifications {
+                notification.succeed(())
+            }
+            
+            isDoneNotifications = []
         }
     }
 
@@ -81,11 +110,16 @@ final class JobQueue: ObservableObject {
         runningJobs = true
 
         func next(in jobs: [DecryptedModel<JobModel>]) async throws {
+            guard let messenger = self.messenger else {
+                return
+            }
+            
             debugLog("Looking for next task")
             if jobs.isEmpty {
                 debugLog("No more tasks")
                 self.runningJobs = false
                 self.hasOutstandingTasks = false
+                self.markAsDone()
                 return
             }
 
@@ -117,8 +151,8 @@ final class JobQueue: ObservableObject {
                             return self.eventLoop.makeFailedFuture(error)
                         }
                         
-                        return self.messenger.eventLoop.executeAsync {
-                            try await task.onDelayed(on: self.messenger)
+                        return messenger.eventLoop.executeAsync {
+                            try await task.onDelayed(on: messenger)
                         }
                     }
 
@@ -136,6 +170,7 @@ final class JobQueue: ObservableObject {
                 debugLog("No jobs to run")
                 self.hasOutstandingTasks = false
                 self.runningJobs = false
+                self.markAsDone()
             } else {
                 var hasUsefulTasks = false
                 
@@ -201,10 +236,10 @@ final class JobQueue: ObservableObject {
         var index = 0
         let initialJob = jobs[0]
 
-        if await initialJob.props.isBackgroundTask, jobs.count > 1 {
+        if initialJob.props.isBackgroundTask, jobs.count > 1 {
             findBetterTask: for newIndex in 1..<jobs.count {
                 let newJob = jobs[newIndex]
-                if await !newJob.props.isBackgroundTask {
+                if !newJob.props.isBackgroundTask {
                     index = newIndex
                     break findBetterTask
                 }
@@ -247,7 +282,7 @@ final class JobQueue: ObservableObject {
             switch task.retryMode.raw {
             case .retryAfter(let retryDelay, let maxAttempts):
                 debugLog("Delaying task for an hour")
-                await job.didRetry(retryDelay: retryDelay)
+                try await job.delayExecution(retryDelay: retryDelay)
                 
                 if let maxAttempts = maxAttempts, await job.attempts >= maxAttempts {
                     try await self.cancelJob(job)

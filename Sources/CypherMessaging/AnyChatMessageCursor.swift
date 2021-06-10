@@ -78,15 +78,16 @@ fileprivate final class DeviceChatCursor {
         self.latestOrder = messages.last?.order ?? self.latestOrder
         
         self.drained = messages.count < limit
-        
-        self.offset += messages.count
-        self.messages.append(contentsOf: messages.map { message in
-            AnyChatMessage(
-                target: self.target,
-                messenger: self.messenger,
-                raw: self.messenger.decrypt(message)
-            )
-        })
+                                            
+                                            self.offset += messages.count
+                                            
+                                            try await self.messages.append(contentsOf: messages.asyncMap { message in
+                                                AnyChatMessage(
+                                                    target: self.target,
+                                                    messenger: self.messenger,
+                                                    raw: try await self.messenger.decrypt(message)
+                                                )
+                                            })
     }
 }
 
@@ -124,7 +125,7 @@ public final class AnyChatMessageCursor {
                     message: message
                 )
                 
-                return await (message.raw.message.sentDate ?? Date(), result)
+                return (message.raw.message.sentDate ?? Date(), result)
             } else {
                 return nil
             }
@@ -134,8 +135,8 @@ public final class AnyChatMessageCursor {
             switch self.sortMode {
             case .ascending:
                 return lhs.0 < rhs.0
-            case .descending:
-                return lhs.0 > rhs.0
+                                case .descending:
+                                    return lhs.0 > rhs.0
             }
         }
         
@@ -178,7 +179,7 @@ public final class AnyChatMessageCursor {
         var devices = try await conversation.memberDevices().asyncMap { device in
             await DeviceChatCursor(
                 target: conversation.getTarget(),
-                conversationId: conversation.conversation.id,
+                conversationId: conversation.conversation.encrypted.id,
                 messenger: conversation.messenger,
                 senderId: device.props.senderId,
                 sortMode: sortMode
@@ -187,7 +188,7 @@ public final class AnyChatMessageCursor {
         await devices.append(
             DeviceChatCursor(
                 target: conversation.getTarget(),
-                conversationId: conversation.conversation.id,
+                conversationId: conversation.conversation.encrypted.id,
                 messenger: conversation.messenger,
                 senderId: conversation.messenger.deviceIdentityId,
                 sortMode: sortMode
@@ -195,7 +196,7 @@ public final class AnyChatMessageCursor {
         )
         
         return await AnyChatMessageCursor(
-            conversationId: conversation.conversation.id,
+            conversationId: conversation.conversation.encrypted.id,
             messenger: conversation.messenger,
             devices: devices,
             sortMode: sortMode

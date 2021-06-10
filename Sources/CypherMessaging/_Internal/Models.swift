@@ -31,20 +31,17 @@ public final class ConversationModel: Model {
 extension DecryptedModel where M == ConversationModel {
     public var members: Set<Username> {
         get { props.members }
-        set { props.members = newValue }
     }
     public var metadata: Document {
         get { props.metadata }
-        set { props.metadata = newValue }
     }
     public var localOrder: Int {
         get { props.localOrder }
-        set { props.localOrder = newValue }
     }
     
-    func getNextLocalOrder() async -> Int {
+    func getNextLocalOrder() async throws -> Int {
         let order = localOrder
-        localOrder += 1
+        try await setProp(at: \.localOrder, to: order &+ 1)
         return order
    }
 }
@@ -95,10 +92,9 @@ extension DecryptedModel where M == DeviceIdentityModel {
     }
     public var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
         get { props.doubleRatchet }
-        set { props.doubleRatchet = newValue }
     }
-    func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) async {
-        self.doubleRatchet = newValue
+    func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) async throws {
+        try await setProp(at: \.doubleRatchet, to: newValue)
     }
 }
 
@@ -131,16 +127,14 @@ extension DecryptedModel where M == ContactModel {
     public var username: Username {
         get { props.username }
     }
-    public internal(set) var config: UserConfig {
+    public var config: UserConfig {
         get { props.config }
-        set { props.config = newValue }
     }
     public var metadata: Document {
         get { props.metadata }
-        set { props.metadata = newValue }
     }
-    func updateConfig(to newValue: UserConfig) async {
-        self.config = newValue
+    func updateConfig(to newValue: UserConfig) async throws {
+        try await self.setProp(at: \.config, to: newValue)
     }
 }
 
@@ -268,13 +262,11 @@ extension DecryptedModel where M == ChatMessageModel {
     public var receiveDate: Date {
         get { props.receiveDate }
     }
-    public internal(set) var deliveryState: ChatMessageModel.DeliveryState {
+    public var deliveryState: ChatMessageModel.DeliveryState {
         get { props.deliveryState }
-        set { props.deliveryState = newValue }
     }
     public var message: SingleCypherMessage {
         get { props.message }
-        set { props.message = newValue }
     }
     public var senderUser: Username {
         get { props.senderUser }
@@ -284,8 +276,11 @@ extension DecryptedModel where M == ChatMessageModel {
     }
     
     @discardableResult
-    func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) async -> MarkMessageResult {
-        deliveryState.transition(to: newState)
+    func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
+        var state = self.deliveryState
+        let result = state.transition(to: newState)
+        try await setProp(at: \.deliveryState, to: state)
+        return result
     }
 }
 
@@ -338,25 +333,21 @@ extension DecryptedModel where M == JobModel {
     }
     public var task: Document {
         get { props.task }
-        set { props.task = newValue }
     }
     public var delayedUntil: Date? {
         get { props.delayedUntil }
-        set { props.delayedUntil = newValue }
     }
     public var scheduledAt: Date {
         get { props.scheduledAt }
-        set { props.scheduledAt = newValue }
     }
     public var attempts: Int {
         get { props.attempts }
-        set { props.attempts = newValue }
     }
     public var isBackgroundTask: Bool {
         get { props.isBackgroundTask }
     }
-    func didRetry(retryDelay: TimeInterval) async {
-        delayedUntil = Date().addingTimeInterval(retryDelay)
-        attempts += 1
+    func delayExecution(retryDelay: TimeInterval) async throws {
+        try await setProp(at: \.delayedUntil, to: Date().addingTimeInterval(retryDelay))
+        try await setProp(at: \.attempts, to: self.attempts + 1)
     }
 }

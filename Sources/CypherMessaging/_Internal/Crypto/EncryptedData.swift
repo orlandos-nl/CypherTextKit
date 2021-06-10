@@ -3,8 +3,9 @@ import Foundation
 import Crypto
 
 /// Used when encrypting a specific value
-public struct Encrypted<T: Codable>: Codable {
+public final class Encrypted<T: Codable>: Codable {
     private var value: AES.GCM.SealedBox
+    private var wrapped: T?
     
     public init(_ value: T, encryptionKey: SymmetricKey) throws {
         // Wrap the type so it can be encoded by BSON
@@ -16,8 +17,19 @@ public struct Encrypted<T: Codable>: Codable {
         self.value = try AES.GCM.seal(data, using: encryptionKey)
     }
     
+    public func update(to value: T, using encryptionKey: SymmetricKey) async throws {
+        self.wrapped = value
+        let wrapper = PrimitiveWrapper(value: value)
+        let data = try BSONEncoder().encode(wrapper).makeData()
+        self.value = try AES.GCM.seal(data, using: encryptionKey)
+    }
+    
     // The inverse of the initializer
     public func decrypt(using encryptionKey: SymmetricKey) throws -> T {
+        if let wrapped = wrapped {
+            return wrapped
+        }
+        
         // Decrypt the data into encoded data
         let data = try AES.GCM.open(value, using: encryptionKey)
         
@@ -25,7 +37,9 @@ public struct Encrypted<T: Codable>: Codable {
         let wrapper = try BSONDecoder().decode(PrimitiveWrapper<T>.self, from: Document(data: data))
         
         // Return the value
-        return wrapper.value
+        let value = wrapper.value
+//        wrapped = value
+        return value
     }
     
     public func makeData() -> Data {

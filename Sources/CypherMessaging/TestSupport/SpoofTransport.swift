@@ -10,6 +10,7 @@ fileprivate final class SpoofServer {
     fileprivate var publicKeys = [Username: UserConfig]()
     fileprivate var groupChats = [GroupChatId: GroupChatConfig]()
     fileprivate var publishedBlobs = [String: Data]()
+    fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
     
     fileprivate static let local = SpoofServer()
     
@@ -42,6 +43,14 @@ fileprivate final class SpoofServer {
         }
         
         backlog[deviceId] = nil
+        
+        if !isDoneNotifications.isEmpty && !hasBacklog {
+            for notification in isDoneNotifications {
+                notification.succeed(())
+            }
+            
+            isDoneNotifications = []
+        }
     }
     
     func sendEvent(_ event: CypherServerEvent, to username: Username, deviceId: DeviceId?) async throws {
@@ -79,18 +88,27 @@ fileprivate final class SpoofServer {
             userDevices[user.username] = [user.deviceId]
         }
     }
+    
+    func doneProcessing() async throws -> SynchronisationResult {
+        if hasBacklog {
+            let el = self.elg.next()
+            let promise = el.makePromise(of: Void.self)
+            self.isDoneNotifications.append(promise)
+            try await promise.futureResult.get()
+            return .synchronised
+        } else {
+            return .skipped
+        }
+    }
+}
+
+public enum SynchronisationResult {
+    case skipped, synchronised, busy
 }
 
 public final class SpoofTransportClient: ConnectableCypherTransportClient {
-    public static func synchronize() {
-        let server = SpoofServer.local
-        
-        repeat {
-            usleep(100)
-        } while server.hasBacklog
-        
-        // Job queue needs to be processed, TODO
-        sleep(1)
+    public static func synchronize() async throws -> SynchronisationResult {
+        try await SpoofServer.local.doneProcessing()
     }
     
     let username: Username

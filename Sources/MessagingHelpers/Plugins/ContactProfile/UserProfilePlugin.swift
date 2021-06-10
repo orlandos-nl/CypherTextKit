@@ -25,8 +25,12 @@ public struct UserProfilePlugin: Plugin {
         messenger: CypherMessenger
     ) async throws {
         let contact = try await messenger.createContact(byUsername: username)
-        contact.metadata[self.pluginIdentifier] = Document()
-        try await contact.save()
+        try await contact.modifyMetadata(
+            ofType: ContactMetadata.self,
+            forPlugin: Self.self
+        ) { metadata in
+            metadata = .init()
+        }
     }
     
     
@@ -121,13 +125,12 @@ public struct UserProfilePlugin: Plugin {
 
 @available(macOS 12, iOS 15, *)
 extension Contact {
-    public var status: String? {
-        try? self.withMetadata(
+    public func getStatus() async -> String? {
+        try? await self.model.withMetadata(
             ofType: ContactMetadata.self,
-            forPlugin: UserProfilePlugin.self
-        ) { metadata in
-            metadata.status
-        }
+            forPlugin: UserProfilePlugin.self,
+            run: \.status
+        )
     }
 }
 
@@ -137,7 +140,7 @@ extension CypherMessenger {
         to status: String
     ) async throws {
         for contact in try await listContacts() {
-            let chat = try await createPrivateChat(with: contact.username)
+            let chat = try await createPrivateChat(with: contact.model.username)
             _ = try await chat.sendRawMessage(
                 type: .magic,
                 messageSubtype: "@/contacts/profile/status/update",
@@ -166,7 +169,7 @@ extension CypherMessenger {
         to data: Data
     ) async throws {
         for contact in try await listContacts() {
-            let chat = try await createPrivateChat(with: contact.username)
+            let chat = try await createPrivateChat(with: contact.model.username)
             _ = try await chat.sendRawMessage(
                 type: .magic,
                 messageSubtype: "@/contacts/profile/picture/update",
