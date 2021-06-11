@@ -136,29 +136,26 @@ final class UserProfilePluginTests: XCTestCase {
             preferredPushType: .none
         )
         
-        
         try await sync.synchronise()
         
         let m1Chat = try await m1.getPrivateChat(with: "m0")!
-        
         
         try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
         
-        let contact = try await m1.getContact(byUsername: "m0")
+        let contact = try await m1.getContact(byUsername: "m0")!
         
-        await XCTAssertAsyncEqual(await contact?.getStatus(), nil)
+        await XCTAssertAsyncEqual(await contact.getStatus(), nil)
         await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, nil)
         await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, nil)
         
         try await m0.changeProfileStatus(to: "Available")
         
-        
         try await sync.synchronise()
         
-        await XCTAssertAsyncEqual(await contact?.getStatus(), "Available")
+        await XCTAssertAsyncEqual(await contact.getStatus(), "Available")
         await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, "Available")
         await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, "Available")
     }

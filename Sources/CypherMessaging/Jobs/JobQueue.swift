@@ -26,7 +26,7 @@ final class JobQueue: ObservableObject {
         self.database = database
         self.databaseEncryptionKey = databaseEncryptionKey
         self.jobs = try await database.readJobs().asyncMap { job -> (Date, DecryptedModel<JobModel>) in
-            let job = try await job.decrypted(using: databaseEncryptionKey)
+            let job = try await messenger.decrypt(job)
             return (job.scheduledAt, job)
         }.sorted { lhs, rhs in
             lhs.0 < rhs.0
@@ -55,12 +55,16 @@ final class JobQueue: ObservableObject {
     }
     
     public func queueTask<T: Task>(_ task: T) async throws {
+        guard let messenger = self.messenger else {
+            throw CypherSDKError.appLocked
+        }
+        
         let job = try JobModel(
             props: .init(task: task),
             encryptionKey: databaseEncryptionKey
         )
         
-        try await self.jobs.append(job.decrypted(using: databaseEncryptionKey))
+        try await self.jobs.append(messenger.decrypt(job))
         try await database.createJob(job)
         if !self.runningJobs {
             self.startRunningTasks()

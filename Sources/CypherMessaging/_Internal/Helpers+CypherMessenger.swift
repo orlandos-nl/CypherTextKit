@@ -12,7 +12,7 @@ enum UserIdentityState {
 internal extension CypherMessenger {
     func _markMessage(byRemoteId remoteId: String, updatedBy user: Username, as newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
         let message = try await cachedStore.fetchChatMessage(byRemoteId: remoteId)
-        let decryptedMessage = try await message.decrypted(using: self.databaseEncryptionKey)
+        let decryptedMessage = try await self.decrypt(message)
         
         guard decryptedMessage.props.senderUser == self.username else {
             throw CypherSDKError.badInput

@@ -32,6 +32,7 @@ extension DecryptedModel where M == ContactModel {
         run: (inout C) throws -> Result
     ) async throws -> Result {
         var metadata = self.metadata
+        print("metadata", metadata)
         let pluginStorage = metadata[plugin.pluginIdentifier] ?? Document()
         var pluginMetadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)
         let result = try run(&pluginMetadata)

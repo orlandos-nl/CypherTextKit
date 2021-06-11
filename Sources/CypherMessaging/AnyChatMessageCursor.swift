@@ -125,7 +125,7 @@ public final class AnyChatMessageCursor {
                     message: message
                 )
                 
-                return (message.raw.message.sentDate ?? Date(), result)
+                return (message.sentDate ?? Date(), result)
             } else {
                 return nil
             }

@@ -12,7 +12,7 @@ public protocol Model: Codable {
 }
 
 // TODO: Re-enable cache, and reuse the cache globally
-public struct DecryptedModel<M: Model> {
+public final class DecryptedModel<M: Model> {
     public let encrypted: M
     public var id: UUID { encrypted.id }
     public private(set) var props: M.SecureProps
@@ -24,7 +24,6 @@ public struct DecryptedModel<M: Model> {
     }
     
     public func modifyProps<T>(run: (inout M.SecureProps) async throws -> T) async throws -> T {
-        var props = try encrypted.props.decrypt(using: encryptionKey)
         let value = try await run(&props)
         try await encrypted.props.update(to: props, using: encryptionKey)
         return value
@@ -40,11 +39,5 @@ public struct DecryptedModel<M: Model> {
         self.encrypted = model
         self.encryptionKey = encryptionKey
         self.props = try model.props.decrypt(using: encryptionKey)
-    }
-}
-
-extension Model {
-    func decrypted(using symmetricKey: SymmetricKey) async throws -> DecryptedModel<Self> {
-        try await DecryptedModel(model: self, encryptionKey: symmetricKey)
     }
 }

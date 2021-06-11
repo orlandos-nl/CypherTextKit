@@ -87,7 +87,6 @@ final class CypherSDKTests: XCTestCase {
     }
     
     func testIPv6P2P() async throws {
-        XCTExpectFailure("Test may fail on ipv4 only networks")
         try await runP2PTests(IPv6TCPP2PTransportClientFactory())
     }
     
@@ -179,7 +178,13 @@ final class CypherSDKTests: XCTestCase {
         
         try await sync.synchronise()
         
-        await XCTAssertAsyncEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
+        if factory is IPv6TCPP2PTransportClientFactory {
+            XCTExpectFailure("Test may fail on ipv4 only networks") {
+                XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
+            }
+        } else {
+            XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
+        }
     }
     
     func testGroupChat() async throws {

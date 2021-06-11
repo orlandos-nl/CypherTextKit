@@ -282,7 +282,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         let data = try await database.readLocalDeviceConfig()
         let box = try AES.GCM.SealedBox(combined: data)
         let encryptedConfig = Encrypted<_CypherMessengerConfig>(representing: box)
-        let config = try await encryptedConfig.decrypt(using: encryptionKey)
+        let config = try encryptedConfig.decrypt(using: encryptionKey)
         let transportRequest = try TransportCreationRequest(
             username: config.username,
             deviceId: config.deviceKeys.deviceId,
@@ -317,12 +317,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     public func verifyAppPassword(matches appPassword: String) async -> Bool {
         do {
             let salt = try await self.cachedStore.readLocalDeviceSalt()
-            let encryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+            let appEncryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+            print("appEncryptionKey", appEncryptionKey.withUnsafeBytes{ Data($0).base64EncodedString() })
                 
             let data = try await self.cachedStore.readLocalDeviceConfig()
             let box = try AES.GCM.SealedBox(combined: data)
             let config = Encrypted<_CypherMessengerConfig>(representing: box)
-            _ = try await config.decrypt(using: encryptionKey)
+            _ = try config.decrypt(using: appEncryptionKey)
             return true
         } catch {
             return false
@@ -480,8 +481,27 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
     }
     
+    actor ModelCache {
+        private var cache = [UUID: Weak<AnyObject>]()
+        func getModel<M: Model>(ofType: M.Type, forId id: UUID) -> DecryptedModel<M>? {
+            cache[id]?.object as? DecryptedModel<M>
+        }
+        
+        func addModel<M: Model>(_ model: DecryptedModel<M>, forId id: UUID) {
+            cache[id] = Weak(object: model)
+        }
+    }
+    
+    private let cache = ModelCache()
+    
     public func decrypt<M: Model>(_ model: M) async throws -> DecryptedModel<M> {
-        try await model.decrypted(using: databaseEncryptionKey)
+        if let decrypted = await cache.getModel(ofType: M.self, forId: model.id) {
+            return decrypted
+        }
+        
+        let decrypted = try await DecryptedModel(model: model, encryptionKey: databaseEncryptionKey)
+        await cache.addModel(decrypted, forId: model.id)
+        return decrypted
     }
     
     public func encryptLocalFile(_ data: Data) throws -> AES.GCM.SealedBox {
@@ -530,10 +550,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     public func writeCustomConfig(_ custom: Document) async throws {
-        guard await verifyAppPassword(matches: appPassword) else {
-            throw CypherSDKError.incorrectAppPassword
-        }
-            
         let salt = try await self.cachedStore.readLocalDeviceSalt()
         let appEncryptionKey = Self.formAppEncryptionKey(appPassword: self.appPassword, salt: salt)
         var newConfig = self.config

@@ -1,7 +1,7 @@
 import NIO
 //import NIOTransportServices
 
-enum IPv6TCPP2PError: Error {
+public enum IPv6TCPP2PError: Error {
     case reconnectFailed, timeout, socketCreationFailed
 }
 
