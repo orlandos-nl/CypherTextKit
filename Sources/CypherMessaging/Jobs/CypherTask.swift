@@ -445,6 +445,7 @@ enum TaskHelpers {
             )
         }
         
-        _ = try await messenger._markMessage(byId: task.localId, as: .none)
+        // Message may be a magic packet
+        _ = try? await messenger._markMessage(byId: task.localId, as: .none)
     }
 }

@@ -195,7 +195,7 @@ public final class AnyChatMessageCursor {
             )
         )
         
-        return await AnyChatMessageCursor(
+        return AnyChatMessageCursor(
             conversationId: conversation.conversation.encrypted.id,
             messenger: conversation.messenger,
             devices: devices,

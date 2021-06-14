@@ -37,18 +37,18 @@ public enum TargetConversation {
         }
     }
     
-    public enum Resolved: AnyConversation {
+    public enum Resolved: AnyConversation, Identifiable {
         case privateChat(PrivateChat)
         case groupChat(GroupChat)
         case internalChat(InternalConversation)
         
         init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) async {
-            let members = await conversation.members
+            let members = conversation.members
             guard members.contains(messenger.username) else {
                 return nil
             }
             
-            let metadata = await conversation.metadata
+            let metadata = conversation.metadata
             switch members.count {
             case ..<0:
                 return nil
@@ -99,7 +99,7 @@ public enum TargetConversation {
         public func getTarget() async -> TargetConversation {
             switch self {
             case .privateChat(let chat):
-                return await chat.getTarget()
+                return chat.getTarget()
             case .groupChat(let chat):
                 return await chat.getTarget()
             case .internalChat(let chat):
@@ -120,6 +120,10 @@ public enum TargetConversation {
             case .internalChat(let chat):
                 return chat.cache
             }
+        }
+        
+        public var id: UUID {
+            conversation.id
         }
     }
 }

@@ -53,7 +53,7 @@ public protocol CypherMessengerEventHandler {
     func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document
     func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document
     func onMessageChange(_ message: AnyChatMessage)
-    func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger)
+    func onCreateContact(_ contact: Contact, messenger: CypherMessenger)
     func onCreateConversation(_ conversation: AnyConversation)
     func onCreateChatMessage(_ conversation: AnyChatMessage)
     func onContactIdentityChange(username: Username, messenger: CypherMessenger)

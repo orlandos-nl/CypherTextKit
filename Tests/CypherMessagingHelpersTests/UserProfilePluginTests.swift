@@ -70,7 +70,7 @@ struct AcceptAllDeviceRegisteriesPlugin: Plugin {
     func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
     
     func onMessageChange(_ message: AnyChatMessage) {}
-    func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {}
+    func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {}
     func onCreateConversation(_ conversation: AnyConversation) {}
     func onCreateChatMessage(_ conversation: AnyChatMessage) {}
     func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
@@ -147,7 +147,7 @@ final class UserProfilePluginTests: XCTestCase {
         
         let contact = try await m1.getContact(byUsername: "m0")!
         
-        await XCTAssertAsyncEqual(await contact.getStatus(), nil)
+        XCTAssertNil(contact.status)
         await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, nil)
         await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, nil)
         
@@ -155,7 +155,7 @@ final class UserProfilePluginTests: XCTestCase {
         
         try await sync.synchronise()
         
-        await XCTAssertAsyncEqual(await contact.getStatus(), "Available")
+        XCTAssertEqual(contact.status, "Available")
         await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, "Available")
         await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, "Available")
     }

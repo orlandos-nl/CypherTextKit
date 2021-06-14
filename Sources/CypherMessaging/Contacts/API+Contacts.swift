@@ -4,7 +4,7 @@ import Foundation
 import NIO
 
 @available(macOS 12, iOS 15, *)
-public struct Contact {
+public struct Contact: Identifiable {
     public let messenger: CypherMessenger
     public let model: DecryptedModel<ContactModel>
     public var eventLoop: EventLoop { messenger.eventLoop }
@@ -16,6 +16,8 @@ public struct Contact {
     public var username: Username {
         model.username
     }
+    
+    public var id: UUID { model.id }
 }
 
 @available(macOS 12, iOS 15, *)

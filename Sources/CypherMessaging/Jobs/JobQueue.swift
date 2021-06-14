@@ -47,7 +47,7 @@ final class JobQueue: ObservableObject {
     func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
         try await database.removeJob(job.encrypted)
         for i in 0..<self.jobs.count {
-            if await self.jobs[i].id == job.id {
+            if self.jobs[i].id == job.id {
                 self.jobs.remove(at: i)
                 return
             }
@@ -129,7 +129,14 @@ final class JobQueue: ObservableObject {
 
             var jobs = jobs
 
-            let result = (try? await runNextJob(in: &jobs)) ?? .failed
+            let result: TaskResult
+            
+            do {
+                result = try await runNextJob(in: &jobs)
+            } catch {
+                debugLog("Task error", error)
+                result = .failed
+            }
             
             if let pausing = self.pausing {
                 debugLog("Job finished, pausing started. Stopping further processing")
@@ -145,11 +152,11 @@ final class JobQueue: ObservableObject {
                         let task: Task
                         
                         do {
-                            let taskKey = await TaskKey(rawValue: job.taskKey)
+                            let taskKey = TaskKey(rawValue: job.taskKey)
                             if let decoder = Self.taskDecoders[taskKey] {
-                                task = try await decoder(job.task)
+                                task = try decoder(job.task)
                             } else {
-                                task = try await BSONDecoder().decode(CypherTask.self, from: job.task)
+                                task = try BSONDecoder().decode(CypherTask.self, from: job.task)
                             }
                         } catch {
                             return self.eventLoop.makeFailedFuture(error)
@@ -179,8 +186,8 @@ final class JobQueue: ObservableObject {
                 var hasUsefulTasks = false
                 
                 findUsefulTasks: for job in jobs {
-                    if let delayedUntil = await job.delayedUntil, delayedUntil >= Date() {
-                        if await !job.props.isBackgroundTask {
+                    if let delayedUntil = job.delayedUntil, delayedUntil >= Date() {
+                        if !job.props.isBackgroundTask {
                             break findUsefulTasks
                         }
                         
@@ -252,20 +259,26 @@ final class JobQueue: ObservableObject {
 
         let job = jobs.remove(at: index)
 
-        debugLog("Running job", await job.props)
+        debugLog("Running job", job.props)
 
-        if let delayedUntil = await job.delayedUntil, delayedUntil >= Date() {
+        if let delayedUntil = job.delayedUntil, delayedUntil >= Date() {
             debugLog("Task was delayed into the future")
             return .delayed
         }
         
         let task: Task
         
-        let taskKey = await TaskKey(rawValue: job.props.taskKey)
-        if let decoder = Self.taskDecoders[taskKey] {
-            task = try await decoder(job.props.task)
-        } else {
-            task = try await BSONDecoder().decode(CypherTask.self, from: job.task)
+        do {
+            let taskKey = TaskKey(rawValue: job.props.taskKey)
+            if let decoder = Self.taskDecoders[taskKey] {
+                task = try decoder(job.props.task)
+            } else {
+                task = try BSONDecoder().decode(CypherTask.self, from: job.task)
+            }
+        } catch {
+            debugLog("Failed to decode job", job.id, ". Error:", error)
+            try await self.dequeueJob(job)
+            return .success
         }
         
         guard let messenger = self.messenger else {
@@ -288,7 +301,7 @@ final class JobQueue: ObservableObject {
                 debugLog("Delaying task for an hour")
                 try await job.delayExecution(retryDelay: retryDelay)
                 
-                if let maxAttempts = maxAttempts, await job.attempts >= maxAttempts {
+                if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {
                     try await self.cancelJob(job)
                     return .success
                 }

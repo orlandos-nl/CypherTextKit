@@ -10,7 +10,7 @@ extension CypherMessenger {
         for conversation in conversations {
             let conversation = try await self.decrypt(conversation)
             
-            if await conversation.id == id {
+            if conversation.id == id {
                 return await TargetConversation.Resolved(
                     conversation: conversation,
                     messenger: self
@@ -60,7 +60,7 @@ extension CypherMessenger {
         
         let devices = try await self._fetchDeviceIdentities(for: groupConfig.admin)
         for device in devices {
-            if await config.blob.isSigned(by: device.props.identity) {
+            if config.blob.isSigned(by: device.props.identity) {
                 let config = ReferencedBlob(id: config.id, blob: groupConfig)
                 let groupMetadata = GroupMetadata(
                     custom: [:],
@@ -556,15 +556,15 @@ public struct PrivateChat: AnyConversation {
     public let messenger: CypherMessenger
     public let cache = Cache()
     
-    public func getTarget() async -> TargetConversation {
-        await .otherUser(getConversationPartner())
+    public func getTarget() -> TargetConversation {
+        .otherUser(conversationPartner)
     }
     
-    public func resolveTarget() async -> TargetConversation.Resolved {
+    public func resolveTarget() -> TargetConversation.Resolved {
         .privateChat(self)
     }
     
-    public func getConversationPartner() async -> Username {
+    public var conversationPartner: Username {
         // PrivateChats always have exactly 2 members
         var members = conversation.members
         members.remove(messenger.username)

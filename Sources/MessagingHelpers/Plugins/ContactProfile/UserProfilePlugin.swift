@@ -2,8 +2,9 @@ import CypherMessaging
 import NIO
 
 public struct ContactMetadata: Codable {
-    public fileprivate(set) var status: String?
-    public fileprivate(set) var image: Data?
+    public var status: String?
+    public var nickname: String?
+    public var image: Data?
 }
 
 // TODO: Use synchronisation framework for own devices
@@ -115,7 +116,7 @@ public struct UserProfilePlugin: Plugin {
     public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
     public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {}
     public func onMessageChange(_ message: AnyChatMessage) { }
-    public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) { }
+    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) { }
     public func onCreateConversation(_ conversation: AnyConversation) { }
     public func onCreateChatMessage(_ conversation: AnyChatMessage) { }
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
@@ -125,12 +126,37 @@ public struct UserProfilePlugin: Plugin {
 
 @available(macOS 12, iOS 15, *)
 extension Contact {
-    public func getStatus() async -> String? {
-        try? await self.model.withMetadata(
-            ofType: ContactMetadata.self,
+    public var status: String? {
+        try? self.model.getProp(
+            fromMetadata: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
             run: \.status
         )
+    }
+    
+    public var image: Data? {
+        try? self.model.getProp(
+            fromMetadata: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self,
+            run: \.image
+        )
+    }
+    
+    public var nickname: String? {
+        try? self.model.getProp(
+            fromMetadata: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self,
+            run: \.nickname
+        )
+    }
+    
+    public func setNickname(to nickname: String) async throws {
+        try await self.model.withMetadata(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self
+        ) { metadata in
+            metadata.nickname = nickname
+        }
     }
 }
 

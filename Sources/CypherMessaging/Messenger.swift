@@ -55,11 +55,11 @@ internal struct P2PSession {
         deviceIdentity: DecryptedModel<DeviceIdentityModel>,
         transport: P2PTransportClient,
         client: P2PClient
-    ) async {
-        self.username = await deviceIdentity.username
-        self.deviceId = await deviceIdentity.deviceId
-        self.publicKey = await deviceIdentity.publicKey
-        self.identity = await deviceIdentity.identity
+    ) {
+        self.username = deviceIdentity.username
+        self.deviceId = deviceIdentity.deviceId
+        self.publicKey = deviceIdentity.publicKey
+        self.identity = deviceIdentity.identity
         self.transport = transport
         self.client = client
     }
@@ -318,7 +318,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         do {
             let salt = try await self.cachedStore.readLocalDeviceSalt()
             let appEncryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
-            print("appEncryptionKey", appEncryptionKey.withUnsafeBytes{ Data($0).base64EncodedString() })
                 
             let data = try await self.cachedStore.readLocalDeviceConfig()
             let box = try AES.GCM.SealedBox(combined: data)
@@ -517,7 +516,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     func _signRatchetMessage(_ message: RatchetMessage, rekey: RekeyState) throws -> RatchetedCypherMessage {
-        try RatchetedCypherMessage(
+        return try RatchetedCypherMessage(
             message: message,
             signWith: self.config.deviceKeys.identity,
             rekey: rekey == .rekey
@@ -555,7 +554,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         var newConfig = self.config
         newConfig.custom = custom
         let encryptedConfig = try Encrypted(newConfig, encryptionKey: appEncryptionKey)
-        try await self.cachedStore.writeLocalDeviceConfig(try BSONEncoder().encode(encryptedConfig).makeData())
+        try await self.cachedStore.writeLocalDeviceConfig(encryptedConfig.makeData())
         self.config = newConfig
     }
     
@@ -752,7 +751,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What is a P2P session already exists?
         if let client = client {
             client.delegate = self
-            await self.p2pSessions.append(
+            self.p2pSessions.append(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,
@@ -839,7 +838,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What if a P2P session already exists?
         if let client = client {
             client.delegate = self
-            await self.p2pSessions.append(
+            self.p2pSessions.append(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,

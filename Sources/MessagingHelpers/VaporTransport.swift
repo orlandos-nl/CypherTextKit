@@ -52,16 +52,26 @@ public struct UserProfile: Decodable {
 
 enum MessageType: String, Codable {
     case message = "a"
-    case readReceipt = "b"
+    case multiRecipientMessage = "b"
+    case readReceipt = "c"
 }
 
-struct ChatMessagePacket: Codable {
+struct DirectMessagePacket: Codable {
     let _id: ObjectId
     let messageId: String
     let createdAt: Date
     let sender: UserDeviceId
     let recipient: UserDeviceId
-    let message: MultiRecipientCypherMessage
+    let message: RatchetedCypherMessage
+}
+
+struct ChatMultiRecipientMessagePacket: Codable {
+    let _id: ObjectId
+    let messageId: String
+    let createdAt: Date
+    let sender: UserDeviceId
+    let recipient: UserDeviceId
+    let multiRecipientMessage: MultiRecipientCypherMessage
 }
 
 struct ReadReceiptPacket: Codable {
@@ -77,12 +87,10 @@ struct ReadReceiptPacket: Codable {
     let recipient: UserDeviceId
 }
 
-let host = "localhost:8080"
-let httpHost = "http://\(host)"
-
 @available(macOS 12, iOS 15, *)
 extension URLSession {
     func getBSON<D: Decodable>(
+        httpHost: String,
         url: String,
         username: Username,
         deviceId: DeviceId,
@@ -101,6 +109,7 @@ extension URLSession {
     }
     
     func postBSON<E: Encodable>(
+        httpHost: String,
         url: String,
         username: Username,
         deviceId: DeviceId,
@@ -135,8 +144,8 @@ struct SignUpResponse: Codable {
     let existingUser: Username?
 }
 
-public struct SendMessage: Codable {
-    let message: MultiRecipientCypherMessage
+public struct SendMessage<Message: Codable>: Codable {
+    let message: Message
     let messageId: String
 }
 
@@ -153,12 +162,15 @@ public final class VaporTransport: CypherServerTransportClient {
     let username: Username
     let deviceId: DeviceId
     let httpClient: URLSession
+    let host: String
+    var httpHost: String { "https://\(host)" }
     var appleToken: String?
     private var wantsConnection = true
     private var webSocket: WebSocket?
     private(set) var signer: TransportCreationRequest
     
     private init(
+        host: String,
         username: Username,
         deviceId: DeviceId,
         eventLoop: EventLoop,
@@ -166,6 +178,7 @@ public final class VaporTransport: CypherServerTransportClient {
         signer: TransportCreationRequest,
         appleToken: String?
     ) {
+        self.host = host
         self.username = username
         self.deviceId = deviceId
         self.eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
@@ -173,9 +186,10 @@ public final class VaporTransport: CypherServerTransportClient {
         self.signer = signer
     }
     
-    public static func login(for transportRequest: TransportCreationRequest, eventLoop: EventLoop) async throws -> VaporTransport {
+    public static func login(for transportRequest: TransportCreationRequest, host: String, eventLoop: EventLoop) async throws -> VaporTransport {
         let client = URLSession(configuration: .default)
         return VaporTransport(
+            host: host,
             username: transportRequest.username,
             deviceId: transportRequest.deviceId,
             eventLoop: eventLoop,
@@ -187,6 +201,7 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public static func registerPlain(
         transportRequest: TransportCreationRequest,
+        host: String,
         eventLoop: EventLoop
     ) async throws -> VaporTransport {
         let client = URLSession(configuration: .default)
@@ -195,7 +210,18 @@ public final class VaporTransport: CypherServerTransportClient {
             config: transportRequest.userConfig
         )
         
+        let transport = VaporTransport(
+            host: host,
+            username: transportRequest.username,
+            deviceId: transportRequest.deviceId,
+            eventLoop: eventLoop,
+            httpClient: client,
+            signer: transportRequest,
+            appleToken: nil
+        )
+        
         let (body, _) = try await client.postBSON(
+            httpHost: transport.httpHost,
             url: "auth/plain/sign-up",
             username: transportRequest.username,
             deviceId: transportRequest.deviceId,
@@ -208,19 +234,13 @@ public final class VaporTransport: CypherServerTransportClient {
             throw VaporTransportError.usernameMismatch
         }
         
-        return VaporTransport(
-            username: transportRequest.username,
-            deviceId: transportRequest.deviceId,
-            eventLoop: eventLoop,
-            httpClient: client,
-            signer: transportRequest,
-            appleToken: nil
-        )
+        return transport
     }
     
     public static func register(
         appleToken: String,
         transportRequest: TransportCreationRequest,
+        host: String,
         eventLoop: EventLoop
     ) async throws -> VaporTransport {
         let client = URLSession(configuration: .default)
@@ -229,8 +249,18 @@ public final class VaporTransport: CypherServerTransportClient {
             appleToken: appleToken,
             config: transportRequest.userConfig
         )
+        let transport = VaporTransport(
+            host: host,
+            username: transportRequest.username,
+            deviceId: transportRequest.deviceId,
+            eventLoop: eventLoop,
+            httpClient: client,
+            signer: transportRequest,
+            appleToken: appleToken
+        )
         
         let (body, _) = try await client.postBSON(
+            httpHost: transport.httpHost,
             url: "auth/apple/sign-up",
             username: transportRequest.username,
             deviceId: transportRequest.deviceId,
@@ -243,14 +273,7 @@ public final class VaporTransport: CypherServerTransportClient {
             throw VaporTransportError.usernameMismatch
         }
         
-        return VaporTransport(
-            username: transportRequest.username,
-            deviceId: transportRequest.deviceId,
-            eventLoop: eventLoop,
-            httpClient: client,
-            signer: transportRequest,
-            appleToken: appleToken
-        )
+        return transport
     }
     
     public private(set) var authenticated = AuthenticationState.unauthenticated
@@ -287,7 +310,7 @@ public final class VaporTransport: CypherServerTransportClient {
         
         let eventLoop = self.eventLoop
         
-        try await WebSocket.connect(to: "ws://\(host)/websocket", headers: headers, on: eventLoop) { webSocket in
+        try await WebSocket.connect(to: "wss://\(host)/websocket", headers: headers, on: eventLoop) { webSocket in
             self.webSocket = webSocket
             self.authenticated = .authenticated
             
@@ -307,11 +330,22 @@ public final class VaporTransport: CypherServerTransportClient {
                         
                         switch packet.type {
                         case .message:
-                            let message = try BSONDecoder().decode(ChatMessagePacket.self, from: packet.body)
+                            let message = try BSONDecoder().decode(DirectMessagePacket.self, from: packet.body)
+                            
+                            _ = try await delegate.receiveServerEvent(
+                                .messageSent(
+                                    message.message,
+                                    id: message.messageId,
+                                    byUser: message.sender.user,
+                                    deviceId: message.sender.device
+                                )
+                            )
+                        case .multiRecipientMessage:
+                            let message = try BSONDecoder().decode(ChatMultiRecipientMessagePacket.self, from: packet.body)
                             
                             _ = try await delegate.receiveServerEvent(
                                 .multiRecipientMessageSent(
-                                    message.message,
+                                    message.multiRecipientMessage,
                                     id: message.messageId,
                                     byUser: message.sender.user,
                                     deviceId: message.sender.device
@@ -358,6 +392,7 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func readKeyBundle(forUsername username: Username) async throws -> UserConfig {
         try await self.httpClient.getBSON(
+            httpHost: httpHost,
             url: "users/\(username.raw)",
             username: self.username,
             deviceId: self.deviceId,
@@ -368,6 +403,7 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func publishKeyBundle(_ data: UserConfig) async throws {
         _ = try await self.httpClient.postBSON(
+            httpHost: httpHost,
             url: "current-user/config",
             username: self.username,
             deviceId: self.deviceId,
@@ -390,10 +426,20 @@ public final class VaporTransport: CypherServerTransportClient {
         fatalError()
     }
     
-    public func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId: DeviceId, messageId: String) async throws { }
+    public func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId deviceId: DeviceId, messageId: String) async throws {
+        _ = try await self.httpClient.postBSON(
+            httpHost: httpHost,
+            url: "users/\(username.raw)/devices/\(deviceId.raw)/send-message",
+            username: self.username,
+            deviceId: self.deviceId,
+            token: self.makeToken(),
+            body: SendMessage(message: message, messageId: messageId)
+        )
+    }
     
     public func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, messageId: String) async throws {
         _ = try await self.httpClient.postBSON(
+            httpHost: httpHost,
             url: "actions/send-message",
             username: self.username,
             deviceId: self.deviceId,

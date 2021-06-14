@@ -58,7 +58,7 @@ public struct ChatActivityPlugin: Plugin {
     public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
     
     public func onMessageChange(_ message: AnyChatMessage) { }
-    public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) { }
+    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) { }
     public func onCreateConversation(_ conversation: AnyConversation) { }
     public func onCreateChatMessage(_ conversation: AnyChatMessage) { }
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
@@ -68,8 +68,8 @@ public struct ChatActivityPlugin: Plugin {
 
 @available(macOS 12, iOS 15, *)
 extension AnyConversation {
-    public func getLastActivity() async -> Date? {
-        try? await self.conversation.withMetadata(
+    public var lastActivity: Date? {
+        try? self.conversation.getProp(
             ofType: ChatActivityMetadata.self,
             forPlugin: ChatActivityPlugin.self,
             run: \.lastActivity

@@ -57,7 +57,7 @@ struct CustomMagicPacketPlugin: Plugin {
     func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
     func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
     func onMessageChange(_ message: AnyChatMessage) {}
-    func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {}
+    func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {}
     func onCreateConversation(_ conversation: AnyConversation) {}
     func onCreateChatMessage(_ conversation: AnyChatMessage) {}
     func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
@@ -132,16 +132,16 @@ final class FriendshipPluginTests: XCTestCase {
             text: "Hello",
             preferredPushType: .none
         )
-        await XCTAssertAsyncFalse(await m0Contact.isMutualFriendship())
-        await XCTAssertAsyncFalse(await m0Contact.isContactBlocked())
+        XCTAssertFalse(m0Contact.isMutualFriendship)
+        XCTAssertFalse(m0Contact.isBlocked)
         
         try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 0)
         
-        await XCTAssertAsyncFalse(await m1Contact.isMutualFriendship())
-        await XCTAssertAsyncFalse(await m1Contact.isContactBlocked())
+        XCTAssertFalse(m1Contact.isMutualFriendship)
+        XCTAssertFalse(m1Contact.isBlocked)
         
         try await m1Contact.befriend()
         try await sync.synchronise()
@@ -154,10 +154,10 @@ final class FriendshipPluginTests: XCTestCase {
         
         try await sync.synchronise()
         
-        await XCTAssertAsyncTrue(await m0Contact.isMutualFriendship())
-        await XCTAssertAsyncTrue(await m1Contact.isMutualFriendship())
-        await XCTAssertAsyncFalse(await m0Contact.isContactBlocked())
-        await XCTAssertAsyncFalse(await m1Contact.isContactBlocked())
+        XCTAssertTrue(m0Contact.isMutualFriendship)
+        XCTAssertTrue(m1Contact.isMutualFriendship)
+        XCTAssertFalse(m0Contact.isBlocked)
+        XCTAssertFalse(m1Contact.isBlocked)
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 3)
         await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
@@ -165,13 +165,13 @@ final class FriendshipPluginTests: XCTestCase {
         // Now they block each other
         try await m0Contact.block()
         
-        await XCTAssertAsyncFalse(await m0Contact.isMutualFriendship())
-        await XCTAssertAsyncTrue(await m0Contact.isContactBlocked())
+        XCTAssertFalse(m0Contact.isMutualFriendship)
+        XCTAssertTrue(m0Contact.isBlocked)
         
         try await sync.synchronise()
         
-        await XCTAssertAsyncFalse(await m1Contact.isMutualFriendship())
-        await XCTAssertAsyncTrue(await m1Contact.isContactBlocked())
+        XCTAssertFalse(m1Contact.isMutualFriendship)
+        XCTAssertTrue(m1Contact.isBlocked)
         
         _ = try await m1Chat.sendRawMessage(
             type: .text,
@@ -202,10 +202,10 @@ final class FriendshipPluginTests: XCTestCase {
         
         try await sync.synchronise()
         
-        await XCTAssertAsyncTrue(await m0Contact.isMutualFriendship())
-        await XCTAssertAsyncTrue(await m1Contact.isMutualFriendship())
-        await XCTAssertAsyncFalse(await m0Contact.isContactBlocked())
-        await XCTAssertAsyncFalse(await m1Contact.isContactBlocked())
+        XCTAssertTrue(m0Contact.isMutualFriendship)
+        XCTAssertTrue(m1Contact.isMutualFriendship)
+        XCTAssertFalse(m0Contact.isBlocked)
+        XCTAssertFalse(m1Contact.isBlocked)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,

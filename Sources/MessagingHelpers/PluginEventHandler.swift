@@ -111,7 +111,7 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         }.get()
     }
     
-    public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {
+    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {
         for plugin in plugins {
             plugin.onCreateContact(contact, messenger: messenger)
         }

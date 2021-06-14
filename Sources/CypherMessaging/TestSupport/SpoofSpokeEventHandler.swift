@@ -30,7 +30,7 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     
     public func onCreateChatMessage(_ conversation: AnyChatMessage) {}
     
-    public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {}
+    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {}
     
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
     

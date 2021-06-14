@@ -1,6 +1,10 @@
 import Foundation
 import Crypto
 
+public protocol MetadataProps {
+    var metadata: Document { get set }
+}
+
 public protocol Model: Codable {
     associatedtype SecureProps: Codable
     

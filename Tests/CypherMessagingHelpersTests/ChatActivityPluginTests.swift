@@ -39,20 +39,20 @@ final class ChatActivityPluginTests: XCTestCase {
         try await sync.synchronise()
         
         let m0Chat = try await m0.createPrivateChat(with: "m1")
-        await XCTAssertAsyncNil(await m0Chat.getLastActivity())
+        XCTAssertNotNil(m0Chat.lastActivity)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
         )
-        await         XCTAssertAsyncNotNil(await m0Chat.getLastActivity())
+        XCTAssertNotNil(m0Chat.lastActivity)
         
         
         try await sync.synchronise()
         
         let m1Chat = try await m1.getPrivateChat(with: "m0")!
-        await XCTAssertAsyncNotNil(await m1Chat.getLastActivity())
+        XCTAssertNotNil(m1Chat.lastActivity)
     }
     
     func testGroupChat() async throws {
@@ -87,19 +87,19 @@ final class ChatActivityPluginTests: XCTestCase {
         try await sync.synchronise()
         
         let m0Chat = try await m0.createGroupChat(with: ["m1"])
-        await XCTAssertAsyncNil(await m0Chat.getLastActivity())
+        XCTAssertNotNil(m0Chat.lastActivity)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
         )
-        await XCTAssertAsyncNotNil(await m0Chat.getLastActivity())
+        XCTAssertNotNil(m0Chat.lastActivity)
         
         try await sync.synchronise()
         
         if let m1Chat = try await m1.getGroupChat(byId: m0Chat.getGroupId()) {
-            await XCTAssertAsyncNotNil(await m1Chat.getLastActivity())
+            XCTAssertNotNil(m1Chat.lastActivity)
         } else {
             XCTFail()
         }

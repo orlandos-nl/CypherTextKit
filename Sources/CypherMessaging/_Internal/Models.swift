@@ -4,7 +4,7 @@ import Foundation
 import CypherProtocol
 
 public final class ConversationModel: Model {
-    public struct SecureProps: Codable {
+    public struct SecureProps: Codable, MetadataProps {
         public var members: Set<Username>
         public var metadata: Document
         public var localOrder: Int
@@ -99,7 +99,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
 }
 
 public final class ContactModel: Model {
-    public struct SecureProps: Codable {
+    public struct SecureProps: Codable, MetadataProps {
         public let username: Username
         public internal(set) var config: UserConfig
         public var metadata: Document

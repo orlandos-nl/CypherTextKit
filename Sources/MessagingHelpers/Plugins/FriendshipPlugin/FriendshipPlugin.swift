@@ -60,11 +60,7 @@ public struct FriendshipPlugin: Plugin {
         if case .groupChat = target {
             if ruleset.blockAffectsGroupChats, senderUsername != message.messenger.username {
                 let contact = try await message.messenger.createContact(byUsername: senderUsername)
-                if await contact.isContactBlocked() {
-                    return .ignore
-                } else {
-                    return nil
-                }
+                return contact.isBlocked ? .ignore : nil
             }
             
             return nil
@@ -122,12 +118,28 @@ public struct FriendshipPlugin: Plugin {
                     metadata.theirState = changedState.newState
                     return .ignore
                 }
+            case "query":
+                let changedState = try BSONEncoder().encode(
+                    ChangeFriendshipState(
+                        newState: contact.ourState,
+                        subject: contact.username
+                    )
+                )
+                
+                try await message.conversation.sendRawMessage(
+                    type: .magic,
+                    messageSubtype: "@/contacts/friendship/change-state",
+                    text: "",
+                    metadata: changedState,
+                    preferredPushType: .none
+                )
+                return .ignore
             default:
                 return .ignore
             }
         }
         
-        switch (await contact.getOurState(), await contact.getTheirState()) {
+        switch (contact.ourState, contact.theirState) {
         case (.blocked, _), (_, .blocked):
             return .ignore
         case (.undecided, _), (_, .undecided):
@@ -162,7 +174,7 @@ public struct FriendshipPlugin: Plugin {
         return [:]
     }
 
-    public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) { }
+    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) { }
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
     public func onMessageChange(_ message: AnyChatMessage) { }
     public func onCreateConversation(_ conversation: AnyConversation) { }
@@ -175,32 +187,32 @@ public struct FriendshipPlugin: Plugin {
 
 @available(macOS 12, iOS 15, *)
 extension Contact {
-    public func getOurState() async -> FriendshipStatus {
-        await (try? self.model.withMetadata(
+    public var ourState: FriendshipStatus {
+        (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.ourState
         )) ?? .undecided
     }
     
-    public func getTheirState() async -> FriendshipStatus {
-        await (try? self.model.withMetadata(
+    public var theirState: FriendshipStatus {
+        (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.theirState
         )) ?? .undecided
     }
     
-    public func isMutualFriendship() async -> Bool {
-        await (try? self.model.withMetadata(
+    public var isMutualFriendship: Bool {
+        (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.mutualFriendship
         )) ?? false
     }
     
-    public func isContactBlocked() async -> Bool {
-        await (try? self.model.withMetadata(
+    public var isBlocked: Bool {
+        (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.contactBlocked
@@ -219,8 +231,18 @@ extension Contact {
         try await changeOurState(to: .notFriend)
     }
     
+    public func query() async throws {
+        let privateChat = try await self.messenger.createPrivateChat(with: self.username)
+        _ = try await privateChat.sendRawMessage(
+            type: .magic,
+            messageSubtype: "@/contacts/friendship/query",
+            text: "",
+            preferredPushType: .none
+        )
+    }
+    
     public func unblock() async throws {
-        guard await getOurState() == .blocked else {
+        guard ourState == .blocked else {
             return
         }
         
