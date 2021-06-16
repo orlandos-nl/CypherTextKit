@@ -57,7 +57,7 @@ public struct MultiRecipientCypherMessage: Codable {
     
     private(set) var tag: CypherMesageTag?
     public let container: MultiRecipientContainer
-    public let keys: [ContainerKey]
+    public var keys: [ContainerKey]
     
     public init(
         encryptedMessage: Data,

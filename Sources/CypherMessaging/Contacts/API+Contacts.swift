@@ -4,13 +4,14 @@ import Foundation
 import NIO
 
 @available(macOS 12, iOS 15, *)
-public struct Contact: Identifiable {
+public struct Contact: Identifiable, Hashable {
     public let messenger: CypherMessenger
     public let model: DecryptedModel<ContactModel>
     public var eventLoop: EventLoop { messenger.eventLoop }
     
     public func save() async throws {
         try await messenger.cachedStore.updateContact(model.encrypted)
+        messenger.eventHandler.onUpdateContact(self)
     }
     
     public var username: Username {
@@ -18,6 +19,14 @@ public struct Contact: Identifiable {
     }
     
     public var id: UUID { model.id }
+    
+    public static func ==(lhs: Contact, rhs: Contact) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        id.hash(into: &hasher)
+    }
 }
 
 @available(macOS 12, iOS 15, *)

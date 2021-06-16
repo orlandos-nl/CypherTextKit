@@ -214,7 +214,8 @@ internal extension CypherMessenger {
         sender: Username,
         senderDevice: DeviceId
     ) async throws {
-        let (data, deviceIdentity) = try await self._readWithRatchetEngine(ofUser: sender, deviceId: senderDevice, message: message)
+        let deviceIdentity = try await self._fetchDeviceIdentity(for: sender, deviceId: senderDevice)
+        let data = try await deviceIdentity._readWithRatchetEngine(ofUser: sender, deviceId: senderDevice, message: message, messenger: self)
         let message: CypherMessage
         
         if let multiRecipientContainer = multiRecipientContainer {
@@ -234,11 +235,6 @@ internal extension CypherMessenger {
         }
         
         func processMessage(_ message: SingleCypherMessage) async throws {
-            if let sentDate = message.sentDate, sentDate > Date() {
-                // Message was sent in the future, which is impossible
-                return
-            }
-            
             return try await self._processMessage(
                 message: message,
                 remoteMessageId: messageId,
@@ -256,7 +252,7 @@ internal extension CypherMessenger {
         }
     }
     
-    private func _processMessage(
+    func _processMessage(
         message: SingleCypherMessage,
         remoteMessageId: String,
         sender: DecryptedModel<DeviceIdentityModel>
@@ -302,9 +298,11 @@ internal extension CypherMessenger {
                     remoteMessageId: remoteMessageId,
                     sender: sender
                 )
+            case (.magic, let subType) where subType.hasPrefix("_/ignore/"):
+                return
             default:
                 guard message.messageSubtype?.hasPrefix("_/") != true else {
-                    debugLog("Unknown message subtype in cypher messenger namespace")
+                    debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
                     throw CypherSDKError.badInput
                 }
                 
@@ -350,9 +348,14 @@ internal extension CypherMessenger {
                 }
             }
         case .groupChat(let groupId):
-            guard message.messageSubtype?.hasPrefix("_/") != true else {
-                debugLog("Unknown message subtype in cypher messenger namespace")
-                throw CypherSDKError.badInput
+            if let subType = message.messageSubtype, subType.hasPrefix("_/") {
+                switch subType {
+                case "_/ignore":
+                    return
+                default:
+                    debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
+                    throw CypherSDKError.badInput
+                }
             }
             
             let group = try await self._openGroupChat(byId: groupId)
@@ -402,9 +405,11 @@ internal extension CypherMessenger {
                     remoteMessageId: remoteMessageId,
                     sender: sender
                 )
+            case (.magic, let subType) where subType.hasPrefix("_/ignore/"):
+                return
             case (.magic, let subType), (.media, let subType), (.text, let subType):
                 if subType.hasPrefix("_/") {
-                    debugLog("Unknown message subtype in cypher messenger namespace")
+                    debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
                     throw CypherSDKError.badInput
                 }
             }

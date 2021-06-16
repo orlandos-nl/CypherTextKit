@@ -369,7 +369,7 @@ enum CypherTask: Codable, Task {
             let result = try await messenger._markMessage(byId: task.localId, as: task.newState)
             switch result {
             case .error:
-                throw CypherSDKError.invalidDeliveryStateTransition
+                return
             case .success:
                 ()
             case .notModified:
@@ -410,7 +410,27 @@ enum TaskHelpers {
             throw CypherSDKError.offline
         }
         
-        let devices = try await messenger._fetchDeviceIdentities(forUsers: task.recipients)
+        var devices = try await messenger._fetchDeviceIdentities(forUsers: task.recipients)
+        
+        for i in 1...devices.count {
+            let index = devices.count - i
+            let device = devices[index]
+            
+            do {
+                if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
+                    with: device.username,
+                    deviceId: device.deviceId
+                ) {
+                    try await p2pTransport.sendMessage(task.message, messageId: task.messageId)
+                    devices.remove(at: index)
+                }
+            } catch {
+                debugLog("Failed to send message over P2P connection", error)
+            }
+        }
+        
+        if devices.isEmpty { return }
+        
         let message = try await messenger._createMultiRecipientMessage(
             encrypting: task.message,
             forDevices: devices
@@ -431,12 +451,29 @@ enum TaskHelpers {
 
         // Fetch the identity
         debugLog("Executing task: Send message")
+            
+        if let p2pTransport = try await messenger.getEstablishedP2PConnection(with: task.recipient, deviceId: task.recipientDeviceId) {
+            do {
+                try await p2pTransport.sendMessage(
+                    task.message,
+                    messageId: task.messageId
+                )
+                
+                // Message may be a magic packet
+                _ = try? await messenger._markMessage(byId: task.localId, as: .none)
+                
+                return
+            } catch {
+                debugLog("P2P Connection failed to communicate")
+            }
+        }
+        
         try await messenger._writeWithRatchetEngine(ofUser: task.recipient, deviceId: task.recipientDeviceId) { ratchetEngine, rekeyState in
             let encodedMessage = try BSONEncoder().encode(task.message).makeData()
             let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
 
             let encryptedMessage = try messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
-
+            print(encryptedMessage.rekey)
             try await messenger.transport.sendMessage(
                 encryptedMessage,
                 toUser: task.recipient,

@@ -96,12 +96,13 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
             
             for interface in interfaces {
                 if
-                    interface.name == "en0",
+//                    interface.name == "en0",
                     let address = interface.address,
                     address.protocol == .inet6,
-                    !address.isMulticast,
+//                    !address.isMulticast,
                     let foundIpAddress = address.ipAddress,
-                    !foundIpAddress.hasPrefix("fe80:")
+                    !foundIpAddress.hasPrefix("fe80:"),
+                    !foundIpAddress.contains("::1")
                 {
                     ipAddress = foundIpAddress
                     break findInterface
@@ -110,6 +111,7 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
             
             throw IPv6TCPP2PError.socketCreationFailed
         } catch {
+            debugLog("Failed to create P2PIPv6 Session", error)
             throw error
         }
         
@@ -150,7 +152,10 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
                         "port": port
                     ])
                 }
-            }.cascadeFailure(to: promise)
+            }.whenFailure { error in
+                debugLog("Failed to host IPv6 Server", error)
+                promise.fail(error)
+            }
         
         return try await promise.futureResult.get()
 //        #endif

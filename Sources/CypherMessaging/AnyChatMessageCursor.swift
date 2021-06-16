@@ -78,10 +78,9 @@ fileprivate final class DeviceChatCursor {
         self.latestOrder = messages.last?.order ?? self.latestOrder
         
         self.drained = messages.count < limit
-                                            
-                                            self.offset += messages.count
-                                            
-                                            try await self.messages.append(contentsOf: messages.asyncMap { message in
+        self.offset += messages.count
+                                            try await self.messages.append(
+                                                contentsOf: messages.asyncMap { message in
                                                 AnyChatMessage(
                                                     target: self.target,
                                                     messenger: self.messenger,

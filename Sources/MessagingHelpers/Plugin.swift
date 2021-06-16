@@ -11,12 +11,32 @@ public protocol Plugin {
     func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document
     func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document
     func onMessageChange(_ message: AnyChatMessage)
+    func onConversationChange(_ conversation: AnyConversation)
+    func onContactChange(_ contact: Contact)
     func onCreateContact(_ contact: Contact, messenger: CypherMessenger)
     func onCreateConversation(_ conversation: AnyConversation)
     func onCreateChatMessage(_ conversation: AnyChatMessage)
     func onContactIdentityChange(username: Username, messenger: CypherMessenger)
     func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger)
     func onP2PClientClose(messenger: CypherMessenger)
+}
+
+extension Plugin {
+    public func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws {}
+    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {}
+    public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? { nil }
+    public func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction? { nil }
+    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
+    public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
+    public func onMessageChange(_ message: AnyChatMessage) {}
+    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {}
+    public func onConversationChange(_ conversation: AnyConversation) {}
+    public func onCreateConversation(_ conversation: AnyConversation) {}
+    public func onCreateChatMessage(_ conversation: AnyChatMessage) {}
+    public func onContactChange(_ contact: Contact) {}
+    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
+    public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
+    public func onP2PClientClose(messenger: CypherMessenger) {}
 }
 
 @available(macOS 12, iOS 15, *)

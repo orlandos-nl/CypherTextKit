@@ -319,6 +319,7 @@ extension AnyConversation {
     
     public func save() async throws {
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
+        messenger.eventHandler.onUpdateConversation(self)
     }
     
     private func getNextLocalOrder() async throws -> Int {

@@ -32,8 +32,6 @@ struct CustomMagicPacketPlugin: Plugin {
     let onInput: () -> ()
     let onOutput: () -> ()
     
-    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws { }
-    
     func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {
         try await messenger.addDevice(config)
     }
@@ -53,16 +51,6 @@ struct CustomMagicPacketPlugin: Plugin {
         
         return nil
     }
-    
-    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    func onMessageChange(_ message: AnyChatMessage) {}
-    func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {}
-    func onCreateConversation(_ conversation: AnyConversation) {}
-    func onCreateChatMessage(_ conversation: AnyChatMessage) {}
-    func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
-    func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
-    func onP2PClientClose(messenger: CypherMessenger) {}
 }
 
 @available(macOS 12, iOS 15, *)

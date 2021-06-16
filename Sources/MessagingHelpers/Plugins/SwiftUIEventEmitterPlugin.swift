@@ -6,27 +6,27 @@ import Combine
 public final class SwiftUIEventEmitter: ObservableObject {
     public let onRekey = PassthroughSubject<Void, Never>()
     public let savedChatMessages = PassthroughSubject<AnyChatMessage, Never>()
-//    public let onRekey = PassthroughSubject<Void, Never>()
+    
+    public let chatMessageChanged = PassthroughSubject<AnyChatMessage, Never>()
+    public let conversationChanged = PassthroughSubject<TargetConversation.Resolved, Never>()
+    public let contactChanged = PassthroughSubject<Contact, Never>()
+    
+    public let p2pClientConnected = PassthroughSubject<P2PClient, Never>()
+    
+    public let contactAdded = PassthroughSubject<Contact, Never>()
+    public let conversationAdded = PassthroughSubject<AnyConversation, Never>()
+    
     @Published public private(set) var conversations = [TargetConversation.Resolved]()
     @Published public fileprivate(set) var contacts = [Contact]()
+    let sortChats: (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
     
-    public init() {}
+    public init(sortChats: @escaping (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
+        self.sortChats = sortChats
+    }
     
     public func boot(for messenger: CypherMessenger) async {
         do {
-            self.conversations = try await messenger.listConversations(includingInternalConversation: true) { lhs, rhs in
-                switch (lhs.lastActivity, rhs.lastActivity) {
-                case (.some(let lhs), .some(let rhs)):
-                    return lhs > rhs
-                case (.some, .none):
-                    return true
-                case (.none, .some):
-                    return false
-                case (.none, .none):
-                    return true
-                }
-            }
-            
+            self.conversations = try await messenger.listConversations(includingInternalConversation: true, increasingOrder: sortChats)
             self.contacts = try await messenger.listContacts()
         } catch {}
     }
@@ -48,35 +48,42 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         emitter.onRekey.send()
     }
     
-    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {
-        
+    public func onMessageChange(_ message: AnyChatMessage) {
+        DispatchQueue.main.async {
+            emitter.chatMessageChanged.send(message)
+        }
     }
     
-    public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
-        nil
+    public func onConversationChange(_ conversation: AnyConversation) {
+        detach {
+            let conversation = await conversation.resolveTarget()
+            DispatchQueue.main.async {
+                emitter.conversationChanged.send(conversation)
+            }
+        }
     }
     
-    public func onSendMessage(
-        _ message: SentMessageContext
-    ) async throws -> SendMessageAction? {
-        nil
+    public func onContactChange(_ contact: Contact) {
+        emitter.contactChanged.send(contact)
     }
     
-    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    
-    public func onMessageChange(_ message: AnyChatMessage) { }
     public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {
         emitter.contacts.append(contact)
+        emitter.contactAdded.send(contact)
     }
-    public func onCreateConversation(_ conversation: AnyConversation) { }
+    
+    public func onCreateConversation(_ conversation: AnyConversation) {
+        emitter.conversationAdded.send(conversation)
+    }
+    
     public func onCreateChatMessage(_ chatMessage: AnyChatMessage) {
         DispatchQueue.main.async {
             self.emitter.savedChatMessages.send(chatMessage)
         }
     }
-    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
-    public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) { }
-    public func onP2PClientClose(messenger: CypherMessenger) { }
+    
+    public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {
+        emitter.p2pClientConnected.send(client)
+    }
 }
 //#endif

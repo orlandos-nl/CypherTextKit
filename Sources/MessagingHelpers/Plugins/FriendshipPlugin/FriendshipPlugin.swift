@@ -155,8 +155,6 @@ public struct FriendshipPlugin: Plugin {
         }
     }
     
-    public func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction? { nil }
-    
     public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document {
         let metadata = FriendshipMetadata(
             ourState: .undecided,
@@ -165,24 +163,6 @@ public struct FriendshipPlugin: Plugin {
         
         return try BSONEncoder().encode(metadata)
     }
-    
-    // Uninteresting events
-    
-    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document{
-        // We don't store any metadata in PrivateChat right now
-        // Contact is used instead
-        return [:]
-    }
-
-    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) { }
-    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
-    public func onMessageChange(_ message: AnyChatMessage) { }
-    public func onCreateConversation(_ conversation: AnyConversation) { }
-    public func onCreateChatMessage(_ conversation: AnyChatMessage) { }
-    public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) { }
-    public func onP2PClientClose(messenger: CypherMessenger) { }
-    public func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws { }
-    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws { }
 }
 
 @available(macOS 12, iOS 15, *)

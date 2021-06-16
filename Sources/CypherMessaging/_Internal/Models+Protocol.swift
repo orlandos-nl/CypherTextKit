@@ -17,6 +17,7 @@ public protocol Model: Codable {
 
 // TODO: Re-enable cache, and reuse the cache globally
 public final class DecryptedModel<M: Model> {
+    public let lock = NSLock()
     public let encrypted: M
     public var id: UUID { encrypted.id }
     public private(set) var props: M.SecureProps

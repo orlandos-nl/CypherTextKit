@@ -8,7 +8,7 @@ public enum DeviceRegisteryMode: Int, Codable {
     case masterDevice, childDevice, unregistered
 }
 
-fileprivate struct _CypherMessengerConfig: Codable {
+internal struct _CypherMessengerConfig: Codable {
     private enum CodingKeys: String, CodingKey {
         case databaseEncryptionKey = "a"
         case deviceKeys = "b"
@@ -70,14 +70,14 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     public let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
     private let appPassword: String
-    private var config: _CypherMessengerConfig
+    internal var config: _CypherMessengerConfig
     private var p2pFactories = [P2PTransportClientFactory]()
     private var p2pSessions = [P2PSession]()
     private var inactiveP2PSessionsTimeout: Int? = 30
     internal var deviceIdentityId: Int { config.deviceIdentityId }
     internal let eventHandler: CypherMessengerEventHandler
     internal let cachedStore: _CypherMessengerStoreCache
-    internal let transport: CypherServerTransportClient
+    public let transport: CypherServerTransportClient
     internal let databaseEncryptionKey: SymmetricKey
     
     public var authenticated: AuthenticationState { transport.authenticated }
@@ -104,7 +104,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         self.jobQueue = try await JobQueue(messenger: self, database: self.cachedStore, databaseEncryptionKey: self.databaseEncryptionKey)
         
         try await self.transport.setDelegate(to: self)
-        try await self.transport.reconnect()
+        
+        if transport.authenticated == .unauthenticated {
+            detach {
+                try await self.transport.reconnect()
+            }
+        }
+        
         jobQueue.resume()
     }
     
@@ -457,7 +463,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         var keyMessages = [MultiRecipientCypherMessage.ContainerKey]()
         
         for device in devices {
-            let keyMessage = try await self._writeWithRatchetEngine(ofDevice: device) { ratchetEngine, rekeyState -> MultiRecipientCypherMessage.ContainerKey in
+            let keyMessage = try await device._writeWithRatchetEngine(messenger: self) { ratchetEngine, rekeyState -> MultiRecipientCypherMessage.ContainerKey in
                 let ratchetMessage = try ratchetEngine.ratchetEncrypt(keyData)
                 
                 return try MultiRecipientCypherMessage.ContainerKey(
@@ -558,126 +564,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         self.config = newConfig
     }
     
-    private func _writeWithRatchetEngine<T>(
-        ofDevice device: DecryptedModel<DeviceIdentityModel>,
-        run: @escaping (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
-    ) async throws -> T {
-        var ratchet: DoubleRatchetHKDF<SHA512>
-        let rekey: Bool
-        
-        if let existingState = device.doubleRatchet {
-            ratchet = DoubleRatchetHKDF(
-                state: existingState,
-                configuration: doubleRatchetConfig
-            )
-            rekey = false
-        } else {
-            let secret = try self._formSharedSecret(with: device.props.publicKey)
-            let symmetricKey = self._deriveSymmetricKey(from: secret, initiator: self.username)
-            ratchet = try DoubleRatchetHKDF.initializeSender(
-                secretKey: symmetricKey,
-                contactingRemote: device.props.publicKey,
-                configuration: doubleRatchetConfig
-            )
-            rekey = true
-        }
-        
-        let result = try await run(&ratchet, rekey ? .rekey : .next)
-        try await device.updateDoubleRatchetState(to: ratchet.state)
-        
-        try await self.cachedStore.updateDeviceIdentity(device.encrypted)
-        return result
-    }
-    
     func _writeWithRatchetEngine<T>(
         ofUser username: Username,
         deviceId: DeviceId,
         run: @escaping (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
     ) async throws -> T {
         let device = try await self._fetchDeviceIdentity(for: username, deviceId: deviceId)
-        return try await self._writeWithRatchetEngine(ofDevice: device, run: run)
-    }
-    
-    func _readWithRatchetEngine(
-        ofUser username: Username,
-        deviceId: DeviceId,
-        message: RatchetedCypherMessage
-    ) async throws -> (Data, DecryptedModel<DeviceIdentityModel>) {
-        let device = try await self._fetchDeviceIdentity(for: username, deviceId: deviceId)
-        func rekey() async throws {
-            try await device.updateDoubleRatchetState(to: nil)
-            
-            try await self.eventHandler.onRekey(
-                withUser: username,
-                deviceId: deviceId,
-                messenger: self
-            )
-            try await self.cachedStore.updateDeviceIdentity(device.encrypted)
-            try await self._queueTask(
-                .sendMessage(
-                    SendMessageTask(
-                        message: CypherMessage(
-                            message: SingleCypherMessage(
-                                messageType: .magic,
-                                messageSubtype: "_/protocol/rekey",
-                                text: "",
-                                metadata: [:],
-                                order: 0,
-                                target: .otherUser(username)
-                            )
-                        ),
-                        recipient: username,
-                        recipientDeviceId: deviceId,
-                        localId: UUID(),
-                        messageId: UUID().uuidString
-                    )
-                )
-            )
-        }
-        
-        let data: Data
-        var ratchet: DoubleRatchetHKDF<SHA512>
-        if let existingState = device.doubleRatchet, !message.rekey {
-            ratchet = DoubleRatchetHKDF(
-                state: existingState,
-                configuration: doubleRatchetConfig
-            )
-            
-            do {
-                let ratchetMessage = try message.readAndValidate(usingIdentity: device.props.identity)
-                data = try ratchet.ratchetDecrypt(ratchetMessage)
-            } catch {
-                try await rekey()
-                throw error
-            }
-        } else {
-            guard message.rekey else {
-                try await rekey()
-                throw CypherSDKError.invalidHandshake
-            }
-            
-            do {
-                let secret = try self._formSharedSecret(with: device.props.publicKey)
-                let symmetricKey = self._deriveSymmetricKey(from: secret, initiator: username)
-                let ratchetMessage = try message.readAndValidate(usingIdentity: device.props.identity)
-                (ratchet, data) = try DoubleRatchetHKDF.initializeRecipient(
-                    secretKey: symmetricKey,
-                    contactedBy: device.props.publicKey,
-                    localPrivateKey: self.config.deviceKeys.privateKey,
-                    configuration: doubleRatchetConfig,
-                    initialMessage: ratchetMessage
-                )
-            } catch {
-                // TODO: Ignore incoming messages
-                try await rekey()
-                throw error
-            }
-        }
-        
-        try await device.updateDoubleRatchetState(to: ratchet.state)
-        
-        try await self.cachedStore.updateDeviceIdentity(device.encrypted)
-        return (data, device)
+        return try await device._writeWithRatchetEngine(messenger: self, run: run)
     }
     
     // TODO: Make internal
@@ -747,7 +640,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             )
         )
         
-        let client = try await factory.receiveMessage(message.text, metadata: message.metadata, handle: handle)
+        let client = try? await factory.receiveMessage(message.text, metadata: message.metadata, handle: handle)
         // TODO: What is a P2P session already exists?
         if let client = client {
             client.delegate = self
@@ -781,6 +674,15 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     public func listOpenP2PConnections() -> EventLoopFuture<[P2PClient]> {
         return eventLoop.makeSucceededFuture(p2pSessions.map(\.client))
+    }
+    
+    internal func getEstablishedP2PConnection(
+        with username: Username,
+        deviceId: DeviceId
+    ) async throws -> P2PClient? {
+        p2pSessions.first(where: { user in
+            user.username == username && user.deviceId == deviceId
+        })?.client
     }
     
     internal func getEstablishedP2PConnection(
@@ -850,6 +752,133 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                 )
             )
         }
+    }
+}
+
+extension DecryptedModel where M == DeviceIdentityModel {
+    func _readWithRatchetEngine(
+        ofUser username: Username,
+        deviceId: DeviceId,
+        message: RatchetedCypherMessage,
+        messenger: CypherMessenger
+    ) async throws -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        func rekey() async throws {
+            try await self.updateDoubleRatchetState(to: nil)
+            
+            try await messenger.eventHandler.onRekey(
+                withUser: username,
+                deviceId: deviceId,
+                messenger: messenger
+            )
+            try await messenger.cachedStore.updateDeviceIdentity(encrypted)
+            try await messenger._queueTask(
+                .sendMessage(
+                    SendMessageTask(
+                        message: CypherMessage(
+                            message: SingleCypherMessage(
+                                messageType: .magic,
+                                messageSubtype: "_/ignore",
+                                text: "",
+                                metadata: [:],
+                                order: 0,
+                                target: .otherUser(username)
+                            )
+                        ),
+                        recipient: username,
+                        recipientDeviceId: deviceId,
+                        localId: UUID(),
+                        messageId: UUID().uuidString
+                    )
+                )
+            )
+        }
+        
+        let data: Data
+        var ratchet: DoubleRatchetHKDF<SHA512>
+        if let existingState = self.doubleRatchet, !message.rekey {
+            ratchet = DoubleRatchetHKDF(
+                state: existingState,
+                configuration: doubleRatchetConfig
+            )
+            
+            do {
+                let ratchetMessage = try message.readAndValidate(usingIdentity: self.identity)
+                data = try ratchet.ratchetDecrypt(ratchetMessage)
+            } catch {
+                try await rekey()
+                debugLog("Failed to read message", error)
+                throw error
+            }
+        } else {
+            guard message.rekey else {
+                debugLog("Couldn't read message not marked as rekey")
+                throw CypherSDKError.invalidHandshake
+            }
+            
+            do {
+                let secret = try messenger._formSharedSecret(with: self.publicKey)
+                let symmetricKey = messenger._deriveSymmetricKey(
+                    from: secret,
+                    initiator: messenger.username
+                )
+                print("recipient", symmetricKey.withUnsafeBytes { Data($0).base64EncodedString() })
+                let ratchetMessage = try message.readAndValidate(usingIdentity: self.identity)
+                (ratchet, data) = try DoubleRatchetHKDF.initializeRecipient(
+                    secretKey: symmetricKey,
+                    contactedBy: self.publicKey,
+                    localPrivateKey: messenger.config.deviceKeys.privateKey,
+                    configuration: doubleRatchetConfig,
+                    initialMessage: ratchetMessage
+                )
+            } catch {
+                // TODO: Ignore incoming follow-up messages
+                debugLog("Failed to initialise recipient", error)
+                try await rekey()
+                throw error
+            }
+        }
+        
+        try await self.updateDoubleRatchetState(to: ratchet.state)
+        
+        try await messenger.cachedStore.updateDeviceIdentity(encrypted)
+        return data
+    }
+    
+    func _writeWithRatchetEngine<T>(
+        messenger: CypherMessenger,
+        run: @escaping (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
+    ) async throws -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        var ratchet: DoubleRatchetHKDF<SHA512>
+        let rekey: Bool
+        
+        if let existingState = self.doubleRatchet {
+            ratchet = DoubleRatchetHKDF(
+                state: existingState,
+                configuration: doubleRatchetConfig
+            )
+            rekey = false
+        } else {
+            let secret = try messenger._formSharedSecret(with: publicKey)
+            let symmetricKey = messenger._deriveSymmetricKey(from: secret, initiator: self.username)
+            print("sender", symmetricKey.withUnsafeBytes { Data($0).base64EncodedString() })
+            ratchet = try DoubleRatchetHKDF.initializeSender(
+                secretKey: symmetricKey,
+                contactingRemote: publicKey,
+                configuration: doubleRatchetConfig
+            )
+            rekey = true
+        }
+        
+        let result = try await run(&ratchet, rekey ? .rekey : .next)
+        try await updateDoubleRatchetState(to: ratchet.state)
+        
+        try await messenger.cachedStore.updateDeviceIdentity(encrypted)
+        return result
     }
 }
 

@@ -7,7 +7,7 @@ public struct AnyChatMessage {
     public let raw: DecryptedModel<ChatMessageModel>
     
     public func markAsRead() async throws {
-        if raw.deliveryState == .read {
+        if raw.deliveryState == .read || sender == messenger.username {
             return
         }
         

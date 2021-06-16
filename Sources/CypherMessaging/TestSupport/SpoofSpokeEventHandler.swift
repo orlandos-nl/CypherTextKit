@@ -26,6 +26,10 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
         [:]
     }
     
+    public func onUpdateContact(_ contact: Contact) {}
+    
+    public func onUpdateConversation(_ conversation: AnyConversation) {}
+    
     public func onCreateConversation(_ conversation: AnyConversation) {}
     
     public func onCreateChatMessage(_ conversation: AnyChatMessage) {}

@@ -53,7 +53,6 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func updateContact(_ contact: ContactModel) async throws {
-        assert(contacts?.contains(where: { $0 === contact }) != false)
         // Already saved in-memory, because it's a reference type
         return try await base.updateContact(contact)
     }
@@ -100,7 +99,6 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     func updateConversation(_ conversation: ConversationModel) async throws {
-        assert(conversations?.contains(where: { $0 === conversation }) != false)
         // Already saved in-memory, because it's a reference type
         return try await base.updateConversation(conversation)
     }

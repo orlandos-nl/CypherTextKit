@@ -54,7 +54,9 @@ public protocol CypherMessengerEventHandler {
     func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document
     func onMessageChange(_ message: AnyChatMessage)
     func onCreateContact(_ contact: Contact, messenger: CypherMessenger)
+    func onUpdateContact(_ contact: Contact)
     func onCreateConversation(_ conversation: AnyConversation)
+    func onUpdateConversation(_ conversation: AnyConversation)
     func onCreateChatMessage(_ conversation: AnyChatMessage)
     func onContactIdentityChange(username: Username, messenger: CypherMessenger)
     func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger)

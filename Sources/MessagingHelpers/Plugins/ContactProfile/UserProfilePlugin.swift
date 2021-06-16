@@ -20,20 +20,17 @@ public struct UserProfilePlugin: Plugin {
     
     public init() {}
     
-    public func onRekey(
-        withUser username: Username,
-        deviceId: DeviceId,
-        messenger: CypherMessenger
-    ) async throws {
-        let contact = try await messenger.createContact(byUsername: username)
-        try await contact.modifyMetadata(
-            ofType: ContactMetadata.self,
-            forPlugin: Self.self
-        ) { metadata in
-            metadata = .init()
+    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {
+        detach {
+            let contact = try await messenger.createContact(byUsername: username)
+            try await contact.modifyMetadata(
+                ofType: ContactMetadata.self,
+                forPlugin: Self.self
+            ) { metadata in
+                metadata = .init()
+            }
         }
     }
-    
     
     public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         guard
@@ -111,17 +108,6 @@ public struct UserProfilePlugin: Plugin {
         
         return .send
     }
-    
-    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {}
-    public func onMessageChange(_ message: AnyChatMessage) { }
-    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) { }
-    public func onCreateConversation(_ conversation: AnyConversation) { }
-    public func onCreateChatMessage(_ conversation: AnyChatMessage) { }
-    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
-    public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) { }
-    public func onP2PClientClose(messenger: CypherMessenger) { }
 }
 
 @available(macOS 12, iOS 15, *)
@@ -142,12 +128,12 @@ extension Contact {
         )
     }
     
-    public var nickname: String? {
-        try? self.model.getProp(
+    public var nickname: String {
+        (try? self.model.getProp(
             fromMetadata: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
             run: \.nickname
-        )
+        )) ?? self.username.raw
     }
     
     public func setNickname(to nickname: String) async throws {

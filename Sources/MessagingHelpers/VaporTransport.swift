@@ -87,6 +87,8 @@ struct ReadReceiptPacket: Codable {
     let recipient: UserDeviceId
 }
 
+let maxBodySize = 500_000
+
 @available(macOS 12, iOS 15, *)
 extension URLSession {
     func getBSON<D: Decodable>(
@@ -125,6 +127,11 @@ extension URLSession {
             request.addValue(token, forHTTPHeaderField: "X-API-Token")
         }
         let data = try BSONEncoder().encode(body).makeData()
+        
+        if data.count > maxBodySize {
+            return (Data(), URLResponse())
+        }
+        
         return try await self.upload(for: request, from: data)
     }
 }
@@ -147,6 +154,10 @@ struct SignUpResponse: Codable {
 public struct SendMessage<Message: Codable>: Codable {
     let message: Message
     let messageId: String
+}
+
+public struct SetToken: Codable {
+    let token: String
 }
 
 public final class VaporTransport: CypherServerTransportClient {
@@ -298,96 +309,113 @@ public final class VaporTransport: CypherServerTransportClient {
         } catch {}
     }
     
-    public func reconnect() async throws {
-        wantsConnection = true
-        var headers = HTTPHeaders()
-        headers.add(name: "Content-Type", value: "application/bson")
-        headers.add(name: "X-API-User", value: username.raw)
-        headers.add(name: "X-API-Device", value: deviceId.raw)
-        if let token = makeToken() {
-            headers.add(name: "X-API-Token", value: token)
-        }
-        
-        let eventLoop = self.eventLoop
-        
-        try await WebSocket.connect(to: "wss://\(host)/websocket", headers: headers, on: eventLoop) { webSocket in
-            self.webSocket = webSocket
-            self.authenticated = .authenticated
+    public func reconnect() async {
+        do {
+            if authenticated == .authenticated {
+                // Already connected
+                return
+            }
             
-            webSocket.onBinary { [weak self] webSocket, buffer in
-                guard let delegate = self?.delegate, let transport = self else {
-                    return
-                }
+            wantsConnection = true
+            var headers = HTTPHeaders()
+            headers.add(name: "Content-Type", value: "application/bson")
+            headers.add(name: "X-API-User", value: username.raw)
+            headers.add(name: "X-API-Device", value: deviceId.raw)
+            if let token = makeToken() {
+                headers.add(name: "X-API-Token", value: token)
+            }
+            
+            let eventLoop = self.eventLoop
+            
+            try await WebSocket.connect(
+                to: "wss://\(host)/websocket",
+                headers: headers,
+                configuration: .init(maxFrameSize: 512_000),
+                on: eventLoop
+            ) { webSocket in
+                self.webSocket = webSocket
+                self.authenticated = .authenticated
                 
-                struct Packet: Codable {
-                    let type: MessageType
-                    let body: Document
-                }
-                
-                _ = eventLoop.executeAsync {
-                    do {
-                        let packet = try BSONDecoder().decode(Packet.self, from: Document(buffer: buffer))
-                        
-                        switch packet.type {
-                        case .message:
-                            let message = try BSONDecoder().decode(DirectMessagePacket.self, from: packet.body)
+                webSocket.onBinary { [weak self] webSocket, buffer in
+                    guard let delegate = self?.delegate, let transport = self else {
+                        return
+                    }
+                    
+                    struct Packet: Codable {
+                        let type: MessageType
+                        let body: Document
+                    }
+                    
+                    detach {
+                        do {
+                            let packet = try BSONDecoder().decode(Packet.self, from: Document(buffer: buffer))
                             
-                            _ = try await delegate.receiveServerEvent(
-                                .messageSent(
-                                    message.message,
-                                    id: message.messageId,
-                                    byUser: message.sender.user,
-                                    deviceId: message.sender.device
+                            switch packet.type {
+                            case .message:
+                                let message = try BSONDecoder().decode(DirectMessagePacket.self, from: packet.body)
+                                
+                                try await delegate.receiveServerEvent(
+                                    .messageSent(
+                                        message.message,
+                                        id: message.messageId,
+                                        byUser: message.sender.user,
+                                        deviceId: message.sender.device
+                                    )
                                 )
-                            )
-                        case .multiRecipientMessage:
-                            let message = try BSONDecoder().decode(ChatMultiRecipientMessagePacket.self, from: packet.body)
-                            
-                            _ = try await delegate.receiveServerEvent(
-                                .multiRecipientMessageSent(
-                                    message.multiRecipientMessage,
-                                    id: message.messageId,
-                                    byUser: message.sender.user,
-                                    deviceId: message.sender.device
+                                
+                                // TODO: ACK
+                            case .multiRecipientMessage:
+                                print(packet.body)
+                                let message = try BSONDecoder().decode(ChatMultiRecipientMessagePacket.self, from: packet.body)
+                                
+                                try await delegate.receiveServerEvent(
+                                    .multiRecipientMessageSent(
+                                        message.multiRecipientMessage,
+                                        id: message.messageId,
+                                        byUser: message.sender.user,
+                                        deviceId: message.sender.device
+                                    )
                                 )
-                            )
-                        case .readReceipt:
-                            let receipt = try BSONDecoder().decode(ReadReceiptPacket.self, from: packet.body)
-                            
-                            switch receipt.state {
-                            case .displayed:
-    //                            delegate.receiveServerEvent(.)
-                                ()
-                            case .received:
-    //                            delegate.receiveServerEvent(.messageReceived(by: receipt., deviceId: receipt.sender, id: receipt.messageId))
-                                ()
+                                
+                                // TODO: ACK
+                            case .readReceipt:
+                                let receipt = try BSONDecoder().decode(ReadReceiptPacket.self, from: packet.body)
+                                
+                                switch receipt.state {
+                                case .displayed:
+        //                            delegate.receiveServerEvent(.)
+                                    ()
+                                case .received:
+        //                            delegate.receiveServerEvent(.messageReceived(by: receipt., deviceId: receipt.sender, id: receipt.messageId))
+                                    ()
+                                }
                             }
+                        } catch {
+                            print(error)
+                            _ = await transport.disconnect()
                         }
-                    } catch {
-                        _ = await transport.disconnect()
                     }
                 }
-            }
-            
-            webSocket.onClose.whenComplete { [weak self] _ in
-                if self?.wantsConnection == true {
-                    _ = eventLoop.executeAsync {
-                        try await self?.reconnect()
+                
+                webSocket.onClose.whenComplete { [weak self] _ in
+                    if self?.wantsConnection == true {
+                        _ = eventLoop.executeAsync {
+                            await self?.reconnect()
+                        }
                     }
                 }
-            }
-        }.flatMapErrorThrowing { error in
+            }.get()
+        } catch {
+            print(error)
+            self.authenticated = .authenticationFailure
             if self.wantsConnection {
                 self.eventLoop.flatScheduleTask(in: .seconds(3)) {
                     self.eventLoop.executeAsync {
-                        try await self.reconnect()
+                        await self.reconnect()
                     }
                 }
             }
-            
-            self.authenticated = .authenticationFailure
-            throw error
-        }.get()
+        }
     }
     
     public func readKeyBundle(forUsername username: Username) async throws -> UserConfig {
@@ -409,6 +437,17 @@ public final class VaporTransport: CypherServerTransportClient {
             deviceId: self.deviceId,
             token: self.makeToken(),
             body: data
+        )
+    }
+    
+    public func registerAPNSToken(_ token: Data) async throws {
+        _ = try await self.httpClient.postBSON(
+            httpHost: httpHost,
+            url: "current-device/token",
+            username: self.username,
+            deviceId: self.deviceId,
+            token: self.makeToken(),
+            body: SetToken(token: token.hexString)
         )
     }
     
@@ -446,5 +485,30 @@ public final class VaporTransport: CypherServerTransportClient {
             token: self.makeToken(),
             body: SendMessage(message: message, messageId: messageId)
         )
+    }
+}
+
+let charA = UInt8(UnicodeScalar("a").value)
+let char0 = UInt8(UnicodeScalar("0").value)
+
+private func itoh(_ value: UInt8) -> UInt8 {
+    return (value > 9) ? (charA + value - 10) : (char0 + value)
+}
+
+extension DataProtocol {
+    var hexString: String {
+        let hexLen = self.count * 2
+        let ptr = UnsafeMutablePointer<UInt8>.allocate(capacity: hexLen)
+        var offset = 0
+        
+        self.regions.forEach { (_) in
+            for i in self {
+                ptr[Int(offset * 2)] = itoh((i >> 4) & 0xF)
+                ptr[Int(offset * 2 + 1)] = itoh(i & 0xF)
+                offset += 1
+            }
+        }
+        
+        return String(bytesNoCopy: ptr, length: hexLen, encoding: .utf8, freeWhenDone: true)!
     }
 }

@@ -14,14 +14,6 @@ public struct ChatActivityPlugin: Plugin {
     
     public init() {}
     
-    public func onRekey(
-        withUser username: Username,
-        deviceId: DeviceId,
-        messenger: CypherMessenger
-    ) async throws {}
-    
-    public func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {}
-    
     public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         switch message.message.messageType {
         case .magic:
@@ -53,17 +45,6 @@ public struct ChatActivityPlugin: Plugin {
             }
         }
     }
-    
-    public func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document { [:] }
-    
-    public func onMessageChange(_ message: AnyChatMessage) { }
-    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) { }
-    public func onCreateConversation(_ conversation: AnyConversation) { }
-    public func onCreateChatMessage(_ conversation: AnyChatMessage) { }
-    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) { }
-    public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) { }
-    public func onP2PClientClose(messenger: CypherMessenger) { }
 }
 
 @available(macOS 12, iOS 15, *)

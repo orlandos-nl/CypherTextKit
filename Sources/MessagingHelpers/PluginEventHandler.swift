@@ -67,6 +67,18 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         }
     }
     
+    public func onUpdateConversation(_ conversation: AnyConversation) {
+        for plugin in plugins {
+            plugin.onConversationChange(conversation)
+        }
+    }
+    
+    public func onUpdateContact(_ contact: Contact) {
+        for plugin in plugins {
+            plugin.onContactChange(contact)
+        }
+    }
+    
     public func createPrivateChatMetadata(
         withUser otherUser: Username,
         messenger: CypherMessenger
