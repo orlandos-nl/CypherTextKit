@@ -119,6 +119,7 @@ public struct P2PTransportFactoryHandle {
                     recipient: state.username,
                     recipientDeviceId: state.deviceId,
                     localId: nil,
+                    pushType: .none,
                     messageId: UUID().uuidString
                 )
             )

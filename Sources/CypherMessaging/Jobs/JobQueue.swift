@@ -135,7 +135,7 @@ final class JobQueue: ObservableObject {
                 result = try await runNextJob(in: &jobs)
             } catch {
                 debugLog("Task error", error)
-                result = .failed
+                result = .failed(haltExecution: true)
             }
             
             if let pausing = self.pausing {
@@ -145,9 +145,9 @@ final class JobQueue: ObservableObject {
                 return
             } else {
                 switch result {
-                case .success, .delayed:
+                case .success, .delayed, .failed(haltExecution: false):
                     return try await next(in: jobs)
-                case .failed:
+                case .failed(haltExecution: true):
                     let done = await jobs.asyncMap { job -> EventLoopFuture<Void> in
                         let task: Task
                         
@@ -207,10 +207,6 @@ final class JobQueue: ObservableObject {
                 
                 do {
                     try await next(in: jobs)
-                    // If offline, don't restart this. That can cause infinite loops
-                    if self.messenger?.transport.authenticated == .authenticated {
-                        self.startRunningTasks()
-                    }
                 } catch {
                     debugLog("Job queue error", error)
                     self.runningJobs = false
@@ -240,7 +236,7 @@ final class JobQueue: ObservableObject {
     }
 
     public enum TaskResult {
-        case success, delayed, failed
+        case success, delayed, failed(haltExecution: Bool)
     }
 
     private func runNextJob(in jobs: inout [DecryptedModel<JobModel>]) async throws -> TaskResult {
@@ -286,6 +282,7 @@ final class JobQueue: ObservableObject {
         }
         
         if task.requiresConnectivity, messenger.transport.authenticated != .authenticated {
+            debugLog("Job required connectivity, but app is offline")
             throw CypherSDKError.offline
         }
 
@@ -312,7 +309,7 @@ final class JobQueue: ObservableObject {
                 return .delayed
             case .never:
                 try await self.dequeueJob(job)
-                return .failed
+                return .failed(haltExecution: false)
             }
         }
     }

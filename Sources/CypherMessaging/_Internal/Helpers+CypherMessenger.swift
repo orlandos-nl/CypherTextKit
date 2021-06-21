@@ -18,9 +18,16 @@ internal extension CypherMessenger {
             throw CypherSDKError.badInput
         }
         
+        let oldState = decryptedMessage.deliveryState
         let result = try await decryptedMessage.transitionDeliveryState(to: newState)
-        self._updateChatMessage(decryptedMessage)
-        return result
+        
+        do {
+            try await self._updateChatMessage(decryptedMessage)
+            return result
+        } catch {
+            try await decryptedMessage.setProp(at: \.deliveryState, to: oldState)
+            throw error
+        }
     }
     
     func _markMessage(byId id: UUID?, as newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
@@ -30,14 +37,21 @@ internal extension CypherMessenger {
         
         let message = try await cachedStore.fetchChatMessage(byId: id)
         let decryptedMessage = try await self.decrypt(message)
+        let oldState = decryptedMessage.deliveryState
         
         let result = try await decryptedMessage.transitionDeliveryState(to: newState)
         
-        self._updateChatMessage(decryptedMessage)
-        return result
+        do {
+            try await self._updateChatMessage(decryptedMessage)
+            return result
+        } catch {
+            try await decryptedMessage.setProp(at: \.deliveryState, to: oldState)
+            throw error
+        }
     }
     
-    func _updateChatMessage(_ message: DecryptedModel<ChatMessageModel>) {
+    func _updateChatMessage(_ message: DecryptedModel<ChatMessageModel>) async throws {
+        try await self.cachedStore.updateChatMessage(message.encrypted)
         self.eventHandler.onMessageChange(
             AnyChatMessage(
                 target: message.props.message.target,
@@ -109,6 +123,10 @@ internal extension CypherMessenger {
         )
         
         try await self.cachedStore.createContact(contact)
+        self.eventHandler.onCreateContact(
+            Contact(messenger: self, model: try await self.decrypt(contact)),
+            messenger: self
+        )
         return .newIdentity
     }
     
@@ -136,6 +154,7 @@ internal extension CypherMessenger {
                 senderId: .random(in: 1..<Int.max),
                 publicKey: device.publicKey,
                 identity: device.identity,
+                isMasterDevice: device.isMasterDevice,
                 doubleRatchet: nil
             ),
             encryptionKey: self.databaseEncryptionKey
@@ -148,41 +167,46 @@ internal extension CypherMessenger {
         return decryptedDevice
     }
     
-    // TDOO: Rate limit
+    // TODO: Rate limit
     func _rediscoverDeviceIdentities(
         for username: Username,
         knownDevices: [DecryptedModel<DeviceIdentityModel>]
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
-        let userConfig = try await self.transport.readKeyBundle(forUsername: username)
-        let identityState = try await self._updateUserIdentity(
-            of: username,
-            to: userConfig
-        )
-        
-        switch identityState {
-        case .changedIdentity:
-            self.eventHandler.onContactIdentityChange(username: username, messenger: self)
-            fallthrough
-        case .consistent, .newIdentity:
-            var models = [DecryptedModel<DeviceIdentityModel>]()
+        do {
+            let userConfig = try await self.transport.readKeyBundle(forUsername: username)
+            let identityState = try await self._updateUserIdentity(
+                of: username,
+                to: userConfig
+            )
             
-            for device in try userConfig.readAndValidateDevices() {
-                if let knownDevice = knownDevices.first(where: { $0.props.deviceId == device.deviceId }) {
-                    // Known device, check that everything is consistent
-                    // To prevent tampering
-                    guard knownDevice.props.publicKey == device.publicKey else {
-                        throw CypherSDKError.invalidUserConfig
+            switch identityState {
+            case .changedIdentity:
+                self.eventHandler.onContactIdentityChange(username: username, messenger: self)
+                fallthrough
+            case .consistent, .newIdentity:
+                var models = [DecryptedModel<DeviceIdentityModel>]()
+                
+                for device in try userConfig.readAndValidateDevices() {
+                    if let knownDevice = knownDevices.first(where: { $0.props.deviceId == device.deviceId }) {
+                        // Known device, check that everything is consistent
+                        // To prevent tampering
+                        guard knownDevice.props.publicKey == device.publicKey else {
+                            throw CypherSDKError.invalidUserConfig
+                        }
+                        
+                        models.append(knownDevice)
+                    } else if username == self.username && device.deviceId == self.deviceId {
+                        continue
+                    } else {
+                        try await models.append(self._createDeviceIdentity(from: device, forUsername: username))
                     }
-                    
-                    models.append(knownDevice)
-                } else if username == self.username && device.deviceId == self.deviceId {
-                    continue
-                } else {
-                    try await models.append(self._createDeviceIdentity(from: device, forUsername: username))
                 }
+                
+                return models
             }
-            
-            return models
+        } catch {
+            debugLog("Cannot fetch user identity config, falling back to empty dataset")
+            return []
         }
     }
     
@@ -242,6 +266,7 @@ internal extension CypherMessenger {
             )
         }
 
+        debugLog("Decrypted message(s)")
         switch message.box {
         case .single(let message):
             return try await processMessage(message)
@@ -261,8 +286,8 @@ internal extension CypherMessenger {
         case .currentUser:
             guard
                 sender.username == self.username,
-                sender.deviceId != self.deviceId
-                // TODO: Check if `sender` is a master device
+                sender.deviceId != self.deviceId,
+                sender.isMasterDevice
             else {
                 throw CypherSDKError.badInput
             }
@@ -298,7 +323,7 @@ internal extension CypherMessenger {
                     remoteMessageId: remoteMessageId,
                     sender: sender
                 )
-            case (.magic, let subType) where subType.hasPrefix("_/ignore/"):
+            case (.magic, let subType) where subType == "_/ignore":
                 return
             default:
                 guard message.messageSubtype?.hasPrefix("_/") != true else {
@@ -405,7 +430,7 @@ internal extension CypherMessenger {
                     remoteMessageId: remoteMessageId,
                     sender: sender
                 )
-            case (.magic, let subType) where subType.hasPrefix("_/ignore/"):
+            case (.magic, let subType) where subType == "_/ignore":
                 return
             case (.magic, let subType), (.media, let subType), (.text, let subType):
                 if subType.hasPrefix("_/") {
@@ -416,6 +441,7 @@ internal extension CypherMessenger {
             
             let chatName = sender.props.username == self.username ? recipient : sender.props.username
             
+            debugLog("Processing received message")
             let privateChat = try await self.createPrivateChat(with: chatName)
             let context = ReceivedMessageContext(
                 sender: DeviceReference(
@@ -429,8 +455,10 @@ internal extension CypherMessenger {
             
             switch try await self.eventHandler.onReceiveMessage(context).raw {
             case .ignore:
+                debugLog("Received message is to be ignored")
                 return
             case .save:
+                debugLog("Received message is to be saved")
                 let chatMessage = try await privateChat._saveMessage(
                     senderId: sender.props.senderId,
                     order: message.order,

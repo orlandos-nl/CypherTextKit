@@ -76,11 +76,13 @@ extension CypherMessenger {
                 )
                 
                 try await self.cachedStore.createConversation(conversation)
-                return GroupChat(
+                let chat = GroupChat(
                     conversation: try await self.decrypt(conversation),
                     messenger: self,
                     metadata: groupMetadata
                 )
+                self.eventHandler.onCreateConversation(chat)
+                return chat
             }
         }
             
@@ -372,7 +374,6 @@ extension AnyConversation {
         )
         
         try await messenger.cachedStore.createChatMessage(chatMessage)
-        
         let message = try await self.messenger.decrypt(chatMessage)
         
         await self.messenger.eventHandler.onCreateChatMessage(
@@ -463,6 +464,7 @@ extension AnyConversation {
                             recipient: recipient,
                             recipientDeviceId: device.props.deviceId,
                             localId: nil,
+                            pushType: message.preferredPushType ?? .none,
                             messageId: ""
                         )
                     )
@@ -517,7 +519,7 @@ public struct InternalConversation: AnyConversation {
     
     public func sendInternalMessage(_ message: SingleCypherMessage) async throws {
         // Refresh device identities
-        // TDOO: Rate limit
+        // TODO: Rate limit
         _ = try await self.messenger._fetchDeviceIdentities(for: messenger.username)
         try await self._writeMessage(message, to: [messenger.username])
     }

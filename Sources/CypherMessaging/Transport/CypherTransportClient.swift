@@ -81,12 +81,12 @@ public protocol CypherServerTransportClient: AnyObject {
     func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) async throws -> ReferencedBlob<C>?
     
     /// Sends a single message to another single device. This device may belong to the same user as the sender.
-    func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId: DeviceId, messageId: String) async throws
+    func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId: DeviceId, pushType: PushType, messageId: String) async throws
     
     /// Sends a single blob, targeted at multiple users. The backend _may_ erase any `ContainerKey` not targeted at the recipeint, before sending it to the other client.
     /// MultiRecipeitnMessages are commonly used in multi-device or group chat scenarios, where a large blob is sent to many devices.
     /// If `supportsMultiRecipientMessages` is `false`, this method will not be called. `sendMesasge` will be called multiple times instead.
-    func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, messageId: String) async throws
+    func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, pushType: PushType, messageId: String) async throws
 }
 
 public protocol ConnectableCypherTransportClient: CypherServerTransportClient {

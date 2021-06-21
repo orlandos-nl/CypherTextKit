@@ -2,12 +2,40 @@ import NIO
 import BSON
 import CypherProtocol
 
-fileprivate actor Ack {
-    var id = 0
+struct Acknowledgement {
+    public let id: ObjectId
+    fileprivate let done: EventLoopFuture<Void>
     
-    func next() -> Int {
-        defer { id = id &+ 1 }
-        return id
+    public func completion() async throws {
+        try await done.get()
+    }
+}
+
+fileprivate actor AcknowledgementManager {
+    var acks = [ObjectId: EventLoopPromise<Void>]()
+    
+    func next(on eventLoop: EventLoop, deadline: TimeAmount = .seconds(10)) -> Acknowledgement {
+        let id = ObjectId()
+        let promise = eventLoop.makePromise(of: Void.self)
+        acks[id] = promise
+        
+        eventLoop.scheduleTask(in: deadline) {
+            promise.succeed(())
+        }
+        
+        return Acknowledgement(id: id, done: promise.futureResult)
+    }
+    
+    func acknowledge(_ id: ObjectId) {
+        acks[id]?.succeed(())
+    }
+    
+    deinit {
+        struct Timeout: Error {}
+        
+        for (_, ack) in acks {
+            ack.fail(Timeout())
+        }
     }
 }
 
@@ -16,7 +44,7 @@ public final class P2PClient {
     private weak var messenger: CypherMessenger?
     private let client: P2PTransportClient
     let eventLoop: EventLoop
-    private let ack = Ack()
+    private let ack = AcknowledgementManager()
     internal private(set) var lastActivity = Date()
     public private(set) var remoteStatus: P2PStatusMessage? {
         didSet {
@@ -59,7 +87,14 @@ public final class P2PClient {
                 initialDelay: .seconds(30),
                 delay: .seconds(30)
             ) { [weak self] task in
-                if let client = self, client.isConnected, client.lastActivity.addingTimeInterval(TimeInterval(seconds)) >= Date() {
+                if
+                    let client = self,
+                    client.isConnected,
+                    client.lastActivity.addingTimeInterval(TimeInterval(seconds)) >= Date()
+                {
+                    detach {
+                        await client.disconnect()
+                    }
                     task.cancel()
                 }
             }
@@ -112,6 +147,8 @@ public final class P2PClient {
                     )
                 }
             }
+        case .ack:
+            await ack.acknowledge(message.ack)
         }
     }
     
@@ -147,13 +184,14 @@ public final class P2PClient {
         }
         
         self.lastActivity = Date()
+        let ack = await ack.next(on: eventLoop)
         
         let message = P2PMessage(
             box: box,
-            ack: await ack.next()
+            ack: ack.id
         )
         
-        return try await messenger._writeWithRatchetEngine(
+        try await messenger._writeWithRatchetEngine(
             ofUser: client.state.username,
             deviceId: client.state.deviceId
         ) { ratchetEngine, rekey in
@@ -162,8 +200,10 @@ public final class P2PClient {
             let signedMessage = try messenger._signRatchetMessage(encryptedMessage, rekey: rekey)
             let signedMessageBson = try BSONEncoder().encode(signedMessage)
             
-            return try await self.client.sendMessage(signedMessageBson.makeByteBuffer())
+            try await self.client.sendMessage(signedMessageBson.makeByteBuffer())
         }
+        
+        try await ack.completion()
     }
     
     public func disconnect() async {

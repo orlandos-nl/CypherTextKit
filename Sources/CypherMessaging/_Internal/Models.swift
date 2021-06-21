@@ -53,6 +53,7 @@ public final class DeviceIdentityModel: Model {
         let senderId: Int
         let publicKey: PublicKey
         let identity: PublicSigningKey
+        let isMasterDevice: Bool
         var doubleRatchet: DoubleRatchetHKDF<SHA512>.State?
     }
     
@@ -80,6 +81,9 @@ extension DecryptedModel where M == DeviceIdentityModel {
     }
     public var deviceId: DeviceId {
         get { props.deviceId }
+    }
+    public var isMasterDevice: Bool {
+        get { props.isMasterDevice }
     }
     public var senderId: Int {
         get { props.senderId }

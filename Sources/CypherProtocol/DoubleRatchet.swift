@@ -4,13 +4,18 @@
 import Foundation
 import CryptoKit
 
+/// A symmetric key encryption & decryption helper
 public protocol RatchetSymmetricEncryption {
+    /// Encrypts cleartext data symmetrically
     func encrypt<PlainText: DataProtocol, Nonce: DataProtocol>(_ data: PlainText, nonce: Nonce, usingKey: SymmetricKey) throws -> Data
+    
+    /// Decryptes cyphertext data into cleartext symmetrically
     func decrypt<CipherText: DataProtocol, Nonce: DataProtocol>(_ data: CipherText, nonce: Nonce, usingKey: SymmetricKey) throws -> Data
 }
 
 struct NonceMismatch: Error {}
 
+/// A symmetric key encryption helper for AES-GCM
 public struct AESGCMEncryption: RatchetSymmetricEncryption {
     public init() {}
     
@@ -25,6 +30,7 @@ public struct AESGCMEncryption: RatchetSymmetricEncryption {
     }
 }
 
+/// A symmetric key encryption helper for ChaChaPoly
 public struct ChaChaPolyEncryption: RatchetSymmetricEncryption {
     public init() {}
     
@@ -47,12 +53,14 @@ public protocol RatchetHeaderEncoder {
     func concatenate(authenticatedData: Data, withHeader header: Data) -> Data
 }
 
+/// A Key Derivation Function protocol that can calculate the (next) message's encryption key based on a created SymmetricKey
 public protocol RatchetKDF {
     func calculateRootKey(diffieHellmanSecret: SharedSecret, rootKey: SymmetricKey) throws -> SymmetricKey
     func calculateChainKey(fromChainKey chainKey: SymmetricKey) throws -> SymmetricKey
     func calculateMessageKey(fromChainKey chainKey: SymmetricKey) throws -> SymmetricKey
 }
 
+/// A default symmetric key derivation function based on `HKDF` and a specified `HashFunction`
 public struct DefaultRatchetKDF<Hash: HashFunction>: RatchetKDF {
     fileprivate let messageKeyConstant: Data
     fileprivate let chainKeyConstant: Data
@@ -90,6 +98,9 @@ public struct DefaultRatchetKDF<Hash: HashFunction>: RatchetKDF {
     }
 }
 
+/// An AssociatedData generator provides an opportunity for implementations to improve entropy, and complicate the process of finding the correct key.
+///
+/// It can be a constant shared piece of information, such as the app name. But could also be based on information known to one or both clients.
 public struct RatchetAssociatedDataGenerator {
     private enum Mode {
         case constant(Data)
@@ -109,6 +120,8 @@ public struct RatchetAssociatedDataGenerator {
     }
 }
 
+/// A configuration type that is used by the DoubleRatchet algorithm to encrypt and decrypt information.
+/// Both the `sender` and `recipient` must share the same settings, consistently.
 public struct DoubleRatchetConfiguration<Hash: HashFunction> {
     fileprivate let info: Data
     let symmetricEncryption: RatchetSymmetricEncryption
@@ -117,6 +130,13 @@ public struct DoubleRatchetConfiguration<Hash: HashFunction> {
     let headerAssociatedDataGenerator: RatchetAssociatedDataGenerator
     let maxSkippedMessageKeys: Int
     
+    /// - Parameters:
+    ///     - info: A shared piece of information, such as protocol or app name
+    ///     - symmetricEncryption: A symmmetric key encryption/decryption algorithm
+    ///     - kdf: A Key Derivation Function that derives the next encryption key in chain
+    ///     - headerEncoder: Encodes the RatchetHeader into `Data`
+    ///     - headerAssociatedDataGenerator: A generator that can add entropy to the key generation process
+    ///     - maxSkippedMessageKeys; The amount of messages that can be sent out-of-order before the message cannot be decrypted anymore.
     public init<Info: DataProtocol>(
         info: Info,
         symmetricEncryption: RatchetSymmetricEncryption,
@@ -149,6 +169,8 @@ extension SymmetricKey: Codable {
     }
 }
 
+/// A skipped key is a generated key which no valid message has been received for.
+/// This may be a message that was sent out of order, and thus is yet to be received.
 public struct SkippedKey: Codable {
     private enum CodingKeys: String, CodingKey {
         case publicKey = "a"
@@ -251,6 +273,11 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
     public private(set) var state: State
     public let configuration: DoubleRatchetConfiguration<Hash>
     
+    /// Creates an 'engine', capable of encryption and decryption, by resuming a saved `state.
+    ///
+    /// - Parameters:
+    ///     - state: The state to resume
+    ///     - configuration: Settings that match the exact behaviour of the other party
     public init(
         state: State,
         configuration: DoubleRatchetConfiguration<Hash>
@@ -259,6 +286,16 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
         self.configuration = configuration
     }
     
+    /// Creates a new ratchet conversation with a remote party.
+    ///
+    /// The remote party _must_ initialise their communications using `initializeRecipient
+    ///
+    /// - Parameters:
+    ///     - secretKey: The shared secret that was created by, for example, a Diffie-Hellman handshake
+    ///     - contactingRemote: The remote party's publicKey, used as the first publicKey for forward secrecy
+    ///     - configuration: Settings that match the exact behaviour of the other party
+    ///
+    /// - Returns: The DoubleRatchetHKDF engine, that can be used to send and receive messages
     public static func initializeSender(
         secretKey: SymmetricKey,
         contactingRemote remote: PublicKey,
@@ -272,9 +309,19 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
         return DoubleRatchetHKDF<Hash>(state: state, configuration: configuration)
     }
     
+    /// Accepts a new ratchet conversation created a remote party.
+    ///
+    /// The remote party has initialise their communications using `initializeSender`
+    ///
+    /// - Parameters:
+    ///     - secretKey: The shared secret that was created by, for example, a Diffie-Hellman handshake
+    ///     - localPrivateKey: Our first privateKey used for forwardSecrecy
+    ///     - configuration: Settings that match the exact behaviour of the other party
+    ///     - initialMessage: The first message that was sent by the `sender`
+    ///
+    /// - Returns: The DoubleRatchetHKDF engine, that can be used to send and receive messages; the first message sent by the remote party
     public static func initializeRecipient(
         secretKey: SymmetricKey,
-        contactedBy remote: PublicKey,
         localPrivateKey: PrivateKey,
         configuration: DoubleRatchetConfiguration<Hash>,
         initialMessage: RatchetMessage
@@ -285,6 +332,11 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
         return (engine, plaintext)
     }
     
+    /// Encrypts a new cleartext message
+    ///
+    /// The result is decrypted by the other party using `ratchetDecrypt`
+    ///
+    /// - Returns: The encrypted `RatchetMessage`
     public mutating func ratchetEncrypt<PlainText: DataProtocol>(_ plaintext: PlainText) throws -> RatchetMessage {
         guard let sendingKey = state.sendingKey else {
             throw DoubleRatchetError.uninitializedRecipient
@@ -321,6 +373,11 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
         )
     }
     
+    /// Decrypts a new `RatchetMessage` message as `Data`
+    ///
+    /// The message used as input _must_ be created by the remote party `ratchetEncrypt`
+    ///
+    /// - Returns: The decrypted data
     public mutating func ratchetDecrypt(_ message: RatchetMessage) throws -> Data {
         var skippedKeys = state.skippedKeys
         defer {

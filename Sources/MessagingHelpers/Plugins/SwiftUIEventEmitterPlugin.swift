@@ -45,7 +45,9 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         deviceId: DeviceId,
         messenger: CypherMessenger
     ) async throws {
-        emitter.onRekey.send()
+        DispatchQueue.main.async {
+            emitter.onRekey.send()
+        }
     }
     
     public func onMessageChange(_ message: AnyChatMessage) {
@@ -64,16 +66,22 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
     }
     
     public func onContactChange(_ contact: Contact) {
-        emitter.contactChanged.send(contact)
+        DispatchQueue.main.async {
+            emitter.contactChanged.send(contact)
+        }
     }
     
     public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {
-        emitter.contacts.append(contact)
-        emitter.contactAdded.send(contact)
+        DispatchQueue.main.async {
+            emitter.contacts.append(contact)
+            emitter.contactAdded.send(contact)
+        }
     }
     
     public func onCreateConversation(_ conversation: AnyConversation) {
-        emitter.conversationAdded.send(conversation)
+        DispatchQueue.main.async {
+            emitter.conversationAdded.send(conversation)
+        }
     }
     
     public func onCreateChatMessage(_ chatMessage: AnyChatMessage) {
@@ -83,7 +91,9 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
     }
     
     public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {
-        emitter.p2pClientConnected.send(client)
+        DispatchQueue.main.async {
+            emitter.p2pClientConnected.send(client)
+        }
     }
 }
 //#endif

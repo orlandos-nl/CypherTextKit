@@ -77,6 +77,10 @@ extension CypherMessenger {
             )
                 
             try await self.cachedStore.createContact(contact)
+            self.eventHandler.onCreateContact(
+                Contact(messenger: self, model: try await self.decrypt(contact)),
+                messenger: self
+            )
             return try await Contact(messenger: self, model: self.decrypt(contact))
         }
     }

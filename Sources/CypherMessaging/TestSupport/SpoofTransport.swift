@@ -226,7 +226,13 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
         return ReferencedBlob(id: id, blob: value)
     }
     
-    public func sendMessage(_ message: RatchetedCypherMessage, toUser otherUser: Username, otherUserDeviceId: DeviceId, messageId: String) async throws {
+    public func sendMessage(
+        _ message: RatchetedCypherMessage,
+        toUser otherUser: Username,
+        otherUserDeviceId: DeviceId,
+        pushType: PushType,
+        messageId: String
+    ) async throws {
         try await server.sendEvent(
             .messageSent(
                 message,
@@ -241,6 +247,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     
     public func sendMultiRecipientMessage(
         _ message: MultiRecipientCypherMessage,
+        pushType: PushType,
         messageId: String
     ) async throws {
         for recipient in message.keys {

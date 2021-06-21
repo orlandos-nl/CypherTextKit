@@ -54,6 +54,7 @@ enum MessageType: String, Codable {
     case message = "a"
     case multiRecipientMessage = "b"
     case readReceipt = "c"
+    case ack = "d"
 }
 
 struct DirectMessagePacket: Codable {
@@ -153,6 +154,7 @@ struct SignUpResponse: Codable {
 
 public struct SendMessage<Message: Codable>: Codable {
     let message: Message
+    let pushType: PushType?
     let messageId: String
 }
 
@@ -342,8 +344,19 @@ public final class VaporTransport: CypherServerTransportClient {
                     }
                     
                     struct Packet: Codable {
+                        let id: ObjectId
                         let type: MessageType
                         let body: Document
+                    }
+                    
+                    struct Ack: Codable {
+                        let type: MessageType
+                        let id: ObjectId
+                        
+                        init(id: ObjectId) {
+                            self.id = id
+                            self.type = .ack
+                        }
                     }
                     
                     detach {
@@ -362,10 +375,7 @@ public final class VaporTransport: CypherServerTransportClient {
                                         deviceId: message.sender.device
                                     )
                                 )
-                                
-                                // TODO: ACK
                             case .multiRecipientMessage:
-                                print(packet.body)
                                 let message = try BSONDecoder().decode(ChatMultiRecipientMessagePacket.self, from: packet.body)
                                 
                                 try await delegate.receiveServerEvent(
@@ -376,8 +386,6 @@ public final class VaporTransport: CypherServerTransportClient {
                                         deviceId: message.sender.device
                                     )
                                 )
-                                
-                                // TODO: ACK
                             case .readReceipt:
                                 let receipt = try BSONDecoder().decode(ReadReceiptPacket.self, from: packet.body)
                                 
@@ -389,9 +397,13 @@ public final class VaporTransport: CypherServerTransportClient {
         //                            delegate.receiveServerEvent(.messageReceived(by: receipt., deviceId: receipt.sender, id: receipt.messageId))
                                     ()
                                 }
+                            case .ack:
+                                ()
                             }
+                            
+                            let ack = try BSONEncoder().encode(Ack(id: packet.id)).makeData()
+                            webSocket.send(raw: ack, opcode: .binary)
                         } catch {
-                            print(error)
                             _ = await transport.disconnect()
                         }
                     }
@@ -455,7 +467,9 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func sendMessageReceivedReceipt(byRemoteId remoteId: String, to username: Username) async throws { }
     
-    public func requestDeviceRegistery(_ config: UserDeviceConfig) async throws { }
+    public func requestDeviceRegistery(_ config: UserDeviceConfig) async throws {
+        
+    }
     
     public func publishBlob<C>(_ blob: C) async throws -> ReferencedBlob<C> where C : Decodable, C : Encodable {
         fatalError()
@@ -465,25 +479,43 @@ public final class VaporTransport: CypherServerTransportClient {
         fatalError()
     }
     
-    public func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId deviceId: DeviceId, messageId: String) async throws {
+    public func sendMessage(
+        _ message: RatchetedCypherMessage,
+        toUser username: Username,
+        otherUserDeviceId deviceId: DeviceId,
+        pushType: PushType,
+        messageId: String
+    ) async throws {
         _ = try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "users/\(username.raw)/devices/\(deviceId.raw)/send-message",
             username: self.username,
             deviceId: self.deviceId,
             token: self.makeToken(),
-            body: SendMessage(message: message, messageId: messageId)
+            body: SendMessage(
+                message: message,
+                pushType: pushType,
+                messageId: messageId
+            )
         )
     }
     
-    public func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, messageId: String) async throws {
+    public func sendMultiRecipientMessage(
+        _ message: MultiRecipientCypherMessage,
+        pushType: PushType,
+        messageId: String
+    ) async throws {
         _ = try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "actions/send-message",
             username: self.username,
             deviceId: self.deviceId,
             token: self.makeToken(),
-            body: SendMessage(message: message, messageId: messageId)
+            body: SendMessage(
+                message: message,
+                pushType: pushType,
+                messageId: messageId
+            )
         )
     }
 }

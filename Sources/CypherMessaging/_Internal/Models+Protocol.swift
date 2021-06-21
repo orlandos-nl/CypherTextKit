@@ -17,11 +17,23 @@ public protocol Model: Codable {
 
 // TODO: Re-enable cache, and reuse the cache globally
 public final class DecryptedModel<M: Model> {
-    public let lock = NSLock()
+    private let lock = NSLock()
     public let encrypted: M
     public var id: UUID { encrypted.id }
     public private(set) var props: M.SecureProps
     private let encryptionKey: SymmetricKey
+    
+    public func withLock<T>(_ run: () async throws -> T) async rethrows -> T {
+        lock.lock()
+        do {
+            let result = try await run()
+            lock.unlock()
+            return result
+        } catch {
+            lock.unlock()
+            throw error
+        }
+    }
     
     public func withProps<T>(get: (M.SecureProps) async throws -> T) async throws -> T {
         let props = try encrypted.props.decrypt(using: encryptionKey)

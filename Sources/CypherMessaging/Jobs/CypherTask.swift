@@ -72,13 +72,15 @@ struct SendMessageTask: Codable {
         case recipient = "b"
         case recipientDeviceId = "c"
         case localId = "e"
-        case messageId = "f"
+        case pushType = "f"
+        case messageId = "g"
     }
     
     let message: CypherMessage
     let recipient: Username
     let recipientDeviceId: DeviceId
     let localId: UUID?
+    let pushType: PushType
     let messageId: String
 }
 
@@ -218,7 +220,7 @@ enum CypherTask: Codable, Task {
     var retryMode: TaskRetryMode {
         switch self {
         case .sendMessage, .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
-            return .always
+            return .retryAfter(30, maxAttempts: 3)
         case .processMultiRecipientMessage, .processMessage:
             return .never
         case .receiveMessageDeliveryStateChangeTask:
@@ -341,7 +343,6 @@ enum CypherTask: Codable, Task {
     }
     
     func execute(on messenger: CypherMessenger) async throws {
-        // TODO: After processing a message, emit a `received` event
         switch self {
         case .sendMessage(let message):
             debugLog("Sending message to \(message.recipient)")
@@ -412,6 +413,10 @@ enum TaskHelpers {
         
         var devices = try await messenger._fetchDeviceIdentities(forUsers: task.recipients)
         
+        if devices.isEmpty {
+            return
+        }
+        
         for i in 1...devices.count {
             let index = devices.count - i
             let device = devices[index]
@@ -436,7 +441,7 @@ enum TaskHelpers {
             forDevices: devices
         )
         
-        return try await messenger.transport.sendMultiRecipientMessage(message, messageId: task.messageId)
+        return try await messenger.transport.sendMultiRecipientMessage(message, pushType: task.pushType, messageId: task.messageId)
     }
 
     fileprivate static func writeMessageTask(
@@ -473,11 +478,11 @@ enum TaskHelpers {
             let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
 
             let encryptedMessage = try messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
-            print(encryptedMessage.rekey)
             try await messenger.transport.sendMessage(
                 encryptedMessage,
                 toUser: task.recipient,
                 otherUserDeviceId: task.recipientDeviceId,
+                pushType: task.pushType,
                 messageId: task.messageId
             )
         }
