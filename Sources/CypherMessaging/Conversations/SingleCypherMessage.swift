@@ -44,7 +44,8 @@ public enum TargetConversation {
         
         init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) async {
             let members = conversation.members
-            guard members.contains(messenger.username) else {
+            let username = messenger.username
+            guard members.contains(username) else {
                 return nil
             }
             

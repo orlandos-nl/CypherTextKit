@@ -11,7 +11,7 @@ struct Acknowledgement {
     }
 }
 
-fileprivate actor AcknowledgementManager {
+fileprivate final actor AcknowledgementManager {
     var acks = [ObjectId: EventLoopPromise<Void>]()
     
     func next(on eventLoop: EventLoop, deadline: TimeAmount = .seconds(10)) -> Acknowledgement {
@@ -92,7 +92,7 @@ public final class P2PClient {
                     client.isConnected,
                     client.lastActivity.addingTimeInterval(TimeInterval(seconds)) >= Date()
                 {
-                    detach {
+                    Task.detached {
                         await client.disconnect()
                     }
                     task.cancel()
@@ -197,7 +197,7 @@ public final class P2PClient {
         ) { ratchetEngine, rekey in
             let messageBson = try BSONEncoder().encode(message)
             let encryptedMessage = try ratchetEngine.ratchetEncrypt(messageBson.makeData())
-            let signedMessage = try messenger._signRatchetMessage(encryptedMessage, rekey: rekey)
+            let signedMessage = try await messenger._signRatchetMessage(encryptedMessage, rekey: rekey)
             let signedMessageBson = try BSONEncoder().encode(signedMessage)
             
             try await self.client.sendMessage(signedMessageBson.makeByteBuffer())

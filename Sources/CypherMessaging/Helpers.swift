@@ -11,7 +11,7 @@ extension EventLoop {
     }
 }
 
-extension Array {
+public extension Array {
     func asyncMap<T>(_ run: (Element) async throws -> T) async rethrows -> [T] {
         var array = [T]()
         array.reserveCapacity(self.count)

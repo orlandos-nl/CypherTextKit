@@ -91,6 +91,10 @@ internal extension CypherMessenger {
     }
     
     func _updateUserIdentity(of username: Username, to config: UserConfig) async throws -> UserIdentityState {
+        if username == self.username {
+            return .consistent
+        }
+        
         let contacts = try await cachedStore.fetchContacts()
         for contact in contacts {
             let contact = try await self.decrypt(contact)
@@ -167,46 +171,49 @@ internal extension CypherMessenger {
         return decryptedDevice
     }
     
+    
+    func _refreshDeviceIdentities(
+        for username: Username
+    ) async throws {
+        let devices = try await self._fetchKnownDeviceIdentities(for: username)
+        _ = try await _rediscoverDeviceIdentities(for: username, knownDevices: devices)
+    }
+    
     // TODO: Rate limit
     func _rediscoverDeviceIdentities(
         for username: Username,
         knownDevices: [DecryptedModel<DeviceIdentityModel>]
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
-        do {
-            let userConfig = try await self.transport.readKeyBundle(forUsername: username)
-            let identityState = try await self._updateUserIdentity(
-                of: username,
-                to: userConfig
-            )
+        let userConfig = try await self.transport.readKeyBundle(forUsername: username)
+        let identityState = try await self._updateUserIdentity(
+            of: username,
+            to: userConfig
+        )
+        
+        switch identityState {
+        case .changedIdentity:
+            self.eventHandler.onContactIdentityChange(username: username, messenger: self)
+            fallthrough
+        case .consistent, .newIdentity:
+            var models = [DecryptedModel<DeviceIdentityModel>]()
             
-            switch identityState {
-            case .changedIdentity:
-                self.eventHandler.onContactIdentityChange(username: username, messenger: self)
-                fallthrough
-            case .consistent, .newIdentity:
-                var models = [DecryptedModel<DeviceIdentityModel>]()
-                
-                for device in try userConfig.readAndValidateDevices() {
-                    if let knownDevice = knownDevices.first(where: { $0.props.deviceId == device.deviceId }) {
-                        // Known device, check that everything is consistent
-                        // To prevent tampering
-                        guard knownDevice.props.publicKey == device.publicKey else {
-                            throw CypherSDKError.invalidUserConfig
-                        }
-                        
-                        models.append(knownDevice)
-                    } else if username == self.username && device.deviceId == self.deviceId {
-                        continue
-                    } else {
-                        try await models.append(self._createDeviceIdentity(from: device, forUsername: username))
+            for device in try userConfig.readAndValidateDevices() {
+                if let knownDevice = knownDevices.first(where: { $0.props.deviceId == device.deviceId }) {
+                    // Known device, check that everything is consistent
+                    // To prevent tampering
+                    guard knownDevice.props.publicKey == device.publicKey else {
+                        throw CypherSDKError.invalidUserConfig
                     }
+                    
+                    models.append(knownDevice)
+                } else if username == self.username && device.deviceId == self.deviceId {
+                    continue
+                } else {
+                    try await models.append(self._createDeviceIdentity(from: device, forUsername: username))
                 }
-                
-                return models
             }
-        } catch {
-            debugLog("Cannot fetch user identity config, falling back to empty dataset")
-            return []
+            
+            return models
         }
     }
     
@@ -232,30 +239,38 @@ internal extension CypherMessenger {
     }
     
     func _receiveMessage(
-        _ message: RatchetedCypherMessage,
+        _ inbound: RatchetedCypherMessage,
         multiRecipientContainer: MultiRecipientContainer?,
         messageId: String,
         sender: Username,
         senderDevice: DeviceId
     ) async throws {
+        // Receive message always retries, do we need to deal with decryption errors as a successful task execution
+        // Otherwise the task will infinitely run
+        // However, replies to this message may fail, and must then be retried
         let deviceIdentity = try await self._fetchDeviceIdentity(for: sender, deviceId: senderDevice)
-        let data = try await deviceIdentity._readWithRatchetEngine(ofUser: sender, deviceId: senderDevice, message: message, messenger: self)
         let message: CypherMessage
-        
-        if let multiRecipientContainer = multiRecipientContainer {
-            guard data.count == 32 else {
-                throw CypherSDKError.invalidMultiRecipientKey
+        do {
+            let data = try await deviceIdentity._readWithRatchetEngine(ofUser: sender, deviceId: senderDevice, message: inbound, messenger: self)
+            
+            if let multiRecipientContainer = multiRecipientContainer {
+                guard data.count == 32 else {
+                    throw CypherSDKError.invalidMultiRecipientKey
+                }
+                
+                let key = SymmetricKey(data: data)
+                
+                message = try multiRecipientContainer.readAndValidate(
+                    type: CypherMessage.self,
+                    usingIdentity: deviceIdentity.props.identity,
+                    decryptingWith: key
+                )
+            } else {
+                message = try BSONDecoder().decode(CypherMessage.self, from: Document(data: data))
             }
-            
-            let key = SymmetricKey(data: data)
-            
-            message = try multiRecipientContainer.readAndValidate(
-                type: CypherMessage.self,
-                usingIdentity: deviceIdentity.props.identity,
-                decryptingWith: key
-            )
-        } else {
-            message = try BSONDecoder().decode(CypherMessage.self, from: Document(data: data))
+        } catch {
+            // Message was corrupt or unusable
+            return
         }
         
         func processMessage(_ message: SingleCypherMessage) async throws {
@@ -301,6 +316,10 @@ internal extension CypherMessenger {
                 
                 if deviceConfig.deviceId == self.deviceId {
                     // We're not going to add ourselves as a conversation partner
+                    // But we will mark ourselves as a child device
+                    try await self.updateConfig { config in
+                        config.registeryMode = .childDevice
+                    }
                     return
                 }
                 
@@ -359,17 +378,10 @@ internal extension CypherMessenger {
                         remoteId: remoteMessageId
                     )
                     
-                    return try await self.jobQueue.queueTask(
-                        CypherTask.sendMessageDeliveryStateChangeTask(
-                            SendMessageDeliveryStateChangeTask(
-                                localId: chatMessage.id,
-                                messageId: chatMessage.encrypted.remoteId,
-                                recipient: chatMessage.props.senderUser,
-                                deviceId: nil, // All devices should receive this change
-                                newState: .received
-                            )
-                        )
-                    )
+                    if chatMessage.senderUser == self.username {
+                        // Send by our device in this chat
+                        return
+                    }
                 }
             }
         case .groupChat(let groupId):
@@ -410,17 +422,19 @@ internal extension CypherMessenger {
                     remoteId: remoteMessageId
                 )
                 
-                return try await self.jobQueue.queueTask(
-                    CypherTask.sendMessageDeliveryStateChangeTask(
-                        SendMessageDeliveryStateChangeTask(
-                            localId: chatMessage.id,
-                            messageId: chatMessage.encrypted.remoteId,
-                            recipient: chatMessage.props.senderUser,
-                            deviceId: nil, // All devices should receive this change
-                            newState: .received
+                if chatMessage.senderUser != self.username {
+                    try await self.jobQueue.queueTask(
+                        CypherTask.sendMessageDeliveryStateChangeTask(
+                            SendMessageDeliveryStateChangeTask(
+                                localId: chatMessage.id,
+                                messageId: chatMessage.encrypted.remoteId,
+                                recipient: chatMessage.props.senderUser,
+                                deviceId: nil, // All devices should receive this change
+                                newState: .received
+                            )
                         )
                     )
-                )
+                }
             }
         case .otherUser(let recipient):
             switch (message.messageType, message.messageSubtype ?? "") {
@@ -431,6 +445,9 @@ internal extension CypherMessenger {
                     sender: sender
                 )
             case (.magic, let subType) where subType == "_/ignore":
+                return
+            case (.magic, let subType) where subType == "_/devices/announce":
+                try await self._refreshDeviceIdentities(for: sender.username)
                 return
             case (.magic, let subType), (.media, let subType), (.text, let subType):
                 if subType.hasPrefix("_/") {
@@ -470,17 +487,20 @@ internal extension CypherMessenger {
                     ),
                     remoteId: remoteMessageId
                 )
-                return try await self.jobQueue.queueTask(
-                    CypherTask.sendMessageDeliveryStateChangeTask(
-                        SendMessageDeliveryStateChangeTask(
-                            localId: chatMessage.id,
-                            messageId: chatMessage.encrypted.remoteId,
-                            recipient: chatMessage.props.senderUser,
-                            deviceId: nil, // All devices should receive this change
-                            newState: .received
+                
+                if chatMessage.senderUser != self.username {
+                    try await self.jobQueue.queueTask(
+                        CypherTask.sendMessageDeliveryStateChangeTask(
+                            SendMessageDeliveryStateChangeTask(
+                                localId: chatMessage.id,
+                                messageId: chatMessage.encrypted.remoteId,
+                                recipient: chatMessage.props.senderUser,
+                                deviceId: nil, // All devices should receive this change
+                                newState: .received
+                            )
                         )
                     )
-                )
+                }
             }
         }
     }

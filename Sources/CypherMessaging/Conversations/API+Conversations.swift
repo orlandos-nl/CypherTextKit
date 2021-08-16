@@ -358,6 +358,39 @@ extension AnyConversation {
         )
     }
     
+    @discardableResult
+    public func saveLocalMessage(
+        type: CypherMessageType,
+        messageSubtype: String? = nil,
+        text: String,
+        metadata: Document = [:],
+        destructionTimer: TimeInterval? = nil,
+        sentDate: Date = Date()
+    ) async throws -> DecryptedModel<ChatMessageModel> {
+        let order = try await getNextLocalOrder()
+        let message = await SingleCypherMessage(
+            messageType: type,
+            messageSubtype: messageSubtype,
+            text: text,
+            metadata: metadata,
+            destructionTimer: destructionTimer,
+            sentDate: sentDate,
+            preferredPushType: .some(.none),
+            order: order,
+            target: getTarget()
+        )
+        
+        return try await _saveMessage(
+            senderId: messenger.deviceIdentityId,
+            order: order,
+            props: .init(
+                sending: message,
+                senderUser: self.messenger.username,
+                senderDeviceId: self.messenger.deviceId
+            )
+        )
+    }
+    
     internal func _saveMessage(
         senderId: Int,
         order: Int,
@@ -409,10 +442,9 @@ extension AnyConversation {
         case .send:
             ()
         case .saveAndSend:
-            let order = try await getNextLocalOrder()
             let chatMessage = try await _saveMessage(
                 senderId: messenger.deviceIdentityId,
-                order: order,
+                order: message.order,
                 props: .init(
                     sending: message,
                     senderUser: self.messenger.username,
@@ -448,28 +480,6 @@ extension AnyConversation {
             )
         } else {
             return nil
-        }
-    }
-    
-    internal func _writeMessage(
-        _ message: SingleCypherMessage,
-        to recipients: Set<Username>
-    ) async throws {
-        for recipient in recipients {
-            for device in try await messenger._fetchDeviceIdentities(for: recipient) {
-                try await messenger._queueTask(
-                    .sendMessage(
-                        SendMessageTask(
-                            message: CypherMessage(message: message),
-                            recipient: recipient,
-                            recipientDeviceId: device.props.deviceId,
-                            localId: nil,
-                            pushType: message.preferredPushType ?? .none,
-                            messageId: ""
-                        )
-                    )
-                )
-            }
         }
     }
     
@@ -521,7 +531,7 @@ public struct InternalConversation: AnyConversation {
         // Refresh device identities
         // TODO: Rate limit
         _ = try await self.messenger._fetchDeviceIdentities(for: messenger.username)
-        try await self._writeMessage(message, to: [messenger.username])
+        try await messenger._writeMessage(message, to: messenger.username)
     }
 }
 

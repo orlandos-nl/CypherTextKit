@@ -19,6 +19,9 @@ public protocol Plugin {
     func onContactIdentityChange(username: Username, messenger: CypherMessenger)
     func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger)
     func onP2PClientClose(messenger: CypherMessenger)
+    func onRemoveContact(_ contact: Contact)
+    func onRemoveChatMessage(_ message: AnyChatMessage)
+    func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
 }
 
 extension Plugin {
@@ -37,6 +40,9 @@ extension Plugin {
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
     public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
     public func onP2PClientClose(messenger: CypherMessenger) {}
+    public func onRemoveContact(_ contact: Contact) {}
+    public func onRemoveChatMessage(_ message: AnyChatMessage) {}
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {}
 }
 
 @available(macOS 12, iOS 15, *)

@@ -13,13 +13,11 @@ struct Synchronisation {
             hasWork -= 1
             if try await SpoofTransportClient.synchronize() != .skipped {
                 hasWork = 10
-                print("Server", "has work")
             }
             
             for app in apps {
                 if try await app.processJobQueue() != .skipped {
                     hasWork = 10
-                    print(app.username, "has work")
                 }
             }
         } while hasWork > 0

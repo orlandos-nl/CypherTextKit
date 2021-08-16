@@ -21,7 +21,7 @@ public struct UserProfilePlugin: Plugin {
     public init() {}
     
     public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {
-        detach {
+        Task.detached {
             let contact = try await messenger.createContact(byUsername: username)
             try await contact.modifyMetadata(
                 ofType: ContactMetadata.self,
@@ -44,10 +44,11 @@ public struct UserProfilePlugin: Plugin {
         subType.removeFirst("@/contacts/profile/".count)
         let messenger = message.messenger
         let sender = message.sender.username
+        let username = messenger.username
         
         switch subType {
         case "status/update":
-            if sender == messenger.username {
+            if sender == username {
                 return try await messenger.modifyCustomConfig(
                     ofType: ContactMetadata.self,
                     forPlugin: Self.self
@@ -72,7 +73,7 @@ public struct UserProfilePlugin: Plugin {
             
             let image = imageBlob.data
             
-            if sender == messenger.username {
+            if sender == username {
                 return try await messenger.modifyCustomConfig(
                     ofType: ContactMetadata.self,
                     forPlugin: Self.self

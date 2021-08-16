@@ -43,4 +43,9 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
     
     public func onP2PClientClose(messenger: CypherMessenger) {}
+    
+    public func onRemoveContact(_ contact: Contact) {}
+    
+    public func onRemoveChatMessage(_ message: AnyChatMessage) {}
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {}
 }

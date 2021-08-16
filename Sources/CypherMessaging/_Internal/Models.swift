@@ -307,7 +307,7 @@ public final class JobModel: Model {
         var attempts: Int
         let isBackgroundTask: Bool
         
-        init<T: Task>(task: T) throws {
+        init<T: StoredTask>(task: T) throws {
             self.taskKey = task.key.rawValue
             self.isBackgroundTask = task.isBackgroundTask
             self.task = try BSONEncoder().encode(task)

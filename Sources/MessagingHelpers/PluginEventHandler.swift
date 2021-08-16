@@ -30,6 +30,8 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
     public func onReceiveMessage(
         _ message: ReceivedMessageContext
     ) async throws -> ProcessMessageAction {
+        // TODO: Parse synchronisation messages
+        
         for plugin in plugins {
             if let result = try await plugin.onReceiveMessage(message) {
                 return result
@@ -83,44 +85,36 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         withUser otherUser: Username,
         messenger: CypherMessenger
     ) async throws -> Document {
-        let metadata = plugins.map { plugin -> EventLoopFuture<(String, Document)> in
-            messenger.eventLoop.executeAsync {
-                let document = try await plugin.createPrivateChatMetadata(withUser: otherUser, messenger: messenger)
-                return (plugin.pluginIdentifier, document)
-            }
+        let metadata = try await plugins.asyncMap { plugin -> (String, Document) in
+            let document = try await plugin.createPrivateChatMetadata(withUser: otherUser, messenger: messenger)
+            return (plugin.pluginIdentifier, document)
         }
         
-        return try await EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
-            var document = Document()
-            
-            for (key, value) in results {
-                document[key] = value
-            }
-            
-            return document
-        }.get()
+        var document = Document()
+        
+        for (key, value) in metadata {
+            document[key] = value
+        }
+        
+        return document
     }
     
     public func createContactMetadata(
         for otherUser: Username,
         messenger: CypherMessenger
     ) async throws -> Document {
-        let metadata = plugins.map { plugin -> EventLoopFuture<(String, Document)> in
-            messenger.eventLoop.executeAsync {
-                let document = try await plugin.createContactMetadata(for: otherUser, messenger: messenger)
-                return (plugin.pluginIdentifier, document)
-            }
+        let metadata = try await plugins.asyncMap { plugin -> (String, Document) in
+            let document = try await plugin.createContactMetadata(for: otherUser, messenger: messenger)
+            return (plugin.pluginIdentifier, document)
         }
         
-        return try await EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
-            var document = Document()
-            
-            for (key, value) in results {
-                document[key] = value
-            }
-            
-            return document
-        }.get()
+        var document = Document()
+        
+        for (key, value) in metadata {
+            document[key] = value
+        }
+        
+        return document
     }
     
     public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {
@@ -151,11 +145,33 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         for plugin in plugins {
             plugin.onP2PClientOpen(client, messenger: messenger)
         }
+        
+        // TODO: Use opportunity to check if state is still in sync
     }
     
     public func onP2PClientClose(messenger: CypherMessenger) {
         for plugin in plugins {
             plugin.onP2PClientClose(messenger: messenger)
         }
+    }
+    
+    public func onRemoveContact(_ contact: Contact) {
+        for plugin in plugins {
+            plugin.onRemoveContact(contact)
+        }
+    }
+    
+    public func onRemoveChatMessage(_ message: AnyChatMessage) {
+        for plugin in plugins {
+            plugin.onRemoveChatMessage(message)
+        }
+    }
+    
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+        for plugin in plugins {
+            try await plugin.onDeviceRegistery(deviceId, messenger: messenger)
+        }
+        
+        // TODO: Synchronise state to new device
     }
 }

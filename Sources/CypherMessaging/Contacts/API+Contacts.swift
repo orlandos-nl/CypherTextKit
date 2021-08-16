@@ -27,6 +27,15 @@ public struct Contact: Identifiable, Hashable {
     public func hash(into hasher: inout Hasher) {
         id.hash(into: &hasher)
     }
+    
+    public func remove() async throws {
+        try await messenger.cachedStore.removeContact(model.encrypted)
+        messenger.eventHandler.onRemoveContact(self)
+    }
+    
+    public func refreshDevices() async throws {
+        try await messenger._refreshDeviceIdentities(for: username)
+    }
 }
 
 @available(macOS 12, iOS 15, *)

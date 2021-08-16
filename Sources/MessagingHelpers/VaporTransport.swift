@@ -47,7 +47,6 @@ struct Token: JWTPayload {
 public struct UserProfile: Decodable {
     public let username: String
     public let config: UserConfig
-    public let blockedUsers: Set<String>
 }
 
 enum MessageType: String, Codable {
@@ -338,8 +337,20 @@ public final class VaporTransport: CypherServerTransportClient {
                 self.webSocket = webSocket
                 self.authenticated = .authenticated
                 
+                _ = webSocket.eventLoop.scheduleRepeatedTask(
+                    initialDelay: .seconds(15),
+                    delay: .seconds(15)
+                ) { task in
+                    if webSocket.isClosed {
+                        task.cancel(promise: nil)
+                        return
+                    }
+                    
+                    webSocket.sendPing(promise: nil)
+                }
+                
                 webSocket.onBinary { [weak self] webSocket, buffer in
-                    guard let delegate = self?.delegate, let transport = self else {
+                    guard let transport = self, let delegate = transport.delegate else {
                         return
                     }
                     
@@ -359,7 +370,7 @@ public final class VaporTransport: CypherServerTransportClient {
                         }
                     }
                     
-                    detach {
+                    Task.detached {
                         do {
                             let packet = try BSONDecoder().decode(Packet.self, from: Document(buffer: buffer))
                             
@@ -418,7 +429,6 @@ public final class VaporTransport: CypherServerTransportClient {
                 }
             }.get()
         } catch {
-            print(error)
             self.authenticated = .authenticationFailure
             if self.wantsConnection {
                 self.eventLoop.flatScheduleTask(in: .seconds(3)) {

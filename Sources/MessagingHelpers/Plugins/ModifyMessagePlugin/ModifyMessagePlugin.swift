@@ -22,7 +22,7 @@ public struct ModifyMessagePlugin: Plugin {
             let message = try await message.conversation.message(byRemoteId: remoteId)
             if message.sender == sender {
                 // Message was sent by this user, so the action is permitted
-                try await message.destroy()
+                try await message.remove()
             }
             
             return .ignore
@@ -57,6 +57,6 @@ extension AnyChatMessage {
             preferredPushType: .none
         )
         
-        try await self.destroy()
+        try await self.remove()
     }
 }

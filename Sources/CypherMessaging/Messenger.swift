@@ -65,24 +65,93 @@ internal struct P2PSession {
     }
 }
 
+fileprivate final actor CypherMessengerActor {
+    var config: _CypherMessengerConfig
+    var p2pSessions = [P2PSession]()
+    var appPassword: String
+    let cachedStore: _CypherMessengerStoreCache
+    
+    internal init(config: _CypherMessengerConfig, cachedStore: _CypherMessengerStoreCache, appPassword: String) {
+        self.config = config
+        self.p2pSessions = []
+        self.appPassword = appPassword
+        self.cachedStore = cachedStore
+    }
+    
+    func updateConfig(_ run: (inout _CypherMessengerConfig) -> ()) async throws {
+        let salt = try await self.cachedStore.readLocalDeviceSalt()
+        let appEncryptionKey = CypherMessenger.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+        run(&config)
+        let encryptedConfig = try Encrypted(config, encryptionKey: appEncryptionKey)
+        try await self.cachedStore.writeLocalDeviceConfig(encryptedConfig.makeData())
+    }
+    
+    func changeAppPassword(to appPassword: String) async throws {
+        let salt = try await self.cachedStore.readLocalDeviceSalt()
+        let appEncryptionKey = CypherMessenger.formAppEncryptionKey(appPassword: appPassword, salt: salt)
+        
+        let encryptedConfig = try Encrypted(self.config, encryptionKey: appEncryptionKey)
+        let data = try BSONEncoder().encode(encryptedConfig).makeData()
+        try await self.cachedStore.writeLocalDeviceConfig(data)
+        self.appPassword = appPassword
+    }
+    
+    var isSetupCompleted: Bool {
+        switch config.registeryMode {
+        case .unregistered:
+            return false
+        case .childDevice, .masterDevice:
+            return true
+        }
+    }
+    
+    public func sign<T: Codable>(_ value: T) throws -> Signed<T> {
+        try Signed(value, signedBy: config.deviceKeys.identity)
+    }
+    
+    public func writeCustomConfig(_ custom: Document) async throws {
+        let salt = try await self.cachedStore.readLocalDeviceSalt()
+        let appEncryptionKey = CypherMessenger.formAppEncryptionKey(appPassword: self.appPassword, salt: salt)
+        var newConfig = self.config
+        newConfig.custom = custom
+        let encryptedConfig = try Encrypted(newConfig, encryptionKey: appEncryptionKey)
+        try await self.cachedStore.writeLocalDeviceConfig(encryptedConfig.makeData())
+        self.config = newConfig
+    }
+    
+    func closeP2PConnection(_ connection: P2PTransportClient) async {
+        debugLog("Removing P2P session from active pool")
+        guard let index = p2pSessions.firstIndex(where: {
+            $0.transport === connection
+        }) else {
+            return
+        }
+        
+        let session = p2pSessions.remove(at: index)
+        return await session.client.disconnect()
+    }
+    
+    func registerSession(_ session: P2PSession) {
+        p2pSessions.append(session)
+    }
+}
+
 @available(macOS 12, iOS 15, *)
 public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate {
     public let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
-    private let appPassword: String
-    internal var config: _CypherMessengerConfig
-    private var p2pFactories = [P2PTransportClientFactory]()
-    private var p2pSessions = [P2PSession]()
     private var inactiveP2PSessionsTimeout: Int? = 30
-    internal var deviceIdentityId: Int { config.deviceIdentityId }
+    internal let deviceIdentityId: Int
+    fileprivate let state: CypherMessengerActor
+    let p2pFactories: [P2PTransportClientFactory]
     internal let eventHandler: CypherMessengerEventHandler
     internal let cachedStore: _CypherMessengerStoreCache
     public let transport: CypherServerTransportClient
     internal let databaseEncryptionKey: SymmetricKey
     
     public var authenticated: AuthenticationState { transport.authenticated }
-    public var username: Username { config.username }
-    public var deviceId: DeviceId { config.deviceKeys.deviceId }
+    public let username: Username
+    public let deviceId: DeviceId
     
     private init(
         eventLoop: EventLoop,
@@ -95,18 +164,24 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     ) async throws {
         self.eventLoop = eventLoop
         self.eventHandler = eventHandler
-        self.config = config
-        self.cachedStore = _CypherMessengerStoreCache(base: database, eventLoop: eventLoop)
+        self.username = config.username
+        self.deviceId = config.deviceKeys.deviceId
+        self.deviceIdentityId = config.deviceIdentityId
+        self.cachedStore = _CypherMessengerStoreCache(base: database)
         self.transport = transport
         self.databaseEncryptionKey = SymmetricKey(data: config.databaseEncryptionKey)
         self.p2pFactories = p2pFactories
-        self.appPassword = appPassword
+        self.state = CypherMessengerActor(
+            config: config,
+            cachedStore: cachedStore,
+            appPassword: appPassword
+        )
         self.jobQueue = try await JobQueue(messenger: self, database: self.cachedStore, databaseEncryptionKey: self.databaseEncryptionKey)
         
         try await self.transport.setDelegate(to: self)
         
         if transport.authenticated == .unauthenticated {
-            detach {
+            Task.detached {
                 try await self.transport.reconnect()
                 self.jobQueue.startRunningTasks()
             }
@@ -152,7 +227,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             otherDevices: []
         )
         
-        let encryptedConfig = try Encrypted(config, encryptionKey: appEncryptionKey)
+        var encryptedConfig = try Encrypted(config, encryptionKey: appEncryptionKey)
         
         let transportRequest = TransportCreationRequest(
             username: username,
@@ -194,6 +269,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         } catch {
             var config = config
             config.registeryMode = .masterDevice
+            encryptedConfig = try Encrypted(config, encryptionKey: appEncryptionKey)
             
             try await database.writeLocalDeviceConfig(encryptedConfig.makeData())
             try await transport.publishKeyBundle(userConfig)
@@ -329,16 +405,35 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
     }
     
-    public func changeAppPassword(to appPassword: String) async throws {
-        let salt = try await self.cachedStore.readLocalDeviceSalt()
-        let appEncryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
-        
-        let encryptedConfig = try Encrypted(self.config, encryptionKey: appEncryptionKey)
-        let data = try BSONEncoder().encode(encryptedConfig).makeData()
-        try await self.cachedStore.writeLocalDeviceConfig(data)
+    internal func updateConfig(_ run: (inout _CypherMessengerConfig) -> ()) async throws {
+        try await state.updateConfig(run)
     }
     
-    public func isRegisteredDevice() async throws -> Bool {
+    public func changeAppPassword(to appPassword: String) async throws {
+        try await state.changeAppPassword(to: appPassword)
+    }
+    
+    public func createDeviceRegisteryRequest(isMasterDevice: Bool = false) async throws -> UserDeviceConfig? {
+        if try await isRegisteredOnline() {
+            try await updateConfig { config in
+                config.registeryMode = .childDevice
+            }
+            return nil
+        }
+        
+        return await UserDeviceConfig(
+            deviceId: deviceId,
+            identity: state.config.deviceKeys.identity.publicKey,
+            publicKey: state.config.deviceKeys.privateKey.publicKey,
+            isMasterDevice: isMasterDevice
+        )
+    }
+    
+    public func checkSetupCompleted() async -> Bool {
+        await state.isSetupCompleted
+    }
+    
+    public func isRegisteredOnline() async throws -> Bool {
         let config = try await transport.readKeyBundle(forUsername: self.username)
         let devices = try config.readAndValidateDevices()
         return devices.contains(where: { $0.deviceId == self.deviceId })
@@ -402,7 +497,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                 )
             )
         case let .requestDeviceRegistery(deviceConfig):
-            guard self.config.registeryMode == .masterDevice, !deviceConfig.isMasterDevice else {
+            guard await state.config.registeryMode == .masterDevice, !deviceConfig.isMasterDevice else {
                 debugLog("Received message intented for master device")
                 throw CypherSDKError.notMasterDevice
             }
@@ -417,11 +512,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     public func addDevice(_ deviceConfig: UserDeviceConfig) async throws {
         var config = try await transport.readKeyBundle(forUsername: self.username)
-        guard config.identity.data == self.config.deviceKeys.identity.publicKey.data else {
+        guard await config.identity.data == state.config.deviceKeys.identity.publicKey.data else {
             throw CypherSDKError.corruptUserConfig
         }
         
-        try config.addDeviceConfig(deviceConfig, signedWith: self.config.deviceKeys.identity)
+        try config.addDeviceConfig(deviceConfig, signedWith: await state.config.deviceKeys.identity)
         try await self.transport.publishKeyBundle(config)
         let internalConversation = try await self.getInternalConversation()
         let metadata = try BSONEncoder().encode(deviceConfig)
@@ -430,22 +525,49 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             forUsername: self.username
         )
         
-        return try await internalConversation.sendInternalMessage(
-            SingleCypherMessage(
-                messageType: .magic,
-                messageSubtype: "_/devices/announce",
-                text: deviceConfig.deviceId.raw,
-                metadata: metadata,
-                order: 0,
-                target: .currentUser
-            )
+        let message = SingleCypherMessage(
+            messageType: .magic,
+            messageSubtype: "_/devices/announce",
+            text: deviceConfig.deviceId.raw,
+            metadata: metadata,
+            order: 0,
+            target: .currentUser
         )
+        
+        try await internalConversation.sendInternalMessage(message)
+        
+        for contact in try await self.listContacts() {
+            try await _writeMessage(message, to: contact.username)
+        }
+        
+        try await eventHandler.onDeviceRegistery(deviceConfig.deviceId, messenger: self)
     }
     
-    func _createMultiRecipientMessage(
+    func _writeMessage(
+        _ message: SingleCypherMessage,
+        to recipient: Username
+    ) async throws {
+        for device in try await _fetchDeviceIdentities(for: recipient) {
+            try await _queueTask(
+                .sendMessage(
+                    SendMessageTask(
+                        message: CypherMessage(message: message),
+                        recipient: recipient,
+                        recipientDeviceId: device.props.deviceId,
+                        localId: nil,
+                        pushType: message.preferredPushType ?? .none,
+                        messageId: UUID().uuidString
+                    )
+                )
+            )
+        }
+    }
+    
+    func _withCreatedMultiRecipientMessage<T>(
         encrypting message: CypherMessage,
-        forDevices devices: [DecryptedModel<DeviceIdentityModel>]
-    ) async throws -> MultiRecipientCypherMessage {
+        forDevices devices: [DecryptedModel<DeviceIdentityModel>],
+        run: (MultiRecipientCypherMessage) async throws -> T
+    ) async throws -> T {
         let key = SymmetricKey(size: .bits256)
         let keyData = key.withUnsafeBytes { buffer in
             Data(bytes: buffer.baseAddress!, count: buffer.count)
@@ -455,12 +577,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         let encryptedMessage = try AES.GCM.seal(messageData, using: key).combined!
         
         var keyMessages = [MultiRecipientCypherMessage.ContainerKey]()
+        var rekeyDevices = [DecryptedModel<DeviceIdentityModel>]()
         
         for device in devices {
             let keyMessage = try await device._writeWithRatchetEngine(messenger: self) { ratchetEngine, rekeyState -> MultiRecipientCypherMessage.ContainerKey in
                 let ratchetMessage = try ratchetEngine.ratchetEncrypt(keyData)
                 
-                return try MultiRecipientCypherMessage.ContainerKey(
+                return try await MultiRecipientCypherMessage.ContainerKey(
                     user: device.props.username,
                     deviceId: device.props.deviceId,
                     message: self._signRatchetMessage(
@@ -470,14 +593,30 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                 )
             }
             
+            if keyMessage.message.rekey {
+                rekeyDevices.append(device)
+            }
+            
             keyMessages.append(keyMessage)
         }
         
-        return try MultiRecipientCypherMessage(
-            encryptedMessage: encryptedMessage,
-            signWith: self.config.deviceKeys.identity,
-            keys: keyMessages
-        )
+        do {
+            let message = try MultiRecipientCypherMessage(
+                encryptedMessage: encryptedMessage,
+                signWith: await state.config.deviceKeys.identity,
+                keys: keyMessages
+            )
+            
+            return try await run(message)
+        } catch {
+            for device in rekeyDevices {
+                // Device was instantiated with a rekey, but the message wasn't sent
+                // So to prevent any further confusion & issues, just reset this
+                try await device.updateDoubleRatchetState(to: nil)
+            }
+            
+            throw error
+        }
     }
     
     actor ModelCache {
@@ -511,20 +650,20 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         try AES.GCM.open(box, using: databaseEncryptionKey)
     }
     
-    public func sign<T: Codable>(_ value: T) throws -> Signed<T> {
-        try Signed(value, signedBy: config.deviceKeys.identity)
+    public func sign<T: Codable>(_ value: T) async throws -> Signed<T> {
+        try await state.sign(value)
     }
     
-    func _signRatchetMessage(_ message: RatchetMessage, rekey: RekeyState) throws -> RatchetedCypherMessage {
+    func _signRatchetMessage(_ message: RatchetMessage, rekey: RekeyState) async throws -> RatchetedCypherMessage {
         return try RatchetedCypherMessage(
             message: message,
-            signWith: self.config.deviceKeys.identity,
+            signWith: await state.config.deviceKeys.identity,
             rekey: rekey == .rekey
         )
     }
     
-    fileprivate func _formSharedSecret(with publicKey: PublicKey) throws -> SharedSecret {
-        try config.deviceKeys.privateKey.sharedSecretFromKeyAgreement(
+    fileprivate func _formSharedSecret(with publicKey: PublicKey) async throws -> SharedSecret {
+        try await state.config.deviceKeys.privateKey.sharedSecretFromKeyAgreement(
             with: publicKey
         )
     }
@@ -545,17 +684,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     public func readCustomConfig() async throws -> Document {
-        return config.custom
+        return await state.config.custom
     }
     
     public func writeCustomConfig(_ custom: Document) async throws {
-        let salt = try await self.cachedStore.readLocalDeviceSalt()
-        let appEncryptionKey = Self.formAppEncryptionKey(appPassword: self.appPassword, salt: salt)
-        var newConfig = self.config
-        newConfig.custom = custom
-        let encryptedConfig = try Encrypted(newConfig, encryptionKey: appEncryptionKey)
-        try await self.cachedStore.writeLocalDeviceConfig(encryptedConfig.makeData())
-        self.config = newConfig
+        try await state.writeCustomConfig(custom)
     }
     
     func _writeWithRatchetEngine<T>(
@@ -572,18 +705,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         _ connection: P2PTransportClient,
         closedWithOptions: Set<P2PTransportClosureOption>
     ) async throws {
-        func close() async {
-            debugLog("Removing P2P session from active pool")
-            guard let index = self.p2pSessions.firstIndex(where: {
-                $0.transport === connection
-            }) else {
-                return
-            }
-            
-            let session = self.p2pSessions.remove(at: index)
-            return await session.client.disconnect()
-        }
-        
         debugLog("P2P session disconnecting")
         
         if closedWithOptions.contains(.reconnnectPossible) {
@@ -591,11 +712,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                 return try await connection.reconnect()
             } catch {
                 debugLog("Reconnecting P2P connection failed")
-                return await close()
+                return await state.closeP2PConnection(connection)
             }
         }
         
-        return await close()
+        return await state.closeP2PConnection(connection)
     }
     
     internal func _processP2PMessage(
@@ -638,7 +759,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What is a P2P session already exists?
         if let client = client {
             client.delegate = self
-            self.p2pSessions.append(
+            await state.registerSession(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,
@@ -657,7 +778,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         _ connection: P2PTransportClient,
         receivedMessage buffer: ByteBuffer
     ) async throws {
-        guard let session = self.p2pSessions.first(where: {
+        guard let session = await state.p2pSessions.first(where: {
             $0.transport === connection
         }) else {
             return
@@ -666,15 +787,15 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return try await session.client.receiveBuffer(buffer)
     }
     
-    public func listOpenP2PConnections() -> EventLoopFuture<[P2PClient]> {
-        return eventLoop.makeSucceededFuture(p2pSessions.map(\.client))
+    public func listOpenP2PConnections() async -> [P2PClient] {
+        await state.p2pSessions.map(\.client)
     }
     
     internal func getEstablishedP2PConnection(
         with username: Username,
         deviceId: DeviceId
     ) async throws -> P2PClient? {
-        p2pSessions.first(where: { user in
+        await state.p2pSessions.first(where: { user in
             user.username == username && user.deviceId == deviceId
         })?.client
     }
@@ -682,7 +803,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     internal func getEstablishedP2PConnection(
         with device: DecryptedModel<DeviceIdentityModel>
     ) async throws -> P2PClient? {
-        p2pSessions.first(where: { user in
+        await state.p2pSessions.first(where: { user in
             user.username == device.username && user.deviceId == device.deviceId
         })?.client
     }
@@ -692,7 +813,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         targetConversation: TargetConversation,
         preferredTransportIdentifier: String? = nil
     ) async throws {
-        if p2pSessions.contains(where: { user in
+        if await state.p2pSessions.contains(where: { user in
             user.username == device.username && user.deviceId == device.deviceId
         }) {
             return
@@ -734,7 +855,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What if a P2P session already exists?
         if let client = client {
             client.delegate = self
-            self.p2pSessions.append(
+            await self.state.registerSession(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,
@@ -758,6 +879,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
     ) async throws -> Data {
         try await withLock {
             func rekey() async throws {
+                debugLog("Rekeying - removing ratchet state")
                 try await self.updateDoubleRatchetState(to: nil)
                 
                 try await messenger.eventHandler.onRekey(
@@ -812,7 +934,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
                 }
                 
                 do {
-                    let secret = try messenger._formSharedSecret(with: self.publicKey)
+                    let secret = try await messenger._formSharedSecret(with: self.publicKey)
                     let symmetricKey = messenger._deriveSymmetricKey(
                         from: secret,
                         initiator: messenger.username
@@ -820,7 +942,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
                     let ratchetMessage = try message.readAndValidate(usingIdentity: self.identity)
                     (ratchet, data) = try DoubleRatchetHKDF.initializeRecipient(
                         secretKey: symmetricKey,
-                        localPrivateKey: messenger.config.deviceKeys.privateKey,
+                        localPrivateKey: await messenger.state.config.deviceKeys.privateKey,
                         configuration: doubleRatchetConfig,
                         initialMessage: ratchetMessage
                     )
@@ -854,7 +976,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
                 )
                 rekey = false
             } else {
-                let secret = try messenger._formSharedSecret(with: publicKey)
+                let secret = try await messenger._formSharedSecret(with: publicKey)
                 let symmetricKey = messenger._deriveSymmetricKey(from: secret, initiator: self.username)
                 ratchet = try DoubleRatchetHKDF.initializeSender(
                     secretKey: symmetricKey,

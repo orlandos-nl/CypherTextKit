@@ -61,4 +61,7 @@ public protocol CypherMessengerEventHandler {
     func onContactIdentityChange(username: Username, messenger: CypherMessenger)
     func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger)
     func onP2PClientClose(messenger: CypherMessenger)
+    func onRemoveContact(_ contact: Contact)
+    func onRemoveChatMessage(_ message: AnyChatMessage)
+    func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
 }

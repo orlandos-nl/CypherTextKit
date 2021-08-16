@@ -58,6 +58,11 @@ public struct UserConfig: Codable {
         signedWith identity: PrivateSigningKey
     ) throws {
         var devices = try readAndValidateDevices()
+        
+        if devices.contains(where: { $0.deviceId == config.deviceId }) {
+            return
+        }
+        
         devices.append(config)
         self.devices = try Signed(devices, signedBy: identity)
     }

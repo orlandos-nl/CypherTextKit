@@ -3,7 +3,7 @@ import BSON
 import Foundation
 
 @available(macOS 12, iOS 15, *)
-public protocol Task: Codable {
+public protocol StoredTask: Codable {
     var key: TaskKey { get }
     var isBackgroundTask: Bool { get }
     var retryMode: TaskRetryMode { get }
@@ -15,7 +15,7 @@ public protocol Task: Codable {
 }
 
 @available(macOS 12, iOS 15, *)
-typealias TaskDecoder = (Document) throws -> Task
+typealias TaskDecoder = (Document) throws -> StoredTask
 
 public struct TaskPriority {
     enum _Raw: Comparable {

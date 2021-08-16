@@ -203,8 +203,12 @@ struct ChangeGroupUsernameTask: Codable {
     let nickname: String
 }
 
+public enum _CypherTaskConfig {
+    public static var sendMessageRetryMode: TaskRetryMode? = nil
+}
+
 @available(macOS 12, iOS 15, *)
-enum CypherTask: Codable, Task {
+enum CypherTask: Codable, StoredTask {
     private enum CodingKeys: String, CodingKey {
         case key = "a"
         case document = "b"
@@ -220,9 +224,13 @@ enum CypherTask: Codable, Task {
     var retryMode: TaskRetryMode {
         switch self {
         case .sendMessage, .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
+            if let mode = _CypherTaskConfig.sendMessageRetryMode {
+                return mode
+            }
+            
             return .retryAfter(30, maxAttempts: 3)
         case .processMultiRecipientMessage, .processMessage:
-            return .never
+            return .always
         case .receiveMessageDeliveryStateChangeTask:
             return .retryAfter(60, maxAttempts: 5)
         }
@@ -358,7 +366,7 @@ enum CypherTask: Codable, Task {
             )
         case .sendMultiRecipientMessage(let task):
             debugLog("Sending message to multiple recipients", task.recipients)
-            return try await TaskHelpers.writeMultiRecipeintMessageTask(task: task, messenger: messenger)
+            return try await TaskHelpers.writeMultiRecipientMessageTask(task: task, messenger: messenger)
         case .processMultiRecipientMessage(let task):
             return try await messenger._receiveMultiRecipientMessage(
                 task.message,
@@ -401,7 +409,7 @@ enum CypherTask: Codable, Task {
 
 @available(macOS 12, iOS 15, *)
 enum TaskHelpers {
-    fileprivate static func writeMultiRecipeintMessageTask(
+    fileprivate static func writeMultiRecipientMessageTask(
         task: SendMultiRecipientMessageTask,
         messenger: CypherMessenger
     ) async throws {
@@ -417,8 +425,9 @@ enum TaskHelpers {
             return
         }
         
-        for i in 1...devices.count {
-            let index = devices.count - i
+        for i in 0..<devices.count {
+            // Back to front, since we're popping elements
+            let index = devices.count - i - 1
             let device = devices[index]
             
             do {
@@ -436,12 +445,12 @@ enum TaskHelpers {
         
         if devices.isEmpty { return }
         
-        let message = try await messenger._createMultiRecipientMessage(
+        return try await messenger._withCreatedMultiRecipientMessage(
             encrypting: task.message,
             forDevices: devices
-        )
-        
-        return try await messenger.transport.sendMultiRecipientMessage(message, pushType: task.pushType, messageId: task.messageId)
+        ) { message in
+            return try await messenger.transport.sendMultiRecipientMessage(message, pushType: task.pushType, messageId: task.messageId)
+        }
     }
 
     fileprivate static func writeMessageTask(
@@ -477,7 +486,7 @@ enum TaskHelpers {
             let encodedMessage = try BSONEncoder().encode(task.message).makeData()
             let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
 
-            let encryptedMessage = try messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
+            let encryptedMessage = try await messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
             try await messenger.transport.sendMessage(
                 encryptedMessage,
                 toUser: task.recipient,

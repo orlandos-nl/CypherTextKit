@@ -42,7 +42,8 @@ public struct AnyChatMessage {
         raw.senderUser
     }
     
-    public func destroy() async throws {
+    public func remove() async throws {
         try await messenger.cachedStore.removeChatMessage(raw.encrypted)
+        messenger.eventHandler.onRemoveChatMessage(self)
     }
 }

@@ -8,6 +8,7 @@ public final class SwiftUIEventEmitter: ObservableObject {
     public let savedChatMessages = PassthroughSubject<AnyChatMessage, Never>()
     
     public let chatMessageChanged = PassthroughSubject<AnyChatMessage, Never>()
+    public let chatMessageRemoved = PassthroughSubject<AnyChatMessage, Never>()
     public let conversationChanged = PassthroughSubject<TargetConversation.Resolved, Never>()
     public let contactChanged = PassthroughSubject<Contact, Never>()
     
@@ -57,7 +58,7 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
     }
     
     public func onConversationChange(_ conversation: AnyConversation) {
-        detach {
+        Task.detached {
             let conversation = await conversation.resolveTarget()
             DispatchQueue.main.async {
                 emitter.conversationChanged.send(conversation)
@@ -87,6 +88,18 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
     public func onCreateChatMessage(_ chatMessage: AnyChatMessage) {
         DispatchQueue.main.async {
             self.emitter.savedChatMessages.send(chatMessage)
+        }
+    }
+    
+    public func onRemoveContact(_ contact: Contact) {
+        DispatchQueue.main.async {
+            self.emitter.contacts.removeAll { $0.id == contact.id }
+        }
+    }
+    
+    public func onRemoveChatMessage(_ message: AnyChatMessage) {
+        DispatchQueue.main.async {
+            self.emitter.chatMessageRemoved.send(message)
         }
     }
     

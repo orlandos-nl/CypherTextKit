@@ -33,7 +33,7 @@ final class JobQueue: ObservableObject {
         }.map(\.1)
     }
     
-    static func registerTask<T: Task>(_ task: T.Type, forKey key: TaskKey) {
+    static func registerTask<T: StoredTask>(_ task: T.Type, forKey key: TaskKey) {
         taskDecoders[key] = { document in
             try BSONDecoder().decode(task, from: document)
         }
@@ -54,7 +54,7 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    public func queueTask<T: Task>(_ task: T) async throws {
+    public func queueTask<T: StoredTask>(_ task: T) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.appLocked
         }
@@ -65,6 +65,7 @@ final class JobQueue: ObservableObject {
         )
         
         try await self.jobs.append(messenger.decrypt(job))
+        self.hasOutstandingTasks = true
         try await database.createJob(job)
         if !self.runningJobs {
             self.startRunningTasks()
@@ -76,7 +77,7 @@ final class JobQueue: ObservableObject {
 //        if runningJobs {
 //            return .busy
 //        } else
-        if runningJobs || hasOutstandingTasks {
+        if hasOutstandingTasks {
             let promise = eventLoop.makePromise(of: Void.self)
             self.isDoneNotifications.append(promise)
             startRunningTasks()
@@ -86,6 +87,7 @@ final class JobQueue: ObservableObject {
             return .skipped
         }
     }
+    
     func markAsDone() {
         if !hasOutstandingTasks && !isDoneNotifications.isEmpty {
             for notification in isDoneNotifications {
@@ -113,7 +115,7 @@ final class JobQueue: ObservableObject {
         debugLog("Job queue started")
         runningJobs = true
 
-        func next(in jobs: [DecryptedModel<JobModel>]) async throws {
+        @MainActor func next(in jobs: [DecryptedModel<JobModel>]) async throws {
             guard let messenger = self.messenger else {
                 return
             }
@@ -149,7 +151,7 @@ final class JobQueue: ObservableObject {
                     return try await next(in: jobs)
                 case .failed(haltExecution: true):
                     let done = await jobs.asyncMap { job -> EventLoopFuture<Void> in
-                        let task: Task
+                        let task: StoredTask
                         
                         do {
                             let taskKey = TaskKey(rawValue: job.taskKey)
@@ -174,7 +176,7 @@ final class JobQueue: ObservableObject {
             }
         }
 
-        _ = eventLoop.executeAsync {
+        _ = eventLoop.executeAsync { @MainActor in
             // Lock in the current queue
             let jobs = self.jobs
             if self.jobs.isEmpty {
@@ -240,6 +242,7 @@ final class JobQueue: ObservableObject {
     }
 
     private func runNextJob(in jobs: inout [DecryptedModel<JobModel>]) async throws -> TaskResult {
+        debugLog("Available jobs", jobs.count)
         var index = 0
         let initialJob = jobs[0]
 
@@ -253,7 +256,7 @@ final class JobQueue: ObservableObject {
             }
         }
 
-        let job = jobs.remove(at: index)
+        let job = jobs[index]
 
         debugLog("Running job", job.props)
 
@@ -262,7 +265,7 @@ final class JobQueue: ObservableObject {
             return .delayed
         }
         
-        let task: Task
+        let task: StoredTask
         
         do {
             let taskKey = TaskKey(rawValue: job.props.taskKey)
@@ -273,6 +276,7 @@ final class JobQueue: ObservableObject {
             }
         } catch {
             debugLog("Failed to decode job", job.id, ". Error:", error)
+            jobs.remove(at: index)
             try await self.dequeueJob(job)
             return .success
         }
@@ -288,6 +292,7 @@ final class JobQueue: ObservableObject {
 
         do {
             try await task.execute(on: messenger)
+            jobs.remove(at: index)
             try await self.dequeueJob(job)
             return .success
         } catch {
@@ -299,6 +304,7 @@ final class JobQueue: ObservableObject {
                 try await job.delayExecution(retryDelay: retryDelay)
                 
                 if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {
+                    jobs.remove(at: index)
                     try await self.cancelJob(job)
                     return .success
                 }
@@ -308,6 +314,7 @@ final class JobQueue: ObservableObject {
             case .always:
                 return .delayed
             case .never:
+                jobs.remove(at: index)
                 try await self.dequeueJob(job)
                 return .failed(haltExecution: false)
             }
