@@ -184,7 +184,7 @@ extension CypherMessenger {
         
         try await chat.sendRawMessage(
             type: .magic,
-            messageSubtype: "_/notification",
+            messageSubtype: "_/ignore",
             text: "",
             preferredPushType: .none
         )
@@ -319,7 +319,7 @@ extension AnyConversation {
         try await messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
     
-    public func save() async throws {
+    @MainActor public func save() async throws {
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         messenger.eventHandler.onUpdateConversation(self)
     }
@@ -331,7 +331,7 @@ extension AnyConversation {
     }
     
     @discardableResult
-    public func sendRawMessage(
+    @MainActor public func sendRawMessage(
         type: CypherMessageType,
         messageSubtype: String? = nil,
         text: String,

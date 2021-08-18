@@ -46,15 +46,17 @@ final class JobQueue: ObservableObject {
     
     func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
         try await database.removeJob(job.encrypted)
-        for i in 0..<self.jobs.count {
-            if self.jobs[i].id == job.id {
-                self.jobs.remove(at: i)
-                return
+        try await eventLoop.submit {
+            for i in 0..<self.jobs.count {
+                if self.jobs[i].id == job.id {
+                    self.jobs.remove(at: i)
+                    return
+                }
             }
-        }
+        }.get()
     }
     
-    public func queueTask<T: StoredTask>(_ task: T) async throws {
+    @MainActor public func queueTask<T: StoredTask>(_ task: T) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.appLocked
         }
@@ -64,7 +66,10 @@ final class JobQueue: ObservableObject {
             encryptionKey: databaseEncryptionKey
         )
         
-        try await self.jobs.append(messenger.decrypt(job))
+        let queuedJob = try await messenger.decrypt(job)
+        try await eventLoop.submit {
+            self.jobs.append(queuedJob)
+        }.get()
         self.hasOutstandingTasks = true
         try await database.createJob(job)
         if !self.runningJobs {
@@ -115,13 +120,13 @@ final class JobQueue: ObservableObject {
         debugLog("Job queue started")
         runningJobs = true
 
-        @MainActor func next(in jobs: [DecryptedModel<JobModel>]) async throws {
+        @MainActor func next() async throws {
             guard let messenger = self.messenger else {
                 return
             }
             
             debugLog("Looking for next task")
-            if jobs.isEmpty {
+            if self.jobs.isEmpty {
                 debugLog("No more tasks")
                 self.runningJobs = false
                 self.hasOutstandingTasks = false
@@ -129,12 +134,10 @@ final class JobQueue: ObservableObject {
                 return
             }
 
-            var jobs = jobs
-
             let result: TaskResult
             
             do {
-                result = try await runNextJob(in: &jobs)
+                result = try await runNextJob(in: &self.jobs)
             } catch {
                 debugLog("Task error", error)
                 result = .failed(haltExecution: true)
@@ -148,9 +151,9 @@ final class JobQueue: ObservableObject {
             } else {
                 switch result {
                 case .success, .delayed, .failed(haltExecution: false):
-                    return try await next(in: jobs)
+                    return try await next()
                 case .failed(haltExecution: true):
-                    let done = await jobs.asyncMap { job -> EventLoopFuture<Void> in
+                    let done = await self.jobs.asyncMap { job -> EventLoopFuture<Void> in
                         let task: StoredTask
                         
                         do {
@@ -178,7 +181,6 @@ final class JobQueue: ObservableObject {
 
         _ = eventLoop.executeAsync { @MainActor in
             // Lock in the current queue
-            let jobs = self.jobs
             if self.jobs.isEmpty {
                 debugLog("No jobs to run")
                 self.hasOutstandingTasks = false
@@ -187,7 +189,7 @@ final class JobQueue: ObservableObject {
             } else {
                 var hasUsefulTasks = false
                 
-                findUsefulTasks: for job in jobs {
+                findUsefulTasks: for job in self.jobs {
                     if let delayedUntil = job.delayedUntil, delayedUntil >= Date() {
                         if !job.props.isBackgroundTask {
                             break findUsefulTasks
@@ -208,7 +210,7 @@ final class JobQueue: ObservableObject {
                 }
                 
                 do {
-                    try await next(in: jobs)
+                    try await next()
                 } catch {
                     debugLog("Job queue error", error)
                     self.runningJobs = false
@@ -276,7 +278,6 @@ final class JobQueue: ObservableObject {
             }
         } catch {
             debugLog("Failed to decode job", job.id, ". Error:", error)
-            jobs.remove(at: index)
             try await self.dequeueJob(job)
             return .success
         }
@@ -292,7 +293,6 @@ final class JobQueue: ObservableObject {
 
         do {
             try await task.execute(on: messenger)
-            jobs.remove(at: index)
             try await self.dequeueJob(job)
             return .success
         } catch {
@@ -304,7 +304,6 @@ final class JobQueue: ObservableObject {
                 try await job.delayExecution(retryDelay: retryDelay)
                 
                 if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {
-                    jobs.remove(at: index)
                     try await self.cancelJob(job)
                     return .success
                 }
@@ -314,7 +313,6 @@ final class JobQueue: ObservableObject {
             case .always:
                 return .delayed
             case .never:
-                jobs.remove(at: index)
                 try await self.dequeueJob(job)
                 return .failed(haltExecution: false)
             }

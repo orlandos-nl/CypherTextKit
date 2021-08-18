@@ -39,7 +39,7 @@ final class ChatActivityPluginTests: XCTestCase {
         try await sync.synchronise()
         
         let m0Chat = try await m0.createPrivateChat(with: "m1")
-        XCTAssertNotNil(m0Chat.lastActivity)
+        XCTAssertNil(m0Chat.lastActivity)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
@@ -87,18 +87,20 @@ final class ChatActivityPluginTests: XCTestCase {
         try await sync.synchronise()
         
         let m0Chat = try await m0.createGroupChat(with: ["m1"])
-        XCTAssertNotNil(m0Chat.lastActivity)
+        XCTAssertNil(m0Chat.lastActivity)
         
         _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
         )
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .ascending).count, 1)
         XCTAssertNotNil(m0Chat.lastActivity)
         
         try await sync.synchronise()
         
         if let m1Chat = try await m1.getGroupChat(byId: m0Chat.getGroupId()) {
+            await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .ascending).count, 1)
             XCTAssertNotNil(m1Chat.lastActivity)
         } else {
             XCTFail()

@@ -347,7 +347,7 @@ internal extension CypherMessenger {
             default:
                 guard message.messageSubtype?.hasPrefix("_/") != true else {
                     debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
-                    throw CypherSDKError.badInput
+                    return
                 }
                 
                 let conversation = try await self.getInternalConversation()
@@ -385,17 +385,18 @@ internal extension CypherMessenger {
                 }
             }
         case .groupChat(let groupId):
+            let group = try await self._openGroupChat(byId: groupId)
+            
             if let subType = message.messageSubtype, subType.hasPrefix("_/") {
                 switch subType {
                 case "_/ignore":
                     return
                 default:
                     debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
-                    throw CypherSDKError.badInput
+                    return
                 }
             }
             
-            let group = try await self._openGroupChat(byId: groupId)
             let context = ReceivedMessageContext(
                 sender: DeviceReference(
                     username: sender.props.username,
@@ -452,7 +453,7 @@ internal extension CypherMessenger {
             case (.magic, let subType), (.media, let subType), (.text, let subType):
                 if subType.hasPrefix("_/") {
                     debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
-                    throw CypherSDKError.badInput
+                    return
                 }
             }
             
