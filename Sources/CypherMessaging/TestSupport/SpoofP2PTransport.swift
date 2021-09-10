@@ -10,16 +10,13 @@ public final class SpoofP2PTransportClient: P2PTransportClient {
     public fileprivate(set) var connected: ConnectionState = .connecting
     public let state: P2PFrameworkState
     fileprivate weak var otherClient: SpoofP2PTransportClient?
-    public let eventLoop: EventLoop
     
     internal init(
         state: P2PFrameworkState,
-        eventLoop: EventLoop,
         otherClient: SpoofP2PTransportClient?
     ) {
         self.state = state
         self.otherClient = otherClient
-        self.eventLoop = eventLoop
     }
     
     public func reconnect() async throws {
@@ -75,7 +72,6 @@ public final class SpoofP2PTransportFactory: P2PTransportClientFactory {
     public func createConnection(handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
         let localClient = SpoofP2PTransportClient(
             state: handle.state,
-            eventLoop: handle.eventLoop,
             otherClient: nil
         )
         
@@ -97,7 +93,6 @@ public final class SpoofP2PTransportFactory: P2PTransportClientFactory {
         
         let localClient = SpoofP2PTransportClient(
             state: handle.state,
-            eventLoop: handle.eventLoop,
             otherClient: client
         )
         client.otherClient = localClient

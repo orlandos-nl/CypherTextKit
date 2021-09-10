@@ -185,7 +185,6 @@ public final class VaporTransport: CypherServerTransportClient {
         host: String,
         username: Username,
         deviceId: DeviceId,
-        eventLoop: EventLoop,
         httpClient: URLSession,
         signer: TransportCreationRequest,
         appleToken: String?
@@ -198,13 +197,12 @@ public final class VaporTransport: CypherServerTransportClient {
         self.signer = signer
     }
     
-    public static func login(for transportRequest: TransportCreationRequest, host: String, eventLoop: EventLoop) async throws -> VaporTransport {
+    public static func login(for transportRequest: TransportCreationRequest, host: String) async throws -> VaporTransport {
         let client = URLSession(configuration: .default)
         return VaporTransport(
             host: host,
             username: transportRequest.username,
             deviceId: transportRequest.deviceId,
-            eventLoop: eventLoop,
             httpClient: client,
             signer: transportRequest,
             appleToken: nil
@@ -226,7 +224,6 @@ public final class VaporTransport: CypherServerTransportClient {
             host: host,
             username: transportRequest.username,
             deviceId: transportRequest.deviceId,
-            eventLoop: eventLoop,
             httpClient: client,
             signer: transportRequest,
             appleToken: nil
@@ -265,7 +262,6 @@ public final class VaporTransport: CypherServerTransportClient {
             host: host,
             username: transportRequest.username,
             deviceId: transportRequest.deviceId,
-            eventLoop: eventLoop,
             httpClient: client,
             signer: transportRequest,
             appleToken: appleToken
@@ -421,9 +417,9 @@ public final class VaporTransport: CypherServerTransportClient {
                 }
                 
                 webSocket.onClose.whenComplete { [weak self] _ in
-                    if self?.wantsConnection == true {
-                        _ = eventLoop.executeAsync {
-                            await self?.reconnect()
+                    if let transport = self, transport.wantsConnection == true {
+                        Task.detached {
+                            await transport.reconnect()
                         }
                     }
                 }

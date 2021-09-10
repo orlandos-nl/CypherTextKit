@@ -1,3 +1,4 @@
+import Dribble
 import NIO
 //import NIOTransportServices
 
@@ -65,12 +66,51 @@ final class IPv6TCPP2PTransportClient: P2PTransportClient {
     }
 }
 
+public struct StunCredentials {
+    enum _Credentials {
+        case none
+        case password(String)
+        case tuple(username: String, realm: String, password: String)
+    }
+    
+    let _credentials: _Credentials
+    
+    public init() {
+        _credentials = .none
+    }
+    
+    public init(password: String) {
+        _credentials = .password(password)
+    }
+    
+    public init(username: String, realm: String, password: String) {
+        _credentials = .tuple(username: username, realm: realm, password: password)
+    }
+}
+
+public struct StunConfig {
+    
+    let server: SocketAddress
+    let credentials: StunCredentials?
+    
+    public init(
+        server: SocketAddress,
+        credentials: StunCredentials = StunCredentials()
+    ) {
+        self.server = server
+        self.credentials = credentials
+    }
+}
+
 @available(macOS 12, iOS 15, *)
 public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
     public let transportLayerIdentifier = "_ipv6-tcp"
     let eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+    let stun: StunConfig?
     
-    public init() {}
+    public init(stun: StunConfig? = nil) {
+        self.stun = stun
+    }
     
     public func receiveMessage(_ text: String, metadata: Document, handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
         guard
@@ -88,9 +128,19 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
             }.get()
     }
     
-    public func createConnection(handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
-        let ipAddress: String
+    private func findAddress() async throws -> SocketAddress {
+        if let stun = stun {
+            do {
+                let stunClient = try await StunClient.connect(to: stun.server)
+                return try await stunClient.requestBinding(addressFamily: .ipv6)
+            } catch {
+                // STUN failed, try a different route
+            }
+        }
         
+        // TODO: Support TURN?
+        
+        // No STUN or TURN, find sensible local interface as a last effort
         findInterface: do {
             let interfaces = try System.enumerateDevices()
             
@@ -104,8 +154,7 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
                     !foundIpAddress.hasPrefix("fe80:"),
                     !foundIpAddress.contains("::1")
                 {
-                    ipAddress = foundIpAddress
-                    break findInterface
+                    return try SocketAddress(ipAddress: foundIpAddress, port: 0)
                 }
             }
             
@@ -114,8 +163,11 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
             debugLog("Failed to create P2PIPv6 Session", error)
             throw error
         }
-        
-        let promise = handle.eventLoop.makePromise(of: Optional<P2PTransportClient>.self)
+    }
+    
+    public func createConnection(handle: P2PTransportFactoryHandle) async throws -> P2PTransportClient? {
+        let address = try await findAddress()
+        let promise = handle.messenger.eventLoop.makePromise(of: Optional<P2PTransportClient>.self)
         
 //        #if canImport(Network) && false
 //        #else
@@ -131,7 +183,7 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
                     throw error
                 }
             }
-            .bind(host: ipAddress, port: 0)
+            .bind(to: address)
             .flatMap { channel -> EventLoopFuture<Void> in
                 self.eventLoop.next().scheduleTask(in: .seconds(30)) { () in
                     promise.fail(IPv6TCPP2PError.timeout)
@@ -148,7 +200,7 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
                 
                 return channel.eventLoop.executeAsync {
                     try await handle.sendMessage("", metadata: [
-                        "ip": ipAddress,
+                        "ip": address.ipAddress,
                         "port": port
                     ])
                 }

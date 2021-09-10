@@ -39,6 +39,10 @@ fileprivate final actor AcknowledgementManager {
     }
 }
 
+/// A peer-to-peer connection with a remote device. Used for low-latency communication with a third-party device.
+/// P2PClient is also used for static-length packets that are easily identified, such as status changes.
+///
+/// You can interact with P2PClient as if you're sending and receiving cleartext messages, while the client itself applies the end-to-end encryption.
 @available(macOS 12, iOS 15, *)
 public final class P2PClient {
     private weak var messenger: CypherMessenger?
@@ -53,18 +57,24 @@ public final class P2PClient {
     }
     private var task: RepeatedTask?
     
+    /// The username of the remote device to which this P2PClient is connected
     public var username: Username { client.state.username }
+    
+    /// The devieId of the remote device to which this P2PClient is connected
     public var deviceId: DeviceId { client.state.deviceId }
+    
     public var isConnected: Bool {
         client.connected == .connected
     }
     private var _onStatusChange: ((P2PStatusMessage?) -> ())?
     private var _onDisconnect: (() -> ())?
     
+    /// The provided closure is called when the client disconnects
     public func onDisconnect(perform: @escaping () -> ()) {
         _onDisconnect = perform
     }
     
+    /// The provided closure is called when the remote device indicates it's status has changed
     public func onStatusChange(perform: @escaping (P2PStatusMessage?) -> ()) {
         _onStatusChange = perform
     }
@@ -103,7 +113,8 @@ public final class P2PClient {
         debugLog("P2P Connection with \(username) created")
     }
     
-    public func receiveBuffer(
+    /// This function is called whenever a P2PTransportClient receives information from a remote device
+    internal func receiveBuffer(
         _ buffer: ByteBuffer
     ) async throws {
         guard let messenger = messenger else {
@@ -164,6 +175,7 @@ public final class P2PClient {
         )
     }
     
+    /// Emits a status update to the remote peer
     public func updateStatus(
         flags: P2PStatusMessage.StatusFlags,
         metadata: Document = [:]
@@ -178,6 +190,8 @@ public final class P2PClient {
         )
     }
     
+    /// Sends a message (cleartext) to a remote peer
+    /// This function then applies end-to-end encryption before transmitting the information over the internet.
     private func sendMessage(_ box: P2PMessage.Box) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.offline
@@ -206,6 +220,7 @@ public final class P2PClient {
         try await ack.completion()
     }
     
+    /// Disconnects the transport layer
     public func disconnect() async {
         if let messenger = self.messenger {
             messenger.eventHandler.onP2PClientClose(messenger: messenger)

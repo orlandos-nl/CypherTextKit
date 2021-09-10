@@ -21,6 +21,8 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     }
     
     @MainActor func emptyCaches() async {
+        // TODO: Only clear entities which are knownUniquelyReferenced
+        
         deviceConfig = nil
         contacts = nil
         conversations = nil

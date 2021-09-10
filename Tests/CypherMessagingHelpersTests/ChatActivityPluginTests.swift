@@ -9,19 +9,15 @@ final class ChatActivityPluginTests: XCTestCase {
     }
     
     func testPrivateChat() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
+            ])
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -29,11 +25,10 @@ final class ChatActivityPluginTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
+            ])
         )
         let sync = Synchronisation(apps: [m0, m1])
         try await sync.synchronise()
@@ -56,19 +51,15 @@ final class ChatActivityPluginTests: XCTestCase {
     }
     
     func testGroupChat() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
+            ])
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -76,11 +67,10 @@ final class ChatActivityPluginTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
+            ])
         )
         
         let sync = Synchronisation(apps: [m0, m1])

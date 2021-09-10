@@ -6,7 +6,6 @@ import NIO
 
 @available(macOS 12, iOS 15, *)
 final class JobQueue: ObservableObject {
-    public let eventLoop: EventLoop
     weak private(set) var messenger: CypherMessenger?
     private let database: CypherMessengerStore
     private let databaseEncryptionKey: SymmetricKey
@@ -18,11 +17,12 @@ final class JobQueue: ObservableObject {
             markAsDone()
         }
     }
+    private let eventLoop: EventLoop
     private static var taskDecoders = [TaskKey: TaskDecoder]()
 
     init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) async throws {
-        self.eventLoop = messenger.eventLoop
         self.messenger = messenger
+        self.eventLoop = messenger.eventLoop
         self.database = database
         self.databaseEncryptionKey = databaseEncryptionKey
         self.jobs = try await database.readJobs().asyncMap { job -> (Date, DecryptedModel<JobModel>) in
@@ -39,21 +39,21 @@ final class JobQueue: ObservableObject {
         }
     }
     
+    @MainActor
     func cancelJob(_ job: DecryptedModel<JobModel>) async throws {
         // TODO: What if the job is cancelled while executing and succeeding?
         try await dequeueJob(job)
     }
     
+    @MainActor
     func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
         try await database.removeJob(job.encrypted)
-        try await eventLoop.submit {
-            for i in 0..<self.jobs.count {
-                if self.jobs[i].id == job.id {
-                    self.jobs.remove(at: i)
-                    return
-                }
+        for i in 0..<self.jobs.count {
+            if self.jobs[i].id == job.id {
+                self.jobs.remove(at: i)
+                return
             }
-        }.get()
+        }
     }
     
     @MainActor public func queueTask<T: StoredTask>(_ task: T) async throws {
@@ -67,9 +67,7 @@ final class JobQueue: ObservableObject {
         )
         
         let queuedJob = try await messenger.decrypt(job)
-        try await eventLoop.submit {
-            self.jobs.append(queuedJob)
-        }.get()
+        self.jobs.append(queuedJob)
         self.hasOutstandingTasks = true
         try await database.createJob(job)
         if !self.runningJobs {
@@ -78,12 +76,14 @@ final class JobQueue: ObservableObject {
     }
     
     fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
+    
+    @MainActor
     func awaitDoneProcessing() async throws -> SynchronisationResult {
 //        if runningJobs {
 //            return .busy
 //        } else
-        if hasOutstandingTasks {
-            let promise = eventLoop.makePromise(of: Void.self)
+        if hasOutstandingTasks, let messenger = messenger {
+            let promise = messenger.eventLoop.makePromise(of: Void.self)
             self.isDoneNotifications.append(promise)
             startRunningTasks()
             try await promise.futureResult.get()
@@ -102,7 +102,8 @@ final class JobQueue: ObservableObject {
             isDoneNotifications = []
         }
     }
-
+    
+    @MainActor
     func startRunningTasks() {
         debugLog("Starting job queue")
 
@@ -120,7 +121,7 @@ final class JobQueue: ObservableObject {
         debugLog("Job queue started")
         runningJobs = true
 
-        @MainActor func next() async throws {
+        @MainActor @Sendable func next() async throws {
             guard let messenger = self.messenger else {
                 return
             }
@@ -153,33 +154,26 @@ final class JobQueue: ObservableObject {
                 case .success, .delayed, .failed(haltExecution: false):
                     return try await next()
                 case .failed(haltExecution: true):
-                    let done = await self.jobs.asyncMap { job -> EventLoopFuture<Void> in
+                    for job in self.jobs {
                         let task: StoredTask
                         
-                        do {
-                            let taskKey = TaskKey(rawValue: job.taskKey)
-                            if let decoder = Self.taskDecoders[taskKey] {
-                                task = try decoder(job.task)
-                            } else {
-                                task = try BSONDecoder().decode(CypherTask.self, from: job.task)
-                            }
-                        } catch {
-                            return self.eventLoop.makeFailedFuture(error)
+                        let taskKey = TaskKey(rawValue: job.taskKey)
+                        if let decoder = Self.taskDecoders[taskKey] {
+                            task = try decoder(job.task)
+                        } else {
+                            task = try BSONDecoder().decode(CypherTask.self, from: job.task)
                         }
                         
-                        return messenger.eventLoop.executeAsync {
-                            try await task.onDelayed(on: messenger)
-                        }
+                        try await task.onDelayed(on: messenger)
                     }
 
                     debugLog("Task failed or none found, stopping processing")
                     self.runningJobs = false
-                    return try await EventLoopFuture.andAllComplete(done, on: self.eventLoop).get()
                 }
             }
         }
 
-        _ = eventLoop.executeAsync { @MainActor in
+        Task.detached { @MainActor in
             // Lock in the current queue
             if self.jobs.isEmpty {
                 debugLog("No jobs to run")
@@ -219,24 +213,27 @@ final class JobQueue: ObservableObject {
             }
         }
     }
-
+    
+    @MainActor
     public func resume() {
         pausing = nil
         startRunningTasks()
     }
     
-    public func restart() -> EventLoopFuture<Void> {
-        pause().map(resume)
+    @MainActor
+    public func restart() async throws {
+        try await pause()
+        resume()
     }
 
-    public func pause() -> EventLoopFuture<Void> {
-        let promise = self.eventLoop.makePromise(of: Void.self)
+    public func pause() async throws {
+        let promise = eventLoop.makePromise(of: Void.self)
         pausing = promise
         if !runningJobs {
             promise.succeed(())
         }
 
-        return promise.futureResult
+        return try await promise.futureResult.get()
     }
 
     public enum TaskResult {

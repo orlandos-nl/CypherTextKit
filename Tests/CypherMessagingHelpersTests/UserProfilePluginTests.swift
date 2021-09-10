@@ -70,20 +70,16 @@ final class UserProfilePluginTests: XCTestCase {
     }
     
     func testChangeStatus() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 UserProfilePlugin(),
                 AcceptAllDeviceRegisteriesPlugin()
-            ]),
-            on: eventLoop
+            ])
         )
         
         let m0_2 = try await CypherMessenger.registerMessenger(
@@ -91,11 +87,10 @@ final class UserProfilePluginTests: XCTestCase {
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 UserProfilePlugin(),
-            ]),
-            on: eventLoop
+            ])
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -103,11 +98,10 @@ final class UserProfilePluginTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 UserProfilePlugin()
-            ]),
-            on: eventLoop
+            ])
         )
         
         let sync = Synchronisation(apps: [m0, m1])

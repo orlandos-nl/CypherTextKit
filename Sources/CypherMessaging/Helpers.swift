@@ -1,11 +1,12 @@
 import NIO
+import _NIOConcurrency
 
 @available(macOS 12, iOS 15, *)
 extension EventLoop {
-    public func executeAsync<T>(_ block: @escaping () async throws -> T) -> EventLoopFuture<T> {
+    public func executeAsync<T>(_ block: @escaping @Sendable () async throws -> T) -> EventLoopFuture<T> {
         let promise = self.makePromise(of: T.self)
         execute {
-            promise.completeWithAsync(block)
+            promise.completeWithTask(block)
         }
         return promise.futureResult
     }

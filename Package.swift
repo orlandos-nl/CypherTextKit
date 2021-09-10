@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "CypherTextKit",
     platforms: [
-        .macOS(.v10_15),
-        .iOS(.v14),
+        .macOS(.v12),
+        .iOS(.v15),
     ],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
@@ -24,8 +24,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
         .package(url: "https://github.com/vapor/jwt-kit.git", from: "4.0.0"),
         .package(url: "https://github.com/vapor/websocket-kit.git", from: "2.0.0"),
-//        .package(name: "swift-nio", path: "/Users/joannisorlandos/Project/swift-nio/"),
-//        .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.0.0"),
+        .package(url: "git@github.com:orlandos-nl/Dribble.git", .branch("main")),
         .package(url: "https://github.com/OpenKitten/BSON.git", from: "7.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
     ],
@@ -35,13 +34,9 @@ let package = Package(
         .target(
             name: "CypherMessaging",
             dependencies: [
+                .product(name: "Dribble", package: "Dribble"),
                 .target(name: "CypherProtocol"),
                 .product(name: "Logging", package: "swift-log"),
-            ], swiftSettings: [
-                .unsafeFlags([
-                    "-Xfrontend", "-enable-experimental-concurrency",
-                    "-Xfrontend", "-disable-availability-checking",
-                ])
             ]),
         .target(
             name: "MessagingHelpers",
@@ -49,11 +44,6 @@ let package = Package(
                 .target(name: "CypherMessaging"),
                 .product(name: "JWTKit", package: "jwt-kit"),
                 .product(name: "WebSocketKit", package: "websocket-kit"),
-            ], swiftSettings: [
-                .unsafeFlags([
-                    "-Xfrontend", "-enable-experimental-concurrency",
-                    "-Xfrontend", "-disable-availability-checking",
-                ])
             ]),
         .target(
             name: "CypherProtocol",
@@ -67,9 +57,11 @@ let package = Package(
             ]),
         .testTarget(
             name: "CypherMessagingTests",
-            dependencies: ["CypherMessaging"]),
+            dependencies: ["CypherMessaging"]
+        ),
         .testTarget(
             name: "CypherMessagingHelpersTests",
-            dependencies: ["MessagingHelpers"]),
+            dependencies: ["MessagingHelpers"]
+        ),
     ]
 )

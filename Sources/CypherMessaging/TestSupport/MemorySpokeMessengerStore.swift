@@ -7,7 +7,6 @@ public enum MemoryCypherMessengerStoreError: Error {
 
 @available(macOS 12, iOS 15, *)
 public final actor MemoryCypherMessengerStore: CypherMessengerStore {
-    public let eventLoop: EventLoop
     private let salt = UUID().uuidString
     private var localConfig: Data?
     
@@ -19,9 +18,7 @@ public final actor MemoryCypherMessengerStore: CypherMessengerStore {
     private var chatMessages = [UUID: ChatMessageModel]()
     private var remoteMessages = [String: ChatMessageModel]()
     
-    public init(eventLoop: EventLoop) {
-        self.eventLoop = eventLoop
-    }
+    public init() {}
     
     public func fetchContacts() async throws -> [ContactModel] {
         return contacts

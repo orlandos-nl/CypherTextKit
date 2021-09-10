@@ -58,8 +58,6 @@ final class FriendshipPluginTests: XCTestCase {
     }
     
     func testIgnoreUndecided() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false
@@ -71,11 +69,10 @@ final class FriendshipPluginTests: XCTestCase {
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
+            ])
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -83,11 +80,10 @@ final class FriendshipPluginTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
+            ])
         )
         
         let sync = Synchronisation(apps: [m0, m1])
@@ -257,8 +253,6 @@ final class FriendshipPluginTests: XCTestCase {
     //    }
     
     func testBlockAffectsGroupChats() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = false
         ruleset.blockAffectsGroupChats = true
@@ -270,11 +264,10 @@ final class FriendshipPluginTests: XCTestCase {
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
+            ])
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -282,11 +275,10 @@ final class FriendshipPluginTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
+            ])
         )
         let sync = Synchronisation(apps: [m0, m1])
         try await sync.synchronise()
@@ -349,8 +341,6 @@ final class FriendshipPluginTests: XCTestCase {
     }
     
     func testBlockingCanPreventOtherPlugins() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false
@@ -363,14 +353,13 @@ final class FriendshipPluginTests: XCTestCase {
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset),
                 CustomMagicPacketPlugin(onInput: {
             inputCount += 1
         }, onOutput: {})
-            ]),
-            on: eventLoop
+            ])
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -378,14 +367,13 @@ final class FriendshipPluginTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset),
                 CustomMagicPacketPlugin(onInput: {
             inputCount += 1
         }, onOutput: {})
-            ]),
-            on: eventLoop
+            ])
         )
         
         let sync = Synchronisation(apps: [m0, m1])

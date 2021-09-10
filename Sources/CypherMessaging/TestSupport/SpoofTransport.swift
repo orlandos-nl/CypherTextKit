@@ -128,7 +128,6 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     
     let username: Username
     let deviceId: DeviceId
-    let eventLoop: EventLoop
     private let server: SpoofServer
     public private(set) var authenticated = AuthenticationState.unauthenticated
     public let supportsMultiRecipientMessages = true
@@ -147,15 +146,14 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
         self.username = username
         self.deviceId = deviceId
         self.server = server
-        self.eventLoop = server.elg.next()
     }
     
     public convenience init(username: Username, deviceId: DeviceId) {
         self.init(username: username, deviceId: deviceId, server: .local)
     }
     
-    public static func login(_ credentials: Credentials, eventLoop: EventLoop) async throws -> SpoofTransportClient {
-        try await SpoofServer.local.login(username: credentials.username, deviceId: credentials.deviceId)
+    public static func login(_ request: TransportCreationRequest) async throws -> SpoofTransportClient {
+        try await SpoofServer.local.login(username: request.username, deviceId: request.deviceId)
     }
     
     public func receiveServerEvent(_ event: CypherServerEvent) async throws {
@@ -170,14 +168,6 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     public func disconnect() async throws {
         authenticated = .unauthenticated
         server.disconnectUser(self)
-    }
-    
-    private func ifConnected<T>(_ run: () -> EventLoopFuture<T>) -> EventLoopFuture<T> {
-        if authenticated == .authenticated {
-            return run()
-        } else {
-            return self.eventLoop.makeFailedFuture(CypherSDKError.offline)
-        }
     }
     
     public func sendMessageReadReceipt(byRemoteId remoteId: String, to otherUser: Username) async throws {

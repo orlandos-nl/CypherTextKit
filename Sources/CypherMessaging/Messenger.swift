@@ -30,6 +30,7 @@ enum RekeyState {
     case rekey, next
 }
 
+/// Provided by CypherMessenger to a factory (function) so that it can create a Transport Client to the app's servers
 public struct TransportCreationRequest {
     public let username: Username
     public let deviceId: DeviceId
@@ -37,19 +38,37 @@ public struct TransportCreationRequest {
     internal let signingIdentity: PrivateSigningKey
     public var identity: PublicSigningKey { signingIdentity.publicKey }
     
+    /// Can be used to sign information in name of the logged in CypherMessenger
+    /// For example; to self-sign a JWT Token, assuming the server has registered the user's public keys
     public func signature<D: DataProtocol>(for data: D) throws -> Data {
         try signingIdentity.signature(for: data)
     }
 }
 
+/// The representation of a P2PSession with another device
+///
+/// Peer-to-peer sessions are used to communicate directly with another device
+/// They can rely on a custom otransport implementation, leveraging network or platform features
 @available(macOS 12, iOS 15, *)
 internal struct P2PSession {
+    /// The connected device's known username
+    /// Multiple devics may belong to the same username
     let username: Username
+    
+    /// The specific device, which is registered ot `username`
     let deviceId: DeviceId
+    
+    /// The other device's publicKey
     let publicKey: PublicKey
+    
+    /// The other device's signingKey, used to verify that data originates from that device
     let identity: PublicSigningKey
-    let transport: P2PTransportClient
+    
+    /// A P2PClient object, which you can use to communicate with the remote device
     let client: P2PClient
+    
+    /// The transport client used by P2PClient
+    let transport: P2PTransportClient
     
     init(
         deviceIdentity: DecryptedModel<DeviceIdentityModel>,
@@ -65,6 +84,7 @@ internal struct P2PSession {
     }
 }
 
+/// This actor stores all mutable shared state for a CypherMessenger instance
 fileprivate final actor CypherMessengerActor {
     var config: _CypherMessengerConfig
     var p2pSessions = [P2PSession]()
@@ -136,9 +156,13 @@ fileprivate final actor CypherMessengerActor {
     }
 }
 
+/// A CypherMessenger is the heart of CypherTextKit Framework, similar to an "Application" class.
+/// CypherMessenger is responsible for orchestrating end-to-end encrypted communication of any kind.
+///
+/// CypherMessenger can be created as a singleton, but multiple clients in the same process is supported.
 @available(macOS 12, iOS 15, *)
 public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate {
-    public let eventLoop: EventLoop
+    internal let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
     private var inactiveP2PSessionsTimeout: Int? = 30
     internal let deviceIdentityId: Int
@@ -146,15 +170,20 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     let p2pFactories: [P2PTransportClientFactory]
     internal let eventHandler: CypherMessengerEventHandler
     internal let cachedStore: _CypherMessengerStoreCache
-    public let transport: CypherServerTransportClient
     internal let databaseEncryptionKey: SymmetricKey
     
+    /// The TransportClient implementation provided to CypherTextKit for this CypherMessenger to communicate through
+    public let transport: CypherServerTransportClient
+    
     public var authenticated: AuthenticationState { transport.authenticated }
+    
+    /// The username that this device is registered to
     public let username: Username
+    
+    /// The deviceId which, together with te username, identifies a registered device
     public let deviceId: DeviceId
     
     private init(
-        eventLoop: EventLoop,
         appPassword: String,
         eventHandler: CypherMessengerEventHandler,
         config: _CypherMessengerConfig,
@@ -162,7 +191,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         p2pFactories: [P2PTransportClientFactory],
         transport: CypherServerTransportClient
     ) async throws {
-        self.eventLoop = eventLoop
+        self.eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
         self.eventHandler = eventHandler
         self.username = config.username
         self.deviceId = config.deviceKeys.deviceId
@@ -183,13 +212,24 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         if transport.authenticated == .unauthenticated {
             Task.detached {
                 try await self.transport.reconnect()
-                self.jobQueue.startRunningTasks()
+                await self.jobQueue.startRunningTasks()
             }
         }
         
-        jobQueue.resume()
+        await jobQueue.resume()
     }
     
+    /// Initializes and registers a new messenger. This generates a new private key.
+    ///
+    ///  - Parameters:
+    ///     - username: The username which identifies this user.
+    ///     - appPassword: The password which is used to encrypt the database models.
+    ///     - usingTransport: A method that CypherTextKit can use to create a transport method with a server, of which the implementation is provided by your application.
+    ///     - p2pFactories: When provided, these factories are used when attempting to create a direct connection with another user's device(s). This can then be used for exchanging real-time information such as typing indicators, or simply improving the latency between two chatting devices.
+    ///     - database: An implementation of persistent storage for database models.
+    ///     - eventHandler: A delegate which can control certain behaviour, or simply respond to changes in datasets.
+    ///
+    /// Implementations that do not (yet) wish to enforce an app password upon users can resort to an empty string `""` for the appPassword.
     public static func registerMessenger<
         Transport: CypherServerTransportClient
     >(
@@ -198,8 +238,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         usingTransport createTransport: @escaping (TransportCreationRequest) async throws -> Transport,
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
-        eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+        eventHandler: CypherMessengerEventHandler
     ) async throws -> CypherMessenger {
         let deviceId = DeviceId()
         let databaseEncryptionKey = SymmetricKey(size: .bits256)
@@ -242,7 +281,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             let existingKeys = try await transport.readKeyBundle(forUsername: username)
             // Existing config found, this is a new device that needs to be registered
             let messenger = try await CypherMessenger(
-                eventLoop: eventLoop,
                 appPassword: appPassword,
                 eventHandler: eventHandler,
                 config: config,
@@ -275,7 +313,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             try await transport.publishKeyBundle(userConfig)
             
             return try await CypherMessenger(
-                eventLoop: eventLoop,
                 appPassword: appPassword,
                 eventHandler: eventHandler,
                 config: config,
@@ -286,6 +323,17 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
     }
     
+    /// Initializes and registers a new messenger. This generates a new private key.
+    ///
+    ///  - Parameters:
+    ///     - username: The username which identifies this user.
+    ///     - appPassword: The password which is used to encrypt the database models.
+    ///     - usingTransport: A Transport Factory that CypherTextKit can use to create a transport method with a server, of which the implementation is provided by your application.
+    ///     - p2pFactories: When provided, these factories are used when attempting to create a direct connection with another user's device(s). This can then be used for exchanging real-time information such as typing indicators, or simply improving the latency between two chatting devices.
+    ///     - database: An implementation of persistent storage for database models.
+    ///     - eventHandler: A delegate which can control certain behaviour, or simply respond to changes in datasets.
+    ///
+    /// Implementations that do not (yet) wish to enforce an app password upon users can resort to an empty string `""` for the appPassword.
     public static func registerMessenger<
         Transport: ConnectableCypherTransportClient
     >(
@@ -295,60 +343,60 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         usingTransport: Transport.Type,
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
-        eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+        eventHandler: CypherMessengerEventHandler
     ) async throws -> CypherMessenger {
         try await Self.registerMessenger(
             username: username,
             appPassword: appPassword,
             usingTransport: { request in
-                try await Transport.login(
-                    Credentials(
-                        username: username,
-                        deviceId: request.deviceId,
-                        method: authenticationMethod
-                    ),
-                    eventLoop: eventLoop
-                )
+                try await Transport.login(request)
             },
             p2pFactories: p2pFactories,
             database: database,
-            eventHandler: eventHandler,
-            on: eventLoop
+            eventHandler: eventHandler
         )
     }
     
+    /// Resumes a suspended CypherMessenger from the `database`
+    ///
+    ///  - Parameters:
+    ///     - appPassword: The password which is used to encrypt the database models.
+    ///     - usingTransport: A method that CypherTextKit can use to create a transport method with a server, of which the implementation is provided by your application.
+    ///     - p2pFactories: When provided, these factories are used when attempting to create a direct connection with another user's device(s). This can then be used for exchanging real-time information such as typing indicators, or simply improving the latency between two chatting devices.
+    ///     - database: An implementation of persistent storage for database models.
+    ///     - eventHandler: A delegate which can control certain behaviour, or simply respond to changes in datasets.
+    ///
+    /// Implementations that do not (yet) wish to enforce an app password upon users can resort to an empty string `""` for the appPassword.
     public static func resumeMessenger<
         Transport: ConnectableCypherTransportClient
     >(
-        username: Username,
-        authenticationMethod: AuthenticationMethod,
         appPassword: String,
         usingTransport createTransport: Transport.Type,
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
-        eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+        eventHandler: CypherMessengerEventHandler
     ) async throws -> CypherMessenger {
         try await resumeMessenger(
             appPassword: appPassword,
             usingTransport: { request in
-                try await Transport.login(
-                    Credentials(
-                        username: username,
-                        deviceId: request.deviceId,
-                        method: authenticationMethod
-                    ),
-                    eventLoop: eventLoop
-                )
+                try await Transport.login(request)
             },
             p2pFactories: p2pFactories,
             database: database,
-            eventHandler: eventHandler,
-            on: eventLoop
+            eventHandler: eventHandler
         )
     }
     
+    /// Resumes a suspended CypherMessenger from the `database`
+    ///
+    ///  - Parameters:
+    ///     - appPassword: The password which is used to encrypt the database models.
+    ///     - usingTransport: A Transport Factory that CypherTextKit can use to create a transport method with a server, of which the implementation is provided by your application.
+    ///     - p2pFactories: When provided, these factories are used when attempting to create a direct connection with another user's device(s). This can then be used for exchanging real-time information such as typing indicators, or simply improving the latency between two chatting devices.
+    ///     - database: An implementation of persistent storage for database models.
+    ///     - eventHandler: A delegate which can control certain behaviour, or simply respond to changes in datasets.
+    ///
+    /// Implementations that do not (yet) wish to enforce an app password upon users can resort to an empty string `""` for the appPassword.
     public static func resumeMessenger<
         Transport: CypherServerTransportClient
     >(
@@ -356,8 +404,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         usingTransport createTransport: @escaping (TransportCreationRequest) async throws -> Transport,
         p2pFactories: [P2PTransportClientFactory] = [],
         database: CypherMessengerStore,
-        eventHandler: CypherMessengerEventHandler,
-        on eventLoop: EventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+        eventHandler: CypherMessengerEventHandler
     ) async throws -> CypherMessenger {
         let salt = try await database.readLocalDeviceSalt()
         let encryptionKey = Self.formAppEncryptionKey(appPassword: appPassword, salt: salt)
@@ -375,7 +422,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         
         let transport = try await createTransport(transportRequest)
         return try await CypherMessenger(
-            eventLoop: eventLoop,
             appPassword: appPassword,
             eventHandler: eventHandler,
             config: config,
@@ -390,6 +436,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return HKDF<SHA512>.deriveKey(inputKeyMaterial: inputKey, salt: salt.data(using: .utf8)!, outputByteCount: 256 / 8)
     }
     
+    /// Verifies that this client uses the `appPassword` to unlock the app..
+    /// Useful when you want to keep the CypherMessenger instance active in the background, but want to verify the user's password before showing them the UI.
     public func verifyAppPassword(matches appPassword: String) async -> Bool {
         do {
             let salt = try await self.cachedStore.readLocalDeviceSalt()
@@ -409,10 +457,18 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         try await state.updateConfig(run)
     }
     
+    /// Used to change the `appPassword`. The new `appPassword` must be provided for `verifyAppPassword` and `resumeMessenger`.
     public func changeAppPassword(to appPassword: String) async throws {
         try await state.changeAppPassword(to: appPassword)
     }
     
+    /// Creates a request for a **master device** to add this device to their account
+    ///
+    /// - Parameters:
+    ///     - isMasterDevice: Requests the other device to add this device as a master, allowing this device to add more clients as well.
+    ///
+    /// The client is responsible for transporting the UserDeviceConfig to another device, for example through a QR code.
+    /// The master device must then call `addDevice` with this request.
     public func createDeviceRegisteryRequest(isMasterDevice: Bool = false) async throws -> UserDeviceConfig? {
         if try await isRegisteredOnline() {
             try await updateConfig { config in
@@ -439,11 +495,14 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return devices.contains(where: { $0.deviceId == self.deviceId })
     }
     
+    /// Mainly used by test suties, to ensure all outstanding work is finished.
+    /// This is handy when you're simulating communication, but want to delay assertions until this CypherMessenger has processed all outstanding work.
     public func processJobQueue() async throws -> SynchronisationResult {
         try await jobQueue.awaitDoneProcessing()
     }
     
     // TODO: Make internal
+    /// Internal API that CypherMessenger uses to read information from Transport Clients
     public func receiveServerEvent(_ event: CypherServerEvent) async throws {
         switch event.raw {
         case let .multiRecipientMessageSent(message, id: messageId, byUser: sender, deviceId: deviceId):
@@ -506,10 +565,12 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
     }
     
+    /// Empties the CypherMessenger's caches to clear up memory.
     public func emptyCaches() async {
         await cachedStore.emptyCaches()
     }
     
+    /// Adds a new device to this user's devices. This device can from now on receive all messages, and communicate in name of this user.
     public func addDevice(_ deviceConfig: UserDeviceConfig) async throws {
         var config = try await transport.readKeyBundle(forUsername: self.username)
         guard await config.identity.data == state.config.deviceKeys.identity.publicKey.data else {
@@ -632,6 +693,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     private let cache = ModelCache()
     
+    /// Decrypts a model as provided by the database
+    /// It is critical to call this method for decryption for stability reasons, as CypherMessenger prevents duplicate representations of a Model from existing at the same time.
     public func decrypt<M: Model>(_ model: M) async throws -> DecryptedModel<M> {
         if let decrypted = await cache.getModel(ofType: M.self, forId: model.id) {
             return decrypted
@@ -642,14 +705,17 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return decrypted
     }
     
+    /// Encrypts a file for storage on the disk. Can be used for any personal information, or attachments received.
     public func encryptLocalFile(_ data: Data) throws -> AES.GCM.SealedBox {
         try AES.GCM.seal(data, using: databaseEncryptionKey)
     }
     
+    /// Decrypts a file that was encrypted with `encryptLocalFile`
     public func decryptLocalFile(_ box: AES.GCM.SealedBox) throws -> Data {
         try AES.GCM.open(box, using: databaseEncryptionKey)
     }
     
+    /// Signs a message using this device's Private Key, allowing another client to verify the message's origin.
     public func sign<T: Codable>(_ value: T) async throws -> Signed<T> {
         try await state.sign(value)
     }
@@ -683,10 +749,12 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
     }
     
+    /// Reads the custom configuration file stored on this device
     public func readCustomConfig() async throws -> Document {
         return await state.config.custom
     }
     
+    /// Writes a new custom configuration file to this device
     public func writeCustomConfig(_ custom: Document) async throws {
         try await state.writeCustomConfig(custom)
     }
@@ -701,6 +769,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     // TODO: Make internal
+    /// An internal implementation that allows CypherMessenger to respond to information received by a P2PConnection
     public func p2pConnection(
         _ connection: P2PTransportClient,
         closedWithOptions: Set<P2PTransportClosureOption>
@@ -774,6 +843,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     // TODO: Make internal
+    /// An internal implementation that allows CypherMessenger to respond to information received by a P2PConnection
     public func p2pConnection(
         _ connection: P2PTransportClient,
         receivedMessage buffer: ByteBuffer
@@ -787,6 +857,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return try await session.client.receiveBuffer(buffer)
     }
     
+    /// Lists all active P2P connections
+    /// Especially useful for when a client wants to purge unneeded sessions
     public func listOpenP2PConnections() async -> [P2PClient] {
         await state.p2pSessions.map(\.client)
     }

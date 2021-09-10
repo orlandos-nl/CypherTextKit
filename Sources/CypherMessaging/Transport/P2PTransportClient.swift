@@ -15,6 +15,7 @@ public struct P2PFrameworkState {
 
 /// PeerToPeerTransportClient is used to create a direct connection between two devices.
 /// The client implementation defined below does not need to verify the identity of the other party.
+/// These transport clients need not concern themselves with end-to-end encryption, as the data they receive is already encrypted.
 ///
 /// CypherTextKit may opt to use a direct connection as a _replacement_ for via-server communication, as to improve security, bandwidth AND latency.
 @available(macOS 12, iOS 15, *)
@@ -94,7 +95,6 @@ public struct P2PTransportFactoryHandle {
     internal let messenger: CypherMessenger
     internal let targetConversation: TargetConversation
     public let state: P2PFrameworkState
-    public var eventLoop: EventLoop { messenger.eventLoop }
     
     public func sendMessage(
         _ text: String,

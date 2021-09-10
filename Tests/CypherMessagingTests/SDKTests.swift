@@ -78,17 +78,13 @@ final class CypherSDKTests: XCTestCase {
     }
     
     func testPrivateChatWithYourself() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         await XCTAssertThrowsAsyncError(try await m0.createPrivateChat(with: "m0"))
@@ -103,9 +99,6 @@ final class CypherSDKTests: XCTestCase {
     }
     
     func runP2PTests<Factory: P2PTransportClientFactory>(_ factory: Factory) async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
@@ -114,9 +107,8 @@ final class CypherSDKTests: XCTestCase {
             p2pFactories: [
                 factory
             ],
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -127,9 +119,8 @@ final class CypherSDKTests: XCTestCase {
             p2pFactories: [
                 factory
             ],
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let sync = Synchronisation(apps: [m0, m1])
@@ -186,27 +177,17 @@ final class CypherSDKTests: XCTestCase {
         
         try await sync.synchronise()
         
-        if factory is IPv6TCPP2PTransportClientFactory {
-            XCTExpectFailure("Test may fail on ipv4 only networks") {
-                XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
-            }
-        } else {
-            XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
-        }
+        XCTAssertEqual(p2pConnection.remoteStatus?.flags.contains(.isTyping), true)
     }
     
     func testGroupChat() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m0_2 = try await CypherMessenger.registerMessenger(
@@ -214,9 +195,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -224,9 +204,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m1_2 = try await CypherMessenger.registerMessenger(
@@ -234,9 +213,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m2 = try await CypherMessenger.registerMessenger(
@@ -244,9 +222,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m2"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m3 = try await CypherMessenger.registerMessenger(
@@ -254,9 +231,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m3"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let sync = Synchronisation(apps: [m0, m1, m2, m3])
@@ -306,7 +282,6 @@ final class CypherSDKTests: XCTestCase {
             preferredPushType: .none
         )
         
-        
         try await sync.synchronise()
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 4)
@@ -317,17 +292,13 @@ final class CypherSDKTests: XCTestCase {
     }
     
     func testPrivateChat() async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m1 = try await CypherMessenger.registerMessenger(
@@ -335,9 +306,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let sync = Synchronisation(apps: [m0, m1])
@@ -417,17 +387,13 @@ final class CypherSDKTests: XCTestCase {
     }
     
     func runTestMultiDevicePrivateChat(messageCount: Int) async throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
         let m0d0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m0d1 = try await CypherMessenger.registerMessenger(
@@ -435,9 +401,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let m1d0 = try await CypherMessenger.registerMessenger(
@@ -445,9 +410,8 @@ final class CypherSDKTests: XCTestCase {
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
-            eventHandler: SpoofCypherEventHandler(),
-            on: eventLoop
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
         )
         
         let sync = Synchronisation(apps: [m0d0, m0d1, m1d0])
