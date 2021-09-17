@@ -37,7 +37,7 @@ The factory gains the opportunity to send magic packets to the other party insid
 ```swift
 func createConnection(
   handle: P2PTransportFactoryHandle
-) -> EventLoopFuture<P2PTransportClient?> {
+) async throws -> P2PTransportClient? {
   ..
 }
 ```
@@ -58,7 +58,7 @@ func receiveMessage(
   _ text: String,
   metadata: Document,
   handle: P2PTransportFactoryHandle
-) -> EventLoopFuture<P2PTransportClient?> {
+) async throws -> P2PTransportClient? {
   ..
 }
 ```
@@ -68,7 +68,7 @@ func receiveMessage(
 To register a P2P connectivity option, simply provide the `p2pFactories` argument when instantiating the CypherMessenger.
 
 ```swift
-let messenger = try CypherMessenger.registerMessenger(
+let messenger = try await CypherMessenger.registerMessenger(
   username: "admin",
   authenticationMethod: .password("hunter2"),
   appPassword: ...,
@@ -79,7 +79,7 @@ let messenger = try CypherMessenger.registerMessenger(
   ],
   database: ...,
   eventHandler: ...
-).wait()
+)
 ```
 
 ### Usage
@@ -87,7 +87,7 @@ let messenger = try CypherMessenger.registerMessenger(
 You can attempt to establish a peer-to-peer session with members of a conversation:
 
 ```swift
-let privateChat = try chat.buildP2PConnections().wait()
+let privateChat = try await chat.buildP2PConnections()
 ```
 
 If a connection is created or disconnected, your EventHandler will be notified.

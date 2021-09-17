@@ -44,6 +44,7 @@ public struct ProcessMessageAction {
     public static let save = ProcessMessageAction(raw: .save)
 }
 
+// TODO: Make this into a concrete type, so more events can be supported
 @available(macOS 12, iOS 15, *)
 public protocol CypherMessengerEventHandler {
     func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws

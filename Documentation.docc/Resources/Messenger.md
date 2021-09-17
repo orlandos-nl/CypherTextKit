@@ -7,10 +7,10 @@ Once registration is completed, your app will need to create and register a `Cyp
 # Registering Users
 
 ```swift
-let messenger = CypherMessenger.registerMessenger(
+let messenger = try await CypherMessenger.registerMessenger(
     username: Username("<unique identifier>"), // 1
     appPassword: "", // 2
-    usingTransport: { request -> EventLoopFuture<VaporTransport> in
+    usingTransport: { request async throws -> VaporTransport in
         // 3 - Create Transport Client
     },
     database: store, // 4
@@ -27,8 +27,6 @@ The Messenger's App Passwords can be changed at any time.
 4. Your app provides a datastore. Our example app for iOS uses an SQLite database. All data entering the data store is already encrypted.
 5. An EventHandler is provided, which your app can use to process events such as incoming chat messages or state changes.
 
-The messenger is created asynchronously. If you don't mind blocking the UI briefly, you can get the results immediately using `.wait()`
-
 Please read [Transport](/docs/cyphertextkit/articles/transport) for more information about implementing a TransportClient.
 
 # Starting the App
@@ -36,7 +34,7 @@ Please read [Transport](/docs/cyphertextkit/articles/transport) for more informa
 Upon launching the app, recreate the suspended CypherMessenger using the following code:
 
 ```swift
-let messenger = CypherMessenger.resumeMessenger(
+let messenger = try await CypherMessenger.resumeMessenger(
     appPassword: "",
     usingTransport: { request in
         // Create Transport Client

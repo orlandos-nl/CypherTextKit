@@ -89,7 +89,6 @@ public struct StunCredentials {
 }
 
 public struct StunConfig {
-    
     let server: SocketAddress
     let credentials: StunCredentials?
     

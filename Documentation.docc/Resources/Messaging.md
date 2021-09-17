@@ -12,12 +12,12 @@ Conversations are, based on the above definition, split into three groups:
 You can list all conversations by running the following:
 
 ```swift
-let allConversations = try messenger.listConversations(
+let allConversations = try await messenger.listConversations(
     includingInternalConversation: true
 ) { lhs, rhs in
     // Sort the resultset, return `true` if lhs comes before rhs
     return true
-}.wait()
+}
 ```
 
 ### Sorting Conversations
@@ -35,7 +35,7 @@ This type of conversation can be used for a personal notebook, but could also fu
 You can get an instance of your User's internal conversation through the following code:
 
 ```swift
-let conversation = try messenger.getInternalConversation().wait()
+let conversation = try await messenger.getInternalConversation()
 ```
 
 Each conversation also has an in-memory `Cache`, which can be used to store temporary metadata such as unread message counts.
@@ -54,12 +54,12 @@ You can list all existing private chats using `listPrivateChats(increasingOrder:
 let otherUser: Username = ..
 
 // Find Existing Chat
-if let chat = try messenger.getPrivateChat(with: otherUser).wait() {
+if let chat = try await messenger.getPrivateChat(with: otherUser) {
   // Use private chat
 }
 
 // Find or Create Chat
-let chat = try messenger.createPrivateChat(with: otherUser).wait()
+let chat = try await messenger.createPrivateChat(with: otherUser)
 ```
 
 ### Group Chats
@@ -69,7 +69,7 @@ Similar to Private Chats, you can get list group chats using `listGroupChats(inc
 Rather than working with Usernames, Group Chats are read by their GroupId. Group
 
 ```swift
-if let groupChat = try messenger.getGroupChat(byId: groupId).wait() else { 
+if let groupChat = try await messenger.getGroupChat(byId: groupId) else { 
   // Use group chat  
 }
 ```
@@ -122,7 +122,7 @@ func sendRawMessage(
   destructionTimer: TimeInterval? = nil,
   sentDate: Date = Date(),
   preferredPushType: PushType
-) -> EventLoopFuture<AnyChatMessage?> {
+) async throws -> AnyChatMessage? {
 ```
 
 The subtype can be used to represent the specific type of text, media, or magic packet. 
@@ -141,15 +141,15 @@ Reading messages in a conversation can be done through two routes:
 2. Iterating over a cursor
 
 ```swift
-func allMessages(sortedBy sortMode: SortMode) -> EventLoopFuture<[AnyChatMessage]>
-func cursor(sortedBy sortMode: SortMode) -> EventLoopFuture<AnyChatMessageCursor>
+func allMessages(sortedBy sortMode: SortMode) async throws -> [AnyChatMessage]
+func cursor(sortedBy sortMode: SortMode) async throws -> AnyChatMessageCursor
 ```
 
 While listing all messages in an array is easy to do, it is extremely costly on performance.
 Therefore we strongly recommend using the Cursor instead.
 
 ```swift
-let cursor = try conversation.cursor(sortedBy: .descending).wait()
+let cursor = try await conversation.cursor(sortedBy: .descending)
 ```
 
 When reading messages from a cursor, simply read the next list using `cursor.getMore(50)`.

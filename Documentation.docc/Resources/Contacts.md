@@ -8,7 +8,7 @@ You can attach metadata to contacts to differentiate their relation with you.
 List contacts using the `listContacts` API.
 
 ```swift
-let contacts = try messenger.listContacts().wait()
+let contacts = try await messenger.listContacts()
 ```
 
 Any filtering and sorting has to be done based on this call's results.

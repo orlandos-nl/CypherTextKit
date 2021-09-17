@@ -240,6 +240,7 @@ final class JobQueue: ObservableObject {
         case success, delayed, failed(haltExecution: Bool)
     }
 
+    @MainActor
     private func runNextJob(in jobs: inout [DecryptedModel<JobModel>]) async throws -> TaskResult {
         debugLog("Available jobs", jobs.count)
         var index = 0

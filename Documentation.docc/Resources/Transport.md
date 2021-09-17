@@ -2,28 +2,29 @@ When making use of CypherTextKit, the SDK relies on your own transport method.
 Our SDK makes use of your own transport system, including API and API Client.
 
 To implement a client, it needs to conform to `CypherServerTransportClient` and implement its functionality.
-Some functionalities are optional, in which case they can emit a failed `EventLoopFuture` but not set out the action.
+Some functionalities are optional, in which case they can emit a an error but not set out the action.
 
 ```swift
 public protocol CypherServerTransportClient: AnyObject {
-    var delegate: CypherTransportClientDelegate? { get set }
+    var delegate: CypherTransportClientDelegate? { get }
     var authenticated: AuthenticationState { get }
     var supportsMultiRecipientMessages: Bool { get }
-    
+
     // Required
-    func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId: DeviceId, messageId: String) -> EventLoopFuture<Void>
-    func readKeyBundle(forUsername username: Username) -> EventLoopFuture<UserConfig>
-    func publishKeyBundle(_ data: UserConfig) -> EventLoopFuture<Void>
-    
+    func setDelegate(to delegate: CypherTransportClientDelegate) async throws
+    func readKeyBundle(forUsername username: Username) async throws -> UserConfig
+    func publishKeyBundle(_ data: UserConfig) async throws
+    func sendMessage(_ message: RatchetedCypherMessage, toUser username: Username, otherUserDeviceId: DeviceId, pushType: PushType, messageId: String) async throws
+
     // Optional from here
-    func reconnect() -> EventLoopFuture<Void>
-    func disconnect() -> EventLoopFuture<Void>
-    func requestDeviceRegistery(_ config: UserDeviceConfig) -> EventLoopFuture<Void>
-    func sendMessageReadReceipt(byRemoteId remoteId: String, to username: Username) -> EventLoopFuture<Void>
-    func sendMessageReceivedReceipt(byRemoteId remoteId: String, to username: Username) -> EventLoopFuture<Void>
-    func publishBlob<C: Codable>(_ blob: C) -> EventLoopFuture<ReferencedBlob<C>>
-    func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) -> EventLoopFuture<ReferencedBlob<C>?>
-    func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, messageId: String) -> EventLoopFuture<Void>
+    func reconnect() async throws
+    func disconnect() async throws
+    func sendMessageReadReceipt(byRemoteId remoteId: String, to username: Username) async throws
+    func sendMessageReceivedReceipt(byRemoteId remoteId: String, to username: Username) async throws
+    func requestDeviceRegistery(_ config: UserDeviceConfig) async throws
+    func publishBlob<C: Codable>(_ blob: C) async throws -> ReferencedBlob<C>
+    func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) async throws -> ReferencedBlob<C>?
+    func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, pushType: PushType, messageId: String) async throws
 }
 ```
 
