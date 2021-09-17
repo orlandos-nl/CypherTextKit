@@ -319,7 +319,7 @@ extension AnyConversation {
         try await messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
     
-    @MainActor public func save() async throws {
+    public func save() async throws {
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         messenger.eventHandler.onUpdateConversation(self)
     }
@@ -330,8 +330,7 @@ extension AnyConversation {
         return order
     }
     
-    @discardableResult
-    @MainActor public func sendRawMessage(
+    @JobQueueActor public func sendRawMessage(
         type: CypherMessageType,
         messageSubtype: String? = nil,
         text: String,

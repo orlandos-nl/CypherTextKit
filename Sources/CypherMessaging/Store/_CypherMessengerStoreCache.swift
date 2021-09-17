@@ -6,6 +6,12 @@ struct Weak<O: AnyObject> {
     weak var object: O?
 }
 
+@globalActor final actor CypherCacheActor {
+    public static let shared = CypherCacheActor()
+    
+    private init() {}
+}
+
 @available(macOS 12, iOS 15, *)
 internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
@@ -20,7 +26,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         self.base = base
     }
     
-    @MainActor func emptyCaches() async {
+    @CypherCacheActor func emptyCaches() async {
         // TODO: Only clear entities which are knownUniquelyReferenced
         
         deviceConfig = nil
@@ -30,7 +36,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         messages.removeAll(keepingCapacity: true)
     }
     
-    @MainActor func fetchContacts() async throws -> [ContactModel] {
+    @CypherCacheActor func fetchContacts() async throws -> [ContactModel] {
         if let contacts = self.contacts {
             return contacts
         } else {
@@ -40,7 +46,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    @MainActor func createContact(_ contact: ContactModel) async throws {
+    @CypherCacheActor func createContact(_ contact: ContactModel) async throws {
         if var users = self.contacts {
             users.append(contact)
             self.contacts = users
@@ -52,12 +58,12 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    @MainActor func updateContact(_ contact: ContactModel) async throws {
+    @CypherCacheActor func updateContact(_ contact: ContactModel) async throws {
         // Already saved in-memory, because it's a reference type
         return try await base.updateContact(contact)
     }
     
-    @MainActor func fetchChatMessage(byId messageId: UUID) async throws -> ChatMessageModel {
+    @CypherCacheActor func fetchChatMessage(byId messageId: UUID) async throws -> ChatMessageModel {
         if let message = self.messages[messageId] {
             return message
         } else {
@@ -67,7 +73,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    @MainActor func fetchChatMessage(byRemoteId remoteId: String) async throws -> ChatMessageModel {
+    @CypherCacheActor func fetchChatMessage(byRemoteId remoteId: String) async throws -> ChatMessageModel {
         let message = try await self.base.fetchChatMessage(byRemoteId: remoteId)
         if let cachedMessage = self.messages[message.id] {
             return cachedMessage
@@ -76,7 +82,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    @MainActor func fetchConversations() async throws -> [ConversationModel] {
+    @CypherCacheActor func fetchConversations() async throws -> [ConversationModel] {
         if let conversations = self.conversations {
             return conversations
         } else {
@@ -86,7 +92,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    @MainActor func createConversation(_ conversation: ConversationModel) async throws {
+    @CypherCacheActor func createConversation(_ conversation: ConversationModel) async throws {
         if var conversations = self.conversations {
             conversations.append(conversation)
             self.conversations = conversations
@@ -98,12 +104,12 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         return try await self.base.createConversation(conversation)
     }
     
-    @MainActor func updateConversation(_ conversation: ConversationModel) async throws {
+    @CypherCacheActor func updateConversation(_ conversation: ConversationModel) async throws {
         // Already saved in-memory, because it's a reference type
         return try await base.updateConversation(conversation)
     }
     
-    @MainActor func fetchDeviceIdentities() async throws -> [DeviceIdentityModel] {
+    @CypherCacheActor func fetchDeviceIdentities() async throws -> [DeviceIdentityModel] {
         if let deviceIdentities = self.deviceIdentities {
             return deviceIdentities
         } else {
@@ -113,7 +119,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    @MainActor func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
+    @CypherCacheActor func createDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
         if var deviceIdentities = self.deviceIdentities {
             deviceIdentities.append(deviceIdentity)
             self.deviceIdentities = deviceIdentities
@@ -122,23 +128,23 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         return try await self.base.createDeviceIdentity(deviceIdentity)
     }
     
-    @MainActor func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
+    @CypherCacheActor func updateDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
         assert(deviceIdentities?.contains(where: { $0 === deviceIdentity }) != false)
         // Already saved in-memory, because it's a reference type
         return try await base.updateDeviceIdentity(deviceIdentity)
     }
     
-    @MainActor func createChatMessage(_ message: ChatMessageModel) async throws {
+    @CypherCacheActor func createChatMessage(_ message: ChatMessageModel) async throws {
         self.messages[message.id] = message
         return try await self.base.createChatMessage(message)
     }
     
-    @MainActor func updateChatMessage(_ message: ChatMessageModel) async throws {
+    @CypherCacheActor func updateChatMessage(_ message: ChatMessageModel) async throws {
         // Already saved in-memory, because it's a reference type
         try await base.updateChatMessage(message)
     }
     
-    @MainActor func listChatMessages(
+    @CypherCacheActor func listChatMessages(
         inConversation conversation: UUID,
         senderId: Int,
         sortedBy sortMode: SortMode,
@@ -165,36 +171,36 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
-    @MainActor func readLocalDeviceConfig() async throws -> Data {
+    @CypherCacheActor func readLocalDeviceConfig() async throws -> Data {
         try await base.readLocalDeviceConfig()
     }
     
-    @MainActor func writeLocalDeviceConfig(_ data: Data) async throws {
+    @CypherCacheActor func writeLocalDeviceConfig(_ data: Data) async throws {
         try await base.writeLocalDeviceConfig(data)
     }
     
-    @MainActor func readLocalDeviceSalt() async throws -> String {
+    @CypherCacheActor func readLocalDeviceSalt() async throws -> String {
         try await base.readLocalDeviceSalt()
     }
     
-    @MainActor func readJobs() async throws -> [JobModel] {
+    @CypherCacheActor func readJobs() async throws -> [JobModel] {
         try await base.readJobs()
     }
     
-    @MainActor func createJob(_ job: JobModel) async throws {
+    @CypherCacheActor func createJob(_ job: JobModel) async throws {
         try await base.createJob(job)
     }
     
-    @MainActor func updateJob(_ job: JobModel) async throws {
+    @CypherCacheActor func updateJob(_ job: JobModel) async throws {
         // Forwarded to DB, caching happens inside JobQueue
         try await base.updateJob(job)
     }
     
-    @MainActor func removeJob(_ job: JobModel) async throws {
+    @CypherCacheActor func removeJob(_ job: JobModel) async throws {
         try await base.removeJob(job)
     }
     
-    @MainActor func removeContact(_ contact: ContactModel) async throws {
+    @CypherCacheActor func removeContact(_ contact: ContactModel) async throws {
         if let index = self.contacts?.firstIndex(where: { $0 === contact }) {
             self.contacts?.remove(at: index)
         }
@@ -202,7 +208,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         return try await self.base.removeContact(contact)
     }
     
-    @MainActor func removeConversation(_ conversation: ConversationModel) async throws {
+    @CypherCacheActor func removeConversation(_ conversation: ConversationModel) async throws {
         if let index = self.conversations?.firstIndex(where: { $0 === conversation }) {
             self.conversations?.remove(at: index)
         }
@@ -210,7 +216,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         return try await self.base.removeConversation(conversation)
     }
     
-    @MainActor func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
+    @CypherCacheActor func removeDeviceIdentity(_ deviceIdentity: DeviceIdentityModel) async throws {
         if let index = self.deviceIdentities?.firstIndex(where: { $0 === deviceIdentity }) {
             self.deviceIdentities?.remove(at: index)
         }
@@ -218,7 +224,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         return try await self.base.removeDeviceIdentity(deviceIdentity)
     }
     
-    @MainActor func removeChatMessage(_ message: ChatMessageModel) async throws {
+    @CypherCacheActor func removeChatMessage(_ message: ChatMessageModel) async throws {
         self.messages[message.id] = nil
         
         return try await self.base.removeChatMessage(message)

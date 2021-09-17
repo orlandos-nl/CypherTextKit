@@ -4,6 +4,12 @@ import Foundation
 import SwiftUI
 import NIO
 
+@globalActor final actor JobQueueActor {
+    public static let shared = JobQueueActor()
+    
+    private init() {}
+}
+
 @available(macOS 12, iOS 15, *)
 final class JobQueue: ObservableObject {
     weak private(set) var messenger: CypherMessenger?
@@ -39,13 +45,13 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    @MainActor
+    @JobQueueActor
     func cancelJob(_ job: DecryptedModel<JobModel>) async throws {
         // TODO: What if the job is cancelled while executing and succeeding?
         try await dequeueJob(job)
     }
     
-    @MainActor
+    @JobQueueActor
     func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
         try await database.removeJob(job.encrypted)
         for i in 0..<self.jobs.count {
@@ -56,7 +62,7 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    @MainActor public func queueTask<T: StoredTask>(_ task: T) async throws {
+    @JobQueueActor public func queueTask<T: StoredTask>(_ task: T) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.appLocked
         }
@@ -77,7 +83,7 @@ final class JobQueue: ObservableObject {
     
     fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
     
-    @MainActor
+    @JobQueueActor
     func awaitDoneProcessing() async throws -> SynchronisationResult {
 //        if runningJobs {
 //            return .busy
@@ -103,7 +109,7 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    @MainActor
+    @JobQueueActor
     func startRunningTasks() {
         debugLog("Starting job queue")
 
@@ -121,7 +127,7 @@ final class JobQueue: ObservableObject {
         debugLog("Job queue started")
         runningJobs = true
 
-        @MainActor @Sendable func next() async throws {
+        @JobQueueActor @Sendable func next() async throws {
             guard let messenger = self.messenger else {
                 return
             }
@@ -173,7 +179,7 @@ final class JobQueue: ObservableObject {
             }
         }
 
-        Task.detached { @MainActor in
+        Task.detached { @JobQueueActor in
             // Lock in the current queue
             if self.jobs.isEmpty {
                 debugLog("No jobs to run")
@@ -214,13 +220,13 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    @MainActor
+    @JobQueueActor
     public func resume() {
         pausing = nil
         startRunningTasks()
     }
     
-    @MainActor
+    @JobQueueActor
     public func restart() async throws {
         try await pause()
         resume()
@@ -240,7 +246,7 @@ final class JobQueue: ObservableObject {
         case success, delayed, failed(haltExecution: Bool)
     }
 
-    @MainActor
+    @JobQueueActor
     private func runNextJob() async throws -> TaskResult {
         debugLog("Available jobs", jobs.count)
         var index = 0

@@ -8,6 +8,12 @@ public enum DeviceRegisteryMode: Int, Codable {
     case masterDevice, childDevice, unregistered
 }
 
+@globalActor final actor CryptoActor {
+    public static let shared = CryptoActor()
+    
+    private init() {}
+}
+
 internal struct _CypherMessengerConfig: Codable {
     private enum CodingKeys: String, CodingKey {
         case databaseEncryptionKey = "a"
@@ -695,7 +701,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     /// Decrypts a model as provided by the database
     /// It is critical to call this method for decryption for stability reasons, as CypherMessenger prevents duplicate representations of a Model from existing at the same time.
-    public func decrypt<M: Model>(_ model: M) async throws -> DecryptedModel<M> {
+    @CryptoActor public func decrypt<M: Model>(_ model: M) async throws -> DecryptedModel<M> {
         if let decrypted = await cache.getModel(ofType: M.self, forId: model.id) {
             return decrypted
         }
@@ -716,11 +722,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     /// Signs a message using this device's Private Key, allowing another client to verify the message's origin.
-    public func sign<T: Codable>(_ value: T) async throws -> Signed<T> {
+    @CryptoActor public func sign<T: Codable>(_ value: T) async throws -> Signed<T> {
         try await state.sign(value)
     }
     
-    func _signRatchetMessage(_ message: RatchetMessage, rekey: RekeyState) async throws -> RatchetedCypherMessage {
+    @CryptoActor func _signRatchetMessage(_ message: RatchetMessage, rekey: RekeyState) async throws -> RatchetedCypherMessage {
         return try RatchetedCypherMessage(
             message: message,
             signWith: await state.config.deviceKeys.identity,
@@ -728,13 +734,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
     }
     
-    fileprivate func _formSharedSecret(with publicKey: PublicKey) async throws -> SharedSecret {
+    @CryptoActor fileprivate func _formSharedSecret(with publicKey: PublicKey) async throws -> SharedSecret {
         try await state.config.deviceKeys.privateKey.sharedSecretFromKeyAgreement(
             with: publicKey
         )
     }
     
-    fileprivate func _deriveSymmetricKey(from secret: SharedSecret, initiator: Username) -> SymmetricKey {
+    @CryptoActor fileprivate func _deriveSymmetricKey(from secret: SharedSecret, initiator: Username) -> SymmetricKey {
         let salt = Data(
             SHA512.hash(
                 data: initiator.raw.lowercased().data(using: .utf8)!
@@ -943,7 +949,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
 }
 
 extension DecryptedModel where M == DeviceIdentityModel {
-    func _readWithRatchetEngine(
+    @CryptoActor func _readWithRatchetEngine(
         ofUser username: Username,
         deviceId: DeviceId,
         message: RatchetedCypherMessage,
@@ -1033,7 +1039,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
         }
     }
     
-    func _writeWithRatchetEngine<T>(
+    @CryptoActor func _writeWithRatchetEngine<T>(
         messenger: CypherMessenger,
         run: @escaping (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
     ) async throws -> T {
