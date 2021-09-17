@@ -138,7 +138,7 @@ final class JobQueue: ObservableObject {
             let result: TaskResult
             
             do {
-                result = try await runNextJob(in: &self.jobs)
+                result = try await runNextJob()
             } catch {
                 debugLog("Task error", error)
                 result = .failed(haltExecution: true)
@@ -241,7 +241,7 @@ final class JobQueue: ObservableObject {
     }
 
     @MainActor
-    private func runNextJob(in jobs: inout [DecryptedModel<JobModel>]) async throws -> TaskResult {
+    private func runNextJob() async throws -> TaskResult {
         debugLog("Available jobs", jobs.count)
         var index = 0
         let initialJob = jobs[0]
