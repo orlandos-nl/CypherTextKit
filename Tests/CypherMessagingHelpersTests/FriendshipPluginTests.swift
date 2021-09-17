@@ -2,296 +2,345 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
+@available(macOS 12, iOS 15, *)
+struct Synchronisation {
+    let apps: [CypherMessenger]
+    
+    func synchronise() async throws {
+        var hasWork = 5
+        
+        repeat {
+            hasWork -= 1
+            if try await SpoofTransportClient.synchronize() != .skipped {
+                hasWork = 10
+            }
+            
+            for app in apps {
+                if try await app.processJobQueue() != .skipped {
+                    hasWork = 10
+                }
+            }
+        } while hasWork > 0
+    }
+}
+
+@available(macOS 12, iOS 15, *)
 struct CustomMagicPacketPlugin: Plugin {
     static let pluginIdentifier = "custom-magic-packet"
     let onInput: () -> ()
     let onOutput: () -> ()
     
-    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
+    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {
+        try await messenger.addDevice(config)
     }
     
-    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.addDevice(config)
-    }
-    
-    func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction?> {
+    func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         if message.message.messageSubtype == "custom-magic-packet" {
             onInput()
         }
         
-        return message.messenger.eventLoop.makeSucceededFuture(nil)
+        return nil
     }
     
-    func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction?> {
+    func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction? {
         if message.message.messageSubtype == "custom-magic-packet" {
             onOutput()
         }
         
-        return message.messenger.eventLoop.makeSucceededFuture(nil)
+        return nil
     }
-    
-    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
-    
-    func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
-    
-    func onMessageChange(_ message: AnyChatMessage) {}
-    func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {}
-    func onCreateConversation(_ conversation: AnyConversation) {}
-    func onCreateChatMessage(_ conversation: AnyChatMessage) {}
-    func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
-    func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
-    func onP2PClientClose(messenger: CypherMessenger) {}
 }
 
+@available(macOS 12, iOS 15, *)
 final class FriendshipPluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
     }
     
-    func testIgnoreUndecided() throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
+    func testIgnoreUndecided() async throws {
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false
         ruleset.canIgnoreMagicPackets = false
         ruleset.preventSendingDisallowedMessages = false
         
-        let m0 = try CypherMessenger.registerMessenger(
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
-        let m0Contact = try m0.createContact(byUsername: "m1").wait()
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
         
-        _ = try m0Chat.sendRawMessage(
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
+        let m0Contact = try await m0.createContact(byUsername: "m1")
+        
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(3)
+        try await sync.synchronise()
         
-        let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
-        let m1Contact = try m1.createContact(byUsername: "m0").wait()
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
+        let m1Contact = try await m1.createContact(byUsername: "m0")
         
-        sleep(2)
+        try await sync.synchronise()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 0)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 0)
         
-        try m0Contact.befriend().wait()
-        _ = try m0Chat.sendRawMessage(
+        try await m0Contact.befriend()
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
-        XCTAssertFalse(m0Contact.mutualFriendship)
-        XCTAssertFalse(m0Contact.contactBlocked)
+        )
+        XCTAssertFalse(m0Contact.isMutualFriendship)
+        XCTAssertFalse(m0Contact.isBlocked)
         
-        sleep(2)
+        try await sync.synchronise()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 2)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 0)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 0)
         
-        XCTAssertFalse(m1Contact.mutualFriendship)
-        XCTAssertFalse(m1Contact.contactBlocked)
-        try m1Contact.befriend().wait()
-        _ = try m0Chat.sendRawMessage(
+        XCTAssertFalse(m1Contact.isMutualFriendship)
+        XCTAssertFalse(m1Contact.isBlocked)
+        
+        try await m1Contact.befriend()
+        try await sync.synchronise()
+        
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(2)
+        try await sync.synchronise()
         
-        XCTAssertTrue(m0Contact.mutualFriendship)
-        XCTAssertTrue(m1Contact.mutualFriendship)
-        XCTAssertFalse(m0Contact.contactBlocked)
-        XCTAssertFalse(m1Contact.contactBlocked)
+        XCTAssertTrue(m0Contact.isMutualFriendship)
+        XCTAssertTrue(m1Contact.isMutualFriendship)
+        XCTAssertFalse(m0Contact.isBlocked)
+        XCTAssertFalse(m1Contact.isBlocked)
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 3)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 3)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
         
         // Now they block each other
-        try m0Contact.block().wait()
+        try await m0Contact.block()
         
-        XCTAssertFalse(m0Contact.mutualFriendship)
-        XCTAssertTrue(m0Contact.contactBlocked)
+        XCTAssertFalse(m0Contact.isMutualFriendship)
+        XCTAssertTrue(m0Contact.isBlocked)
         
-        sleep(1)
+        try await sync.synchronise()
         
-        XCTAssertFalse(m1Contact.mutualFriendship)
-        XCTAssertTrue(m1Contact.contactBlocked)
+        XCTAssertFalse(m1Contact.isMutualFriendship)
+        XCTAssertTrue(m1Contact.isBlocked)
         
-        _ = try m1Chat.sendRawMessage(
+        _ = try await m1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 3)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 2)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 3)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 2)
         
-        try m1Contact.block().wait()
+        try await m1Contact.block()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(1)
+        try await sync.synchronise()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 4)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 2)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 4)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 2)
         
         // And now they need to unblock to reclaim friendship
         
-        try m0Contact.unblock().wait()
-        try m1Contact.unblock().wait()
+        try await m0Contact.unblock()
+        try await m1Contact.unblock()
         
-        sleep(1)
+        try await sync.synchronise()
         
-        XCTAssertTrue(m0Contact.mutualFriendship)
-        XCTAssertTrue(m1Contact.mutualFriendship)
-        XCTAssertFalse(m0Contact.contactBlocked)
-        XCTAssertFalse(m1Contact.contactBlocked)
+        XCTAssertTrue(m0Contact.isMutualFriendship)
+        XCTAssertTrue(m1Contact.isMutualFriendship)
+        XCTAssertFalse(m0Contact.isBlocked)
+        XCTAssertFalse(m1Contact.isBlocked)
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        _ = try m1Chat.sendRawMessage(
+        _ = try await m1Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(1)
+        try await sync.synchronise()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 6)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 4)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 6)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 4)
     }
     
-    func testBlockAffectsGroupChats() throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
+    //    func testHeavyLoad() async throws {
+    //        let el = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+    //        let m0 = try await CypherMessenger.registerMessenger(
+    //            username: "m0",
+    //            appPassword: "",
+    //            usingTransport: { request in
+    //            try await VaporTransport.registerPlain(transportRequest: request, eventLoop: el)
+    //            },
+    //            database: MemoryCypherMessengerStore(eventLoop: el),
+    //            eventHandler: SpoofCypherEventHandler(),
+    //            on: el
+    //        )
+    //        
+    //        let m1 = try await CypherMessenger.registerMessenger(
+    //            username: "m1",
+    //            appPassword: "",
+    //            usingTransport: { request in
+    //                try await VaporTransport.registerPlain(transportRequest: request, eventLoop: el)
+    //            },
+    //            database: MemoryCypherMessengerStore(eventLoop: el),
+    //            eventHandler: SpoofCypherEventHandler(),
+    //            on: el
+    //        )
+    //        
+    //        try el.executeAsync {
+    //            let chat = try await m0.createPrivateChat(with: "m1")
+    //            
+    //            for _ in 0..<1000 {
+    //                _ = el.executeAsync {
+    //                    _ = try await chat.sendRawMessage(type: .text, text: "Hello", preferredPushType: .none)
+    //                }
+    //            }
+    //        }.wait()
+    //        
+    //        var receivedAll = false
+    //        repeat {
+    //            sleep(1)
+    //            if let chat = try await m1.getPrivateChat(with: "m0") {
+    //                let count = try await chat.allMessages(sortedBy: .ascending).count
+    //                receivedAll = count >= 1000
+    //                print("Processed \(count)")
+    //            }
+    //        } while !receivedAll
+    //    }
+    
+    func testBlockAffectsGroupChats() async throws {
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = false
         ruleset.blockAffectsGroupChats = true
         ruleset.canIgnoreMagicPackets = false
         ruleset.preventSendingDisallowedMessages = false
         
-        let m0 = try CypherMessenger.registerMessenger(
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset)
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(3)
+        try await sync.synchronise()
         
-        let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
         
-        sleep(2)
+        try await sync.synchronise()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
         
-        let m0GroupChat = try m0.createGroupChat(with: ["m1"]).wait()
-        _ = try m0GroupChat.sendRawMessage(
+        let m0GroupChat = try await m0.createGroupChat(with: ["m1"])
+        _ = try await m0GroupChat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(2)
+        try await sync.synchronise()
         
-        let m1GroupChat = try m1.getGroupChat(byId: m0GroupChat.groupId).wait()!
+        guard let m1GroupChat = try await m1.getGroupChat(byId: m0GroupChat.getGroupId()) else {
+            return
+        }
         
-        try XCTAssertEqual(m1GroupChat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1GroupChat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m1GroupChat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1GroupChat.allMessages(sortedBy: .descending).count, 1)
         
-        let m1Contact = try m1.createContact(byUsername: "m0").wait()
-        try m1Contact.block().wait()
+        let m1Contact = try await m1.createContact(byUsername: "m0")
+        try await m1Contact.block()
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        _ = try m0GroupChat.sendRawMessage(
+        _ = try await m0GroupChat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(2)
+        try await sync.synchronise()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 2)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
         
-        try XCTAssertEqual(m0GroupChat.allMessages(sortedBy: .descending).wait().count, 2)
-        try XCTAssertEqual(m1GroupChat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0GroupChat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m1GroupChat.allMessages(sortedBy: .descending).count, 1)
     }
     
-    func testBlockingCanPreventOtherPlugins() throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
+    func testBlockingCanPreventOtherPlugins() async throws {
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false
@@ -299,66 +348,70 @@ final class FriendshipPluginTests: XCTestCase {
         ruleset.preventSendingDisallowedMessages = false
         var inputCount = 0
         
-        let m0 = try CypherMessenger.registerMessenger(
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset),
                 CustomMagicPacketPlugin(onInput: {
-                    inputCount += 1
-                }, onOutput: {})
-            ]),
-            on: eventLoop
-        ).wait()
+            inputCount += 1
+        }, onOutput: {})
+            ])
+        )
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset),
                 CustomMagicPacketPlugin(onInput: {
-                    inputCount += 1
-                }, onOutput: {})
-            ]),
-            on: eventLoop
-        ).wait()
+            inputCount += 1
+        }, onOutput: {})
+            ])
+        )
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
-        let m0Contact = try m0.createContact(byUsername: "m1").wait()
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
         
-        _ = try m0Chat.sendRawMessage(
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
+        let m0Contact = try await m0.createContact(byUsername: "m1")
+        
+        _ = try await m0Chat.sendRawMessage(
             type: .magic,
             messageSubtype: "custom-magic-packet",
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(3)
         
-        XCTAssertEqual(inputCount, 0)
-        let m1Contact = try m1.createContact(byUsername: "m0").wait()
+        try await sync.synchronise()
         
-        try m0Contact.befriend().wait()
-        try m1Contact.befriend().wait()
+        await XCTAssertAsyncEqual(inputCount, 0)
+        let m1Contact = try await m1.createContact(byUsername: "m0")
         
-        sleep(1)
+        try await m0Contact.befriend()
+        try await m1Contact.befriend()
         
-        _ = try m0Chat.sendRawMessage(
+        
+        try await sync.synchronise()
+        
+        _ = try await m0Chat.sendRawMessage(
             type: .magic,
             messageSubtype: "custom-magic-packet",
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(2)
         
-        XCTAssertEqual(inputCount, 1)
+        try await sync.synchronise()
+        
+        await XCTAssertAsyncEqual(inputCount, 1)
         _ = m0
         _ = m1
     }

@@ -29,6 +29,7 @@ struct HandshakeMessageTask: Codable {
     let messageId: String
 }
 
+@available(macOS 12, iOS 15, *)
 struct CreateChatTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -49,6 +50,7 @@ struct CreateChatTask: Codable {
     let acceptedByOtherUser: Bool
 }
 
+@available(macOS 12, iOS 15, *)
 struct AddContactTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -63,19 +65,22 @@ struct AddContactTask: Codable {
     let nickname: String
 }
 
+@available(macOS 12, iOS 15, *)
 struct SendMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
         case recipient = "b"
         case recipientDeviceId = "c"
         case localId = "e"
-        case messageId = "f"
+        case pushType = "f"
+        case messageId = "g"
     }
     
     let message: CypherMessage
     let recipient: Username
     let recipientDeviceId: DeviceId
     let localId: UUID?
+    let pushType: PushType
     let messageId: String
 }
 
@@ -93,6 +98,7 @@ struct ReceiveMessageTask: Codable {
     let deviceId: DeviceId
 }
 
+@available(macOS 12, iOS 15, *)
 struct SendMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case localId = "a"
@@ -109,6 +115,7 @@ struct SendMessageDeliveryStateChangeTask: Codable {
     let newState: ChatMessageModel.DeliveryState
 }
 
+@available(macOS 12, iOS 15, *)
 struct ReceiveMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case messageId = "a"
@@ -123,6 +130,7 @@ struct ReceiveMessageDeliveryStateChangeTask: Codable {
     let newState: ChatMessageModel.DeliveryState
 }
 
+@available(macOS 12, iOS 15, *)
 struct ReceiveMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -137,6 +145,7 @@ struct ReceiveMultiRecipientMessageTask: Codable {
     let deviceId: DeviceId
 }
 
+@available(macOS 12, iOS 15, *)
 struct SendMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -194,7 +203,12 @@ struct ChangeGroupUsernameTask: Codable {
     let nickname: String
 }
 
-enum CypherTask: Codable, Task {
+public enum _CypherTaskConfig {
+    public static var sendMessageRetryMode: TaskRetryMode? = nil
+}
+
+@available(macOS 12, iOS 15, *)
+enum CypherTask: Codable, StoredTask {
     private enum CodingKeys: String, CodingKey {
         case key = "a"
         case document = "b"
@@ -210,9 +224,13 @@ enum CypherTask: Codable, Task {
     var retryMode: TaskRetryMode {
         switch self {
         case .sendMessage, .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
-            return .always
+            if let mode = _CypherTaskConfig.sendMessageRetryMode {
+                return mode
+            }
+            
+            return .retryAfter(30, maxAttempts: 3)
         case .processMultiRecipientMessage, .processMessage:
-            return .never
+            return .always
         case .receiveMessageDeliveryStateChangeTask:
             return .retryAfter(60, maxAttempts: 5)
         }
@@ -321,140 +339,164 @@ enum CypherTask: Codable, Task {
         try container.encode(makeDocument(), forKey: .document)
     }
     
-    func onDelayed(on messenger: CypherMessenger) -> EventLoopFuture<Void> {
+    func onDelayed(on messenger: CypherMessenger) async throws {
         switch self {
         case .sendMessage(let task):
-            return messenger._markMessage(byId: task.localId, as: .undelivered).map { _ in }
+            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
         case .sendMultiRecipientMessage(let task):
-            return messenger._markMessage(byId: task.localId, as: .undelivered).map { _ in }
+            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
         case .processMessage, .processMultiRecipientMessage, .sendMessageDeliveryStateChangeTask, .receiveMessageDeliveryStateChangeTask:
-            return messenger.eventLoop.makeSucceededVoidFuture()
+            ()
         }
     }
     
-    func execute(on messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        // TODO: After processing a message, emit a `received` event
+    func execute(on messenger: CypherMessenger) async throws {
         switch self {
         case .sendMessage(let message):
             debugLog("Sending message to \(message.recipient)")
-            return TaskHelpers.writeMessageTask(task: message, messenger: messenger)
+            return try await TaskHelpers.writeMessageTask(task: message, messenger: messenger)
         case .processMessage(let message):
             debugLog("Processing message sent by \(message.sender)")
-            return messenger._receiveMessage(
+            return try await messenger._receiveMessage(
                 message.message,
                 multiRecipientContainer: nil,
                 messageId: message.messageId,
                 sender: message.sender,
                 senderDevice: message.deviceId
-            ).recover { error in
-                debugLog("Error processing received message \(message.messageId) by \(message.sender) with error \(error)")
-            }
+            )
         case .sendMultiRecipientMessage(let task):
             debugLog("Sending message to multiple recipients", task.recipients)
-            return TaskHelpers.writeMultiRecipeintMessageTask(task: task, messenger: messenger)
+            return try await TaskHelpers.writeMultiRecipientMessageTask(task: task, messenger: messenger)
         case .processMultiRecipientMessage(let task):
-            return messenger._receiveMultiRecipientMessage(
+            return try await messenger._receiveMultiRecipientMessage(
                 task.message,
                 messageId: task.messageId,
                 sender: task.sender,
                 senderDevice: task.deviceId
             )
         case .sendMessageDeliveryStateChangeTask(let task):
-            return messenger._markMessage(byId: task.localId, as: task.newState).flatMap { result in
-                switch result {
-                case .error:
-                    return messenger.eventLoop.makeFailedFuture(CypherSDKError.invalidDeliveryStateTransition)
-                case .success:
-                    ()
-                case .notModified:
-                    () // Still emit the notification to the other side
-                }
-                
-                switch task.newState {
-                case .none, .undelivered:
-                    return messenger.eventLoop.makeSucceededVoidFuture()
-                case .read:
-                    return messenger.transport.sendMessageReadReceipt(
-                        byRemoteId: task.messageId,
-                        to: task.recipient
-                    )
-                case .received:
-                    return messenger.transport.sendMessageReceivedReceipt(
-                        byRemoteId: task.messageId,
-                        to: task.recipient
-                    )
-                case .revoked:
-                    fatalError("TODO")
-                }
-            }.flatMapErrorThrowing { error in
-                debugLog("Cannot modify delivery state for unknown message", error)
-                throw error
+            let result = try await messenger._markMessage(byId: task.localId, as: task.newState)
+            switch result {
+            case .error:
+                return
+            case .success:
+                ()
+            case .notModified:
+                () // Still emit the notification to the other side
+            }
+            
+            switch task.newState {
+            case .none, .undelivered:
+                return
+            case .read:
+                return try await messenger.transport.sendMessageReadReceipt(
+                    byRemoteId: task.messageId,
+                    to: task.recipient
+                )
+            case .received:
+                return try await messenger.transport.sendMessageReceivedReceipt(
+                    byRemoteId: task.messageId,
+                    to: task.recipient
+                )
+            case .revoked:
+                fatalError("TODO")
             }
         case .receiveMessageDeliveryStateChangeTask(let task):
-            return messenger._markMessage(byRemoteId: task.messageId, updatedBy: task.sender, as: task.newState)
-                .map { _ in }
-                .flatMapErrorThrowing { error in
-                debugLog("Cannot modify delivery state for unknown message", error)
-                throw error
-            }
+            _ = try await messenger._markMessage(byRemoteId: task.messageId, updatedBy: task.sender, as: task.newState)
         }
     }
 }
 
+@available(macOS 12, iOS 15, *)
 enum TaskHelpers {
-    fileprivate static func writeMultiRecipeintMessageTask(
+    fileprivate static func writeMultiRecipientMessageTask(
         task: SendMultiRecipientMessageTask,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Void> {
+    ) async throws {
         guard messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
-            return messenger._markMessage(byId: task.localId, as: .undelivered).flatMapThrowing { _ in
-                throw CypherSDKError.offline
+            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            throw CypherSDKError.offline
+        }
+        
+        var devices = try await messenger._fetchDeviceIdentities(forUsers: task.recipients)
+        
+        if devices.isEmpty {
+            return
+        }
+        
+        for i in 0..<devices.count {
+            // Back to front, since we're popping elements
+            let index = devices.count - i - 1
+            let device = devices[index]
+            
+            do {
+                if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
+                    with: device.username,
+                    deviceId: device.deviceId
+                ) {
+                    try await p2pTransport.sendMessage(task.message, messageId: task.messageId)
+                    devices.remove(at: index)
+                }
+            } catch {
+                debugLog("Failed to send message over P2P connection", error)
             }
         }
         
-        return messenger._fetchDeviceIdentities(forUsers: task.recipients).flatMap { devices in
-            messenger._createMultiRecipientMessage(
-                encrypting: task.message,
-                forDevices: devices
-            )
-        }.flatMap { message in
-            return messenger.transport.sendMultiRecipientMessage(message, messageId: task.messageId)
+        if devices.isEmpty { return }
+        
+        return try await messenger._withCreatedMultiRecipientMessage(
+            encrypting: task.message,
+            forDevices: devices
+        ) { message in
+            return try await messenger.transport.sendMultiRecipientMessage(message, pushType: task.pushType, messageId: task.messageId)
         }
     }
 
     fileprivate static func writeMessageTask(
         task: SendMessageTask,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Void> {
+    ) async throws {
         guard messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
-            return messenger._markMessage(byId: task.localId, as: .undelivered).flatMapThrowing { _ in
-                throw CypherSDKError.offline
-            }
+            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            throw CypherSDKError.offline
         }
 
         // Fetch the identity
         debugLog("Executing task: Send message")
-        return messenger._writeWithRatchetEngine(ofUser: task.recipient, deviceId: task.recipientDeviceId) { ratchetEngine, rekeyState -> EventLoopFuture<Void> in
+            
+        if let p2pTransport = try await messenger.getEstablishedP2PConnection(with: task.recipient, deviceId: task.recipientDeviceId) {
             do {
-                let encodedMessage = try BSONEncoder().encode(task.message).makeData()
-                let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
-
-                let encryptedMessage = try messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
-
-                return messenger.transport.sendMessage(
-                    encryptedMessage,
-                    toUser: task.recipient,
-                    otherUserDeviceId: task.recipientDeviceId,
+                try await p2pTransport.sendMessage(
+                    task.message,
                     messageId: task.messageId
                 )
+                
+                // Message may be a magic packet
+                _ = try? await messenger._markMessage(byId: task.localId, as: .none)
+                
+                return
             } catch {
-                debugLog("Send message failed", error)
-                return messenger.eventLoop.makeFailedFuture(error)
+                debugLog("P2P Connection failed to communicate")
             }
-        }.flatMap {
-            messenger._markMessage(byId: task.localId, as: .none).map { _ in }
         }
+        
+        try await messenger._writeWithRatchetEngine(ofUser: task.recipient, deviceId: task.recipientDeviceId) { ratchetEngine, rekeyState in
+            let encodedMessage = try BSONEncoder().encode(task.message).makeData()
+            let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
+
+            let encryptedMessage = try await messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
+            try await messenger.transport.sendMessage(
+                encryptedMessage,
+                toUser: task.recipient,
+                otherUserDeviceId: task.recipientDeviceId,
+                pushType: task.pushType,
+                messageId: task.messageId
+            )
+        }
+        
+        // Message may be a magic packet
+        _ = try? await messenger._markMessage(byId: task.localId, as: .none)
     }
 }

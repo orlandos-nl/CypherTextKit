@@ -10,6 +10,7 @@ public enum CypherMessageType: String, Codable {
     case text, media, magic
 }
 
+@available(macOS 12, iOS 15, *)
 public enum TargetConversation {
     case currentUser
     case otherUser(Username)
@@ -17,54 +18,51 @@ public enum TargetConversation {
     
     public func resolve(
         in messenger: CypherMessenger
-    ) -> EventLoopFuture<TargetConversation.Resolved> {
+    ) async throws -> TargetConversation.Resolved {
         switch self {
         case .currentUser:
-            return messenger.getInternalConversation().map {
-                .internalChat($0)
-            }
+            return try await .internalChat(messenger.getInternalConversation())
         case .otherUser(let username):
-            return messenger.getPrivateChat(with: username).flatMapThrowing { chat in
-                if let chat = chat {
-                    return .privateChat(chat)
-                }
-                
-                throw CypherSDKError.unknownChat
+            if let chat = try await messenger.getPrivateChat(with: username) {
+                return .privateChat(chat)
             }
+            
+            throw CypherSDKError.unknownChat
         case .groupChat(let groupId):
-            return messenger.getGroupChat(byId: groupId).flatMapThrowing { chat in
-                if let chat = chat {
-                    return .groupChat(chat)
-                }
-                
-                throw CypherSDKError.unknownGroup
+            if let chat = try await messenger.getGroupChat(byId: groupId) {
+                return .groupChat(chat)
             }
+            
+            throw CypherSDKError.unknownGroup
         }
     }
     
-    public enum Resolved: AnyConversation {
+    public enum Resolved: AnyConversation, Identifiable {
         case privateChat(PrivateChat)
         case groupChat(GroupChat)
         case internalChat(InternalConversation)
         
-        init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
-            guard conversation.members.contains(messenger.username) else {
+        init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) async {
+            let members = conversation.members
+            let username = messenger.username
+            guard members.contains(username) else {
                 return nil
             }
             
-            switch conversation.members.count {
+            let metadata = conversation.metadata
+            switch members.count {
             case ..<0:
                 return nil
             case 1:
                 self = .internalChat(InternalConversation(conversation: conversation, messenger: messenger))
-            case 2 where conversation.metadata["_type"] as? String != "group":
+            case 2 where metadata["_type"] as? String != "group":
                 self = .privateChat(PrivateChat(conversation: conversation, messenger: messenger))
             default:
-                if conversation.metadata["_type"] as? String == "group" {
+                if metadata["_type"] as? String == "group" {
                     do {
                         let groupMetadata = try BSONDecoder().decode(
                             GroupMetadata.self,
-                            from: conversation.metadata
+                            from: metadata
                         )
                         
                         self = .groupChat(GroupChat(conversation: conversation, messenger: messenger, metadata: groupMetadata))
@@ -99,15 +97,19 @@ public enum TargetConversation {
             }
         }
         
-        public var target: TargetConversation {
+        public func getTarget() async -> TargetConversation {
             switch self {
             case .privateChat(let chat):
-                return chat.target
+                return chat.getTarget()
             case .groupChat(let chat):
-                return chat.target
+                return await chat.getTarget()
             case .internalChat(let chat):
-                return chat.target
+                return await chat.getTarget()
             }
+        }
+        
+        public func resolveTarget() async -> TargetConversation.Resolved {
+            self
         }
         
         public var cache: Cache {
@@ -121,10 +123,13 @@ public enum TargetConversation {
             }
         }
         
-        public var resolvedTarget: TargetConversation.Resolved { self }
+        public var id: UUID {
+            conversation.id
+        }
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public struct ConversationTarget: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {
@@ -154,6 +159,7 @@ public struct ConversationTarget: Codable {
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public struct SingleCypherMessage: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {

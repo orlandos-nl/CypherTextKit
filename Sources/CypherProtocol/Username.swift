@@ -1,4 +1,4 @@
-/// A string wrapper so that Strings are handled in a case-insensitive manner and to prevent mistakes like provding the wring String in a function
+/// A helper wrapper around `String`, so that the type cannot be used interchangably with other String based types
 public struct Username: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable, ExpressibleByStringLiteral {
     public let raw: String
     

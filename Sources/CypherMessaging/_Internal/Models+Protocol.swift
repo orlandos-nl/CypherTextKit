@@ -1,74 +1,60 @@
 import Foundation
 import Crypto
 
-public protocol Model: AnyObject, Codable {
+public protocol MetadataProps {
+    var metadata: Document { get set }
+}
+
+public protocol Model: Codable {
     associatedtype SecureProps: Codable
     
     var id: UUID { get }
     var props: Encrypted<SecureProps> { get set }
+//    func setProps(to props: Encrypted<SecureProps>) async
+    
+//    func save(on store: CypherMessengerStore) async throws
 }
 
-@dynamicMemberLookup
-public struct DecryptedModel<M: Model> {
-    public var encrypted: M
+// TODO: Re-enable cache, and reuse the cache globally
+public final class DecryptedModel<M: Model> {
+    private let lock = NSLock()
+    public let encrypted: M
+    public var id: UUID { encrypted.id }
+    public private(set) var props: M.SecureProps
     private let encryptionKey: SymmetricKey
     
-    private final class DecryptedPropertyCache {
-        var props: M.SecureProps?
-    }
-    
-    public var id: UUID {
-        encrypted.id
-    }
-    
-    private var propertyCache = DecryptedPropertyCache()
-    
-    public var props: M.SecureProps {
-        get {
-//            if let cached = propertyCache.props {
-//                return cached
-//            } else {
-                do {
-                    let props = try encrypted.props.decrypt(using: encryptionKey)
-                    propertyCache.props = props
-                    return props
-                } catch {
-                    fatalError("Props cannot be decrypted for \(M.self)")
-                }
-//            }
-        }
-        nonmutating set {
-            propertyCache.props = newValue
-            
-            do {
-                encrypted.props = try Encrypted(newValue, encryptionKey: encryptionKey)
-            } catch {
-                fatalError("Props cannot be encrypted for \(M.self)")
-            }
+    public func withLock<T>(_ run: () async throws -> T) async rethrows -> T {
+        lock.lock()
+        do {
+            let result = try await run()
+            lock.unlock()
+            return result
+        } catch {
+            lock.unlock()
+            throw error
         }
     }
     
-    init(model: M, encryptionKey: SymmetricKey) {
+    public func withProps<T>(get: (M.SecureProps) async throws -> T) async throws -> T {
+        let props = try encrypted.props.decrypt(using: encryptionKey)
+        return try await get(props)
+    }
+    
+    public func modifyProps<T>(run: (inout M.SecureProps) async throws -> T) async throws -> T {
+        let value = try await run(&props)
+        try await encrypted.props.update(to: props, using: encryptionKey)
+        return value
+    }
+    
+    public func setProp<T>(at keyPath: WritableKeyPath<M.SecureProps, T>, to value: T) async throws {
+        try await modifyProps { props in
+            props[keyPath: keyPath] = value
+        }
+    }
+    
+    init(model: M, encryptionKey: SymmetricKey) async throws {
         self.encrypted = model
         self.encryptionKey = encryptionKey
-    }
-    
-    public subscript<T>(dynamicMember keyPath: WritableKeyPath<M.SecureProps, T>) -> T {
-        get {
-            props[keyPath: keyPath]
-        }
-        nonmutating set {
-            props[keyPath: keyPath] = newValue
-        }
-    }
-    
-    public subscript<T>(dynamicMember keyPath: KeyPath<M.SecureProps, T>) -> T {
-        props[keyPath: keyPath]
-    }
-}
-
-extension Model {
-    func decrypted(using symmetricKey: SymmetricKey) -> DecryptedModel<Self> {
-        DecryptedModel(model: self, encryptionKey: symmetricKey)
+        self.props = try model.props.decrypt(using: encryptionKey)
     }
 }

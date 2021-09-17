@@ -2,18 +2,20 @@ import NIO
 import BSON
 import Foundation
 
-public protocol Task: Codable {
+@available(macOS 12, iOS 15, *)
+public protocol StoredTask: Codable {
     var key: TaskKey { get }
     var isBackgroundTask: Bool { get }
     var retryMode: TaskRetryMode { get }
     var priority: TaskPriority { get }
     var requiresConnectivity: Bool { get }
     
-    func execute(on messenger: CypherMessenger) -> EventLoopFuture<Void>
-    func onDelayed(on messenger: CypherMessenger) -> EventLoopFuture<Void>
+    func execute(on messenger: CypherMessenger) async throws
+    func onDelayed(on messenger: CypherMessenger) async throws
 }
 
-typealias TaskDecoder = (Document) throws -> Task
+@available(macOS 12, iOS 15, *)
+typealias TaskDecoder = (Document) throws -> StoredTask
 
 public struct TaskPriority {
     enum _Raw: Comparable {

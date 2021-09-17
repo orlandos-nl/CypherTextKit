@@ -15,8 +15,10 @@ public struct P2PFrameworkState {
 
 /// PeerToPeerTransportClient is used to create a direct connection between two devices.
 /// The client implementation defined below does not need to verify the identity of the other party.
+/// These transport clients need not concern themselves with end-to-end encryption, as the data they receive is already encrypted.
 ///
 /// CypherTextKit may opt to use a direct connection as a _replacement_ for via-server communication, as to improve security, bandwidth AND latency.
+@available(macOS 12, iOS 15, *)
 public protocol P2PTransportClient: AnyObject {
     /// The delegate receives incoming data from the the remote peer. MUST be `weak` to prevent memory leaks.
     ///
@@ -32,28 +34,30 @@ public protocol P2PTransportClient: AnyObject {
     var state: P2PFrameworkState { get }
     
     /// (Re-)starts the connection(s).
-    func reconnect() -> EventLoopFuture<Void>
+    func reconnect() async throws
     
     /// Disconnects any active connections.
-    func disconnect() -> EventLoopFuture<Void>
+    func disconnect() async
     
     /// Sends a buffer to the remote. The remote, upon receiving, must call `delegate.receiveMessage`
-    func sendMessage(_ buffer: ByteBuffer) -> EventLoopFuture<Void>
+    func sendMessage(_ buffer: ByteBuffer) async throws
 }
 
 public enum P2PTransportClosureOption {
     case reconnnectPossible
 }
 
+@available(macOS 12, iOS 15, *)
 public protocol P2PTransportClientDelegate: AnyObject {
-    func p2pConnection(_ connection: P2PTransportClient, receivedMessage buffer: ByteBuffer) -> EventLoopFuture<Void>
-    func p2pConnection(_ connection: P2PTransportClient, closedWithOptions: Set<P2PTransportClosureOption>) -> EventLoopFuture<Void>
+    func p2pConnection(_ connection: P2PTransportClient, receivedMessage buffer: ByteBuffer) async throws
+    func p2pConnection(_ connection: P2PTransportClient, closedWithOptions: Set<P2PTransportClosureOption>) async throws
 }
 
 public struct P2PTransportCreationRequest {
     public let state: P2PFrameworkState
 }
 
+@available(macOS 12, iOS 15, *)
 public typealias PeerToPeerConnectionBuilder = (P2PTransportCreationRequest) -> P2PTransportClient
 
 /// P2PTransportClientFactory is a _stateful_ factory that can instantiate new connections
@@ -63,6 +67,7 @@ public typealias PeerToPeerConnectionBuilder = (P2PTransportCreationRequest) -> 
 /// Example: Apple devices can use Multipeer Connectivity, possibly without making use of server-side communication.
 ///
 /// Example: WebRTC based implementations are likely to make use of the handle to send and receive SDPs. The factory can then make use of internal state for storing incomplete connections.
+@available(macOS 12, iOS 15, *)
 public protocol P2PTransportClientFactory {
     var transportLayerIdentifier: String { get }
     
@@ -70,7 +75,7 @@ public protocol P2PTransportClientFactory {
         _ text: String,
         metadata: Document,
         handle: P2PTransportFactoryHandle
-    ) -> EventLoopFuture<P2PTransportClient?>
+    ) async throws -> P2PTransportClient?
     
     /// Creates a new P2PConnection with a remote client. Any necessary communication _must_ go through `handle`.
     ///
@@ -80,22 +85,22 @@ public protocol P2PTransportClientFactory {
     /// `createConnection` _should_ complete after any current actions. It _may_ also delay the completion until a network related task completed, such as discovery on the local network or nearby BlueTooth devices. In which case the function _must_ implement a reasonable termination deadline.
     func createConnection(
         handle: P2PTransportFactoryHandle
-    ) -> EventLoopFuture<P2PTransportClient?>
+    ) async throws -> P2PTransportClient?
 }
 
 /// An interface through which can be communicated with the remote device
+@available(macOS 12, iOS 15, *)
 public struct P2PTransportFactoryHandle {
     internal let transportLayerIdentifier: String
     internal let messenger: CypherMessenger
     internal let targetConversation: TargetConversation
     public let state: P2PFrameworkState
-    public var eventLoop: EventLoop { messenger.eventLoop }
     
     public func sendMessage(
         _ text: String,
         metadata: Document = [:]
-    ) -> EventLoopFuture<Void> {
-        messenger._queueTask(
+    ) async throws {
+        try await messenger._queueTask(
             .sendMessage(
                 SendMessageTask(
                     message: CypherMessage(
@@ -114,6 +119,7 @@ public struct P2PTransportFactoryHandle {
                     recipient: state.username,
                     recipientDeviceId: state.deviceId,
                     localId: nil,
+                    pushType: .none,
                     messageId: UUID().uuidString
                 )
             )

@@ -1,5 +1,6 @@
 import CypherMessaging
 
+@available(macOS 12, iOS 15, *)
 public struct PluginEventHandler: CypherMessengerEventHandler {
     private var plugins: [Plugin]
     
@@ -8,70 +9,58 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
     }
     
     public func onRekey(
-        withUser: Username,
+        withUser username: Username,
         deviceId: DeviceId,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
+    ) async throws {
+        for plugin in plugins {
+            try await plugin.onRekey(withUser: username, deviceId: deviceId, messenger: messenger)
+        }
     }
     
     public func onDeviceRegisteryRequest(
         _ config: UserDeviceConfig,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Void> {
-        let done = plugins.map { plugin in
-            plugin.onDeviceRegisteryRequest(config, messenger: messenger)
+    ) async throws {
+        for plugin in plugins {
+            try await plugin.onDeviceRegisteryRequest(config, messenger: messenger)
         }
-        
-        return EventLoopFuture.andAllSucceed(done, on: messenger.eventLoop)
     }
     
     public func onReceiveMessage(
         _ message: ReceivedMessageContext
-    ) -> EventLoopFuture<ProcessMessageAction> {
-        var plugins = self.plugins.makeIterator()
+    ) async throws -> ProcessMessageAction {
+        // TODO: Parse synchronisation messages
         
-        func next() -> EventLoopFuture<ProcessMessageAction> {
-            guard let plugin = plugins.next() else {
-                return message.messenger.eventLoop.makeSucceededFuture(
-                    message.message.messageType == .magic ? .ignore : .save
-                )
-            }
-            
-            return plugin.onReceiveMessage(message).flatMap { result in
-                if let result = result {
-                    return message.messenger.eventLoop.makeSucceededFuture(result)
-                }
-                
-                return next()
+        for plugin in plugins {
+            if let result = try await plugin.onReceiveMessage(message) {
+                return result
             }
         }
         
-        return next()
+        switch message.message.messageType {
+        case .magic:
+            return .ignore
+        case .text, .media:
+            return .save
+        }
     }
     
     public func onSendMessage(
         _ message: SentMessageContext
-    ) -> EventLoopFuture<SendMessageAction> {
-        var plugins = self.plugins.makeIterator()
-        
-        func next() -> EventLoopFuture<SendMessageAction> {
-            guard let plugin = plugins.next() else {
-                return message.messenger.eventLoop.makeSucceededFuture(
-                    message.message.messageType == .magic ? .send : .saveAndSend
-                )
-            }
-            
-            return plugin.onSendMessage(message).flatMap { result in
-                if let result = result {
-                    return message.messenger.eventLoop.makeSucceededFuture(result)
-                }
-                
-                return next()
+    ) async throws -> SendMessageAction {
+        for plugin in plugins {
+            if let result = try await plugin.onSendMessage(message) {
+                return result
             }
         }
         
-        return next()
+        switch message.message.messageType {
+        case .magic:
+            return .send
+        case .text, .media:
+            return .saveAndSend
+        }
     }
     
     public func onMessageChange(_ message: AnyChatMessage) {
@@ -80,49 +69,55 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         }
     }
     
+    public func onUpdateConversation(_ conversation: AnyConversation) {
+        for plugin in plugins {
+            plugin.onConversationChange(conversation)
+        }
+    }
+    
+    public func onUpdateContact(_ contact: Contact) {
+        for plugin in plugins {
+            plugin.onContactChange(contact)
+        }
+    }
+    
     public func createPrivateChatMetadata(
         withUser otherUser: Username,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Document> {
-        let metadata = plugins.map { plugin -> EventLoopFuture<(String, Document)> in
-            plugin.createPrivateChatMetadata(withUser: otherUser, messenger: messenger).map { document in
-                return (plugin.pluginIdentifier, document)
-            }
+    ) async throws -> Document {
+        let metadata = try await plugins.asyncMap { plugin -> (String, Document) in
+            let document = try await plugin.createPrivateChatMetadata(withUser: otherUser, messenger: messenger)
+            return (plugin.pluginIdentifier, document)
         }
         
-        return EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
-            var document = Document()
-            
-            for (key, value) in results {
-                document[key] = value
-            }
-            
-            return document
+        var document = Document()
+        
+        for (key, value) in metadata {
+            document[key] = value
         }
+        
+        return document
     }
     
     public func createContactMetadata(
         for otherUser: Username,
         messenger: CypherMessenger
-    ) -> EventLoopFuture<Document> {
-        let metadata = plugins.map { plugin -> EventLoopFuture<(String, Document)> in
-            plugin.createContactMetadata(for: otherUser, messenger: messenger).map { document in
-                return (plugin.pluginIdentifier, document)
-            }
+    ) async throws -> Document {
+        let metadata = try await plugins.asyncMap { plugin -> (String, Document) in
+            let document = try await plugin.createContactMetadata(for: otherUser, messenger: messenger)
+            return (plugin.pluginIdentifier, document)
         }
         
-        return EventLoopFuture.whenAllSucceed(metadata, on: messenger.eventLoop).map { results in
-            var document = Document()
-            
-            for (key, value) in results {
-                document[key] = value
-            }
-            
-            return document
+        var document = Document()
+        
+        for (key, value) in metadata {
+            document[key] = value
         }
+        
+        return document
     }
     
-    public func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {
+    public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {
         for plugin in plugins {
             plugin.onCreateContact(contact, messenger: messenger)
         }
@@ -150,11 +145,33 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         for plugin in plugins {
             plugin.onP2PClientOpen(client, messenger: messenger)
         }
+        
+        // TODO: Use opportunity to check if state is still in sync
     }
     
     public func onP2PClientClose(messenger: CypherMessenger) {
         for plugin in plugins {
             plugin.onP2PClientClose(messenger: messenger)
         }
+    }
+    
+    public func onRemoveContact(_ contact: Contact) {
+        for plugin in plugins {
+            plugin.onRemoveContact(contact)
+        }
+    }
+    
+    public func onRemoveChatMessage(_ message: AnyChatMessage) {
+        for plugin in plugins {
+            plugin.onRemoveChatMessage(message)
+        }
+    }
+    
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+        for plugin in plugins {
+            try await plugin.onDeviceRegistery(deviceId, messenger: messenger)
+        }
+        
+        // TODO: Synchronise state to new device
     }
 }

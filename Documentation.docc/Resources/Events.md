@@ -1,51 +1,11 @@
-import NIO
-import CypherProtocol
+When creating a CypherMessenger, **EventHandlers** will gain an opportunity to manipulate or react to events.
 
-public struct DeviceReference {
-    public let username: Username
-    public let deviceId: DeviceId
-}
+An EventHandler can prevent a message from being saved, but can also use that opportunity to process magic packets.
+Therefore, such a system can also be used to implement a "block user" feature on client level.
 
-@available(macOS 12, iOS 15, *)
-public struct ReceivedMessageContext {
-    public let sender: DeviceReference
-    public let messenger: CypherMessenger
-    public var message: SingleCypherMessage
-    public let conversation: TargetConversation.Resolved
-}
+EventHandlers need to implement the following protocol:
 
-@available(macOS 12, iOS 15, *)
-public struct SentMessageContext {
-    public let recipients: Set<Username>
-    public let messenger: CypherMessenger
-    public var message: SingleCypherMessage
-    public let conversation: TargetConversation.Resolved
-}
-
-public struct SendMessageAction {
-    internal enum _Action {
-        case send, saveAndSend
-    }
-    
-    internal let raw: _Action
-    
-    public static let send = SendMessageAction(raw: .send)
-    public static let saveAndSend = SendMessageAction(raw: .saveAndSend)
-}
-
-public struct ProcessMessageAction {
-    internal enum _Action {
-        case ignore, save
-    }
-    
-    internal let raw: _Action
-    
-    public static let ignore = ProcessMessageAction(raw: .ignore)
-    public static let save = ProcessMessageAction(raw: .save)
-}
-
-// TODO: Make this into a concrete type, so more events can be supported
-@available(macOS 12, iOS 15, *)
+```swift
 public protocol CypherMessengerEventHandler {
     func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws
     func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws
@@ -66,3 +26,7 @@ public protocol CypherMessengerEventHandler {
     func onRemoveChatMessage(_ message: AnyChatMessage)
     func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
 }
+```
+
+Note that the supported types of events may be expanded in the future.
+Methods that are `async` will delay further processing until the future is resolved.

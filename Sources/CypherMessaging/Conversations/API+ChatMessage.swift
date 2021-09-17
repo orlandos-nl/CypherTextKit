@@ -1,28 +1,49 @@
+import Foundation
+
+@available(macOS 12, iOS 15, *)
 public struct AnyChatMessage {
     public let target: TargetConversation
-    public var id: UUID { raw.id }
     public let messenger: CypherMessenger
-    internal let raw: DecryptedModel<ChatMessageModel>
-    public var message: SingleCypherMessage { raw.message }
-    public var sendDate: Date { raw.props.sendDate }
-    public var receiveDate: Date { raw.props.receiveDate }
-    public var senderUser: Username { raw.props.senderUser }
-    public var senderDeviceId: DeviceId { raw.props.senderDeviceId }
-    public var remoteId: String { raw.encrypted.remoteId }
+    public let raw: DecryptedModel<ChatMessageModel>
     
-    public var deliveryState: ChatMessageModel.DeliveryState {
-        raw.deliveryState
-    }
-    
-    public func markAsRead() -> EventLoopFuture<Void> {
-        if raw.deliveryState == .read {
-            return messenger.eventLoop.makeSucceededVoidFuture()
+    public func markAsRead() async throws {
+        if raw.deliveryState == .read || sender == messenger.username {
+            return
         }
         
-        return messenger._markMessage(byId: raw.id, as: .read).map { _ in }
+        _ = try await messenger._markMessage(byId: raw.encrypted.id, as: .read)
     }
     
-    public func destroy() -> EventLoopFuture<Void> {
-        messenger.cachedStore.removeChatMessage(raw.encrypted)
+    public var text: String {
+        raw.message.text
+    }
+    
+    public var metadata: Document {
+        raw.message.metadata
+    }
+    
+    public var messageType: CypherMessageType {
+        raw.message.messageType
+    }
+    
+    public var messageSubtype: String? {
+        raw.message.messageSubtype
+    }
+    
+    public var sentDate: Date? {
+        raw.message.sentDate
+    }
+    
+    public var destructionTimer: TimeInterval? {
+        raw.message.destructionTimer
+    }
+    
+    public var sender: Username {
+        raw.senderUser
+    }
+    
+    public func remove() async throws {
+        try await messenger.cachedStore.removeChatMessage(raw.encrypted)
+        messenger.eventHandler.onRemoveChatMessage(self)
     }
 }

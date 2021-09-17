@@ -2,96 +2,98 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
+@available(macOS 12, iOS 15, *)
 final class ChatActivityPluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
     }
     
-    func testPrivateChat() throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
-        let m0 = try CypherMessenger.registerMessenger(
+    func testPrivateChat() async throws {
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
         XCTAssertNil(m0Chat.lastActivity)
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         XCTAssertNotNil(m0Chat.lastActivity)
         
-        sleep(3)
         
-        let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
+        try await sync.synchronise()
+        
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
         XCTAssertNotNil(m1Chat.lastActivity)
     }
     
-    func testGroupChat() throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
-        let m0 = try CypherMessenger.registerMessenger(
+    func testGroupChat() async throws {
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 ChatActivityPlugin()
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m0Chat = try m0.createGroupChat(with: ["m1"]).wait()
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
+        let m0Chat = try await m0.createGroupChat(with: ["m1"])
         XCTAssertNil(m0Chat.lastActivity)
         
-        _ = try m0Chat.sendRawMessage(
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .ascending).count, 1)
         XCTAssertNotNil(m0Chat.lastActivity)
         
-        sleep(3)
+        try await sync.synchronise()
         
-        let m1Chat = try m1.getGroupChat(byId: m0Chat.groupId).wait()!
-        XCTAssertNotNil(m1Chat.lastActivity)
+        if let m1Chat = try await m1.getGroupChat(byId: m0Chat.getGroupId()) {
+            await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .ascending).count, 1)
+            XCTAssertNotNil(m1Chat.lastActivity)
+        } else {
+            XCTFail()
+        }
     }
 }

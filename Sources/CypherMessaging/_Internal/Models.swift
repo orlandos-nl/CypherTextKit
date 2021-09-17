@@ -4,15 +4,10 @@ import Foundation
 import CypherProtocol
 
 public final class ConversationModel: Model {
-    public struct SecureProps: Codable {
+    public struct SecureProps: Codable, MetadataProps {
         public var members: Set<Username>
         public var metadata: Document
         public var localOrder: Int
-        
-        mutating func getNextLocalOrder() -> Int {
-            defer { localOrder += 1 }
-            return localOrder
-        }
     }
     
     public let id: UUID
@@ -33,6 +28,24 @@ public final class ConversationModel: Model {
     }
 }
 
+extension DecryptedModel where M == ConversationModel {
+    public var members: Set<Username> {
+        get { props.members }
+    }
+    public var metadata: Document {
+        get { props.metadata }
+    }
+    public var localOrder: Int {
+        get { props.localOrder }
+    }
+    
+    func getNextLocalOrder() async throws -> Int {
+        let order = localOrder
+        try await setProp(at: \.localOrder, to: order &+ 1)
+        return order
+   }
+}
+
 public final class DeviceIdentityModel: Model {
     public struct SecureProps: Codable {
         let username: Username
@@ -40,6 +53,7 @@ public final class DeviceIdentityModel: Model {
         let senderId: Int
         let publicKey: PublicKey
         let identity: PublicSigningKey
+        let isMasterDevice: Bool
         var doubleRatchet: DoubleRatchetHKDF<SHA512>.State?
     }
     
@@ -61,8 +75,35 @@ public final class DeviceIdentityModel: Model {
     }
 }
 
+extension DecryptedModel where M == DeviceIdentityModel {
+    public var username: Username {
+        get { props.username }
+    }
+    public var deviceId: DeviceId {
+        get { props.deviceId }
+    }
+    public var isMasterDevice: Bool {
+        get { props.isMasterDevice }
+    }
+    public var senderId: Int {
+        get { props.senderId }
+    }
+    public var publicKey: PublicKey {
+        get { props.publicKey }
+    }
+    public var identity: PublicSigningKey {
+        get { props.identity }
+    }
+    public var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
+        get { props.doubleRatchet }
+    }
+    func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) async throws {
+        try await setProp(at: \.doubleRatchet, to: newValue)
+    }
+}
+
 public final class ContactModel: Model {
-    public struct SecureProps: Codable {
+    public struct SecureProps: Codable, MetadataProps {
         public let username: Username
         public internal(set) var config: UserConfig
         public var metadata: Document
@@ -86,10 +127,26 @@ public final class ContactModel: Model {
     }
 }
 
+extension DecryptedModel where M == ContactModel {
+    public var username: Username {
+        get { props.username }
+    }
+    public var config: UserConfig {
+        get { props.config }
+    }
+    public var metadata: Document {
+        get { props.metadata }
+    }
+    func updateConfig(to newValue: UserConfig) async throws {
+        try await self.setProp(at: \.config, to: newValue)
+    }
+}
+
 public enum MarkMessageResult {
     case success, error, notModified
 }
 
+@available(macOS 12, iOS 15, *)
 public final class ChatMessageModel: Model {
     public enum DeliveryState: Int, Codable {
         case none = 0
@@ -202,6 +259,36 @@ public final class ChatMessageModel: Model {
     }
 }
 
+extension DecryptedModel where M == ChatMessageModel {
+    public var sendDate: Date {
+        get { props.sendDate }
+    }
+    public var receiveDate: Date {
+        get { props.receiveDate }
+    }
+    public var deliveryState: ChatMessageModel.DeliveryState {
+        get { props.deliveryState }
+    }
+    public var message: SingleCypherMessage {
+        get { props.message }
+    }
+    public var senderUser: Username {
+        get { props.senderUser }
+    }
+    public var senderDeviceId: DeviceId {
+        get { props.senderDeviceId }
+    }
+    
+    @discardableResult
+    func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
+        var state = self.deliveryState
+        let result = state.transition(to: newState)
+        try await setProp(at: \.deliveryState, to: state)
+        return result
+    }
+}
+
+@available(macOS 12, iOS 15, *)
 public final class JobModel: Model {
     public struct SecureProps: Codable {
         private enum CodingKeys: String, CodingKey {
@@ -220,7 +307,7 @@ public final class JobModel: Model {
         var attempts: Int
         let isBackgroundTask: Bool
         
-        init<T: Task>(task: T) throws {
+        init<T: StoredTask>(task: T) throws {
             self.taskKey = task.key.rawValue
             self.isBackgroundTask = task.isBackgroundTask
             self.task = try BSONEncoder().encode(task)
@@ -241,5 +328,30 @@ public final class JobModel: Model {
     internal init(props: SecureProps, encryptionKey: SymmetricKey) throws {
         self.id = UUID()
         self.props = try Encrypted(props, encryptionKey: encryptionKey)
+    }
+}
+
+extension DecryptedModel where M == JobModel {
+    public var taskKey: String {
+        get { props.taskKey }
+    }
+    public var task: Document {
+        get { props.task }
+    }
+    public var delayedUntil: Date? {
+        get { props.delayedUntil }
+    }
+    public var scheduledAt: Date {
+        get { props.scheduledAt }
+    }
+    public var attempts: Int {
+        get { props.attempts }
+    }
+    public var isBackgroundTask: Bool {
+        get { props.isBackgroundTask }
+    }
+    func delayExecution(retryDelay: TimeInterval) async throws {
+        try await setProp(at: \.delayedUntil, to: Date().addingTimeInterval(retryDelay))
+        try await setProp(at: \.attempts, to: self.attempts + 1)
     }
 }

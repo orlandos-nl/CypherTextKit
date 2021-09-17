@@ -3,167 +3,154 @@ import BSON
 import Foundation
 import NIO
 
+@available(macOS 12, iOS 15, *)
 extension CypherMessenger {
-    public func getConversation(byId id: UUID) -> EventLoopFuture<TargetConversation.Resolved?> {
-        cachedStore.fetchConversations().map { conversations in
-            for conversation in conversations {
-                let conversation = self.decrypt(conversation)
-                
-                if conversation.id == id {
-                    return TargetConversation.Resolved(
-                        conversation: conversation,
-                        messenger: self
-                    )
-                }
-            }
+    public func getConversation(byId id: UUID) async throws -> TargetConversation.Resolved? {
+        let conversations = try await cachedStore.fetchConversations()
+        for conversation in conversations {
+            let conversation = try await self.decrypt(conversation)
             
-            return nil
-        }
-    }
-    
-    public func getInternalConversation() -> EventLoopFuture<InternalConversation> {
-        cachedStore.fetchConversations().flatMap { conversations in
-            for conversation in conversations {
-                let conversation = self.decrypt(conversation)
-                
-                if conversation.members == [self.username] {
-                    let internalChat = InternalConversation(conversation: conversation, messenger: self)
-                    return self.eventLoop.makeSucceededFuture(internalChat)
-                }
-            }
-            
-            return self._createConversation(
-                members: [self.username],
-                metadata: [:]
-            ).map { conversation in
-                InternalConversation(
-                    conversation: self.decrypt(conversation),
-                    messenger: self
-                )
-            }
-        }
-    }
-    
-    internal func _openGroupChat(byId id: GroupChatId) -> EventLoopFuture<GroupChat> {
-        getGroupChat(byId: id).flatMap { groupChat in
-            if let groupChat = groupChat {
-                return self.eventLoop.makeSucceededFuture(groupChat)
-            }
-            
-            return self.transport.readPublishedBlob(
-                byId: id.raw,
-                as: Signed<GroupChatConfig>.self
-            ).flatMap { config in
-                guard let config = config else {
-                    return self.eventLoop.makeFailedFuture(CypherSDKError.unknownGroup)
-                }
-                
-                do {
-                    let groupConfig = try config.blob.readWithoutVerifying()
-                    
-                    return self._fetchDeviceIdentities(for: groupConfig.admin).flatMap { devices in
-                        for device in devices {
-                            if config.blob.isSigned(by: device.props.identity) {
-                                do {
-                                    let config = ReferencedBlob(id: config.id, blob: groupConfig)
-                                    let groupMetadata = GroupMetadata(
-                                        custom: [:],
-                                        config: config
-                                    )
-                                    let conversation = try ConversationModel(
-                                        props: .init(
-                                            members: groupConfig.members,
-                                            metadata: BSONEncoder().encode(groupMetadata),
-                                            localOrder: 0
-                                        ),
-                                        encryptionKey: self.databaseEncryptionKey
-                                    )
-                                    
-                                    return self.cachedStore.createConversation(conversation).map {
-                                        GroupChat(
-                                            conversation: self.decrypt(conversation),
-                                            messenger: self,
-                                            metadata: groupMetadata
-                                        )
-                                    }
-                                } catch {
-                                    return self.eventLoop.makeFailedFuture(error)
-                                }
-                            }
-                        }
-                        
-                        return self.eventLoop.makeFailedFuture(CypherSDKError.invalidGroupConfig)
-                    }
-                } catch {
-                    return self.eventLoop.makeFailedFuture(error)
-                }
-            }
-        }
-    }
-    
-    public func getGroupChat(byId id: GroupChatId) -> EventLoopFuture<GroupChat?> {
-        cachedStore.fetchConversations().flatMapThrowing { conversations in
-            nextConversation: for conversation in conversations {
-                let conversation = self.decrypt(conversation)
-                guard
-                    conversation.members.count >= 2,
-                    conversation.members.contains(self.username)
-                else {
-                    continue nextConversation
-                }
-                
-                do {
-                    let groupMetadata = try BSONDecoder().decode(
-                        GroupMetadata.self,
-                        from: conversation.metadata
-                    )
-                    
-                    if GroupChatId(groupMetadata.config.id) != id {
-                        continue nextConversation
-                    }
-                    
-                    return GroupChat(
-                        conversation: conversation,
-                        messenger: self,
-                        metadata: groupMetadata
-                    )
-                } catch {
-                    continue nextConversation
-                }
-            }
-            
-            return nil
-        }
-    }
-    
-    public func getPrivateChat(with otherUser: Username) -> EventLoopFuture<PrivateChat?> {
-        cachedStore.fetchConversations().map { conversations in
-            nextConversation: for conversation in conversations {
-                let conversation = self.decrypt(conversation)
-                
-                if
-                    conversation.members.count != 2
-                        || !conversation.members.contains(self.username)
-                        || !conversation.members.contains(otherUser)
-                {
-                    continue nextConversation
-                }
-
-                return PrivateChat(
+            if conversation.id == id {
+                return await TargetConversation.Resolved(
                     conversation: conversation,
                     messenger: self
                 )
             }
-            
-            return nil
         }
+        
+        return nil
+    }
+    
+    public func getInternalConversation() async throws -> InternalConversation {
+        let conversations = try await cachedStore.fetchConversations()
+        for conversation in conversations {
+            let conversation = try await self.decrypt(conversation)
+            
+            if conversation.members == [self.username] {
+                return InternalConversation(conversation: conversation, messenger: self)
+            }
+        }
+        
+        let conversation = try await self._createConversation(
+            members: [self.username],
+            metadata: [:]
+        )
+        
+        return InternalConversation(
+            conversation: try await self.decrypt(conversation),
+            messenger: self
+        )
+    }
+    
+    internal func _openGroupChat(byId id: GroupChatId) async throws -> GroupChat {
+        if let groupChat = try await getGroupChat(byId: id) {
+            return groupChat
+        }
+        
+        let config = try await self.transport.readPublishedBlob(
+            byId: id.raw,
+            as: Signed<GroupChatConfig>.self
+        )
+    
+        guard let config = config else {
+            throw CypherSDKError.unknownGroup
+        }
+        
+        let groupConfig = try config.blob.readWithoutVerifying()
+        
+        let devices = try await self._fetchDeviceIdentities(for: groupConfig.admin)
+        for device in devices {
+            if config.blob.isSigned(by: device.props.identity) {
+                let config = ReferencedBlob(id: config.id, blob: groupConfig)
+                let groupMetadata = GroupMetadata(
+                    custom: [:],
+                    config: config
+                )
+                let conversation = try ConversationModel(
+                    props: .init(
+                        members: groupConfig.members,
+                        metadata: BSONEncoder().encode(groupMetadata),
+                        localOrder: 0
+                    ),
+                    encryptionKey: self.databaseEncryptionKey
+                )
+                
+                try await self.cachedStore.createConversation(conversation)
+                let chat = GroupChat(
+                    conversation: try await self.decrypt(conversation),
+                    messenger: self,
+                    metadata: groupMetadata
+                )
+                self.eventHandler.onCreateConversation(chat)
+                return chat
+            }
+        }
+            
+        throw CypherSDKError.invalidGroupConfig
+    }
+    
+    public func getGroupChat(byId id: GroupChatId) async throws -> GroupChat? {
+        let conversations = try await cachedStore.fetchConversations()
+        nextConversation: for conversation in conversations {
+            let conversation = try await self.decrypt(conversation)
+            guard
+                conversation.members.count >= 2,
+                conversation.members.contains(self.username)
+            else {
+                continue nextConversation
+            }
+            
+            do {
+                let groupMetadata = try BSONDecoder().decode(
+                    GroupMetadata.self,
+                    from: conversation.metadata
+                )
+                
+                if GroupChatId(groupMetadata.config.id) != id {
+                    continue nextConversation
+                }
+                
+                return GroupChat(
+                    conversation: conversation,
+                    messenger: self,
+                    metadata: groupMetadata
+                )
+            } catch {
+                continue nextConversation
+            }
+        }
+        
+        return nil
+    }
+    
+    public func getPrivateChat(with otherUser: Username) async throws -> PrivateChat? {
+        let conversations = try await cachedStore.fetchConversations()
+        nextConversation: for conversation in conversations {
+            let conversation = try await self.decrypt(conversation)
+            let members = conversation.members
+            
+            if
+                members.count != 2
+                    || !members.contains(self.username)
+                    || !members.contains(otherUser)
+            {
+                continue nextConversation
+            }
+
+            return PrivateChat(
+                conversation: conversation,
+                messenger: self
+            )
+        }
+        
+        return nil
     }
     
     public func createGroupChat(
         with users: Set<Username>,
         localMetadata: Document = [:],
         sharedMetadata: Document = [:]
-    ) -> EventLoopFuture<GroupChat> {
+    ) async throws -> GroupChat {
         var members = users
         members.insert(username)
         let config = GroupChatConfig(
@@ -173,156 +160,140 @@ extension CypherMessenger {
             metadata: sharedMetadata
         )
         
-        do {
-            return try self.transport.publishBlob(
-                self.sign(config)
-            ).flatMapThrowing { referencedBlob in
-                let metadata = GroupMetadata(
-                    custom: localMetadata,
-                    config: ReferencedBlob(
-                        id: referencedBlob.id,
-                        blob: config
-                    )
-                )
-            
-                let metadataDocument = try BSONEncoder().encode(metadata)
-                
-                return (metadata, metadataDocument)
-            }.flatMap { (metadata, metadataDocument) in
-                return self._createConversation(
-                    members: members,
-                    metadata: metadataDocument
-                ).map { conversation in
-                    GroupChat(
-                        conversation: self.decrypt(conversation),
-                        messenger: self,
-                        metadata: metadata
-                    )
-                }.flatMap { chat in
-                    chat.sendRawMessage(
-                        type: .magic,
-                        messageSubtype: "_/notification",
-                        text: "",
-                        preferredPushType: .none
-                    ).map { _ in
-                        chat
-                    }
-                }
-            }
-            
-        } catch {
-            return eventLoop.makeFailedFuture(error)
-        }
+        let referencedBlob = try await self.transport.publishBlob(self.sign(config))
+        let metadata = GroupMetadata(
+            custom: localMetadata,
+            config: ReferencedBlob(
+                id: referencedBlob.id,
+                blob: config
+            )
+        )
+    
+        let metadataDocument = try BSONEncoder().encode(metadata)
+        
+        let conversation = try await self._createConversation(
+            members: members,
+            metadata: metadataDocument
+        )
+        
+        let chat = GroupChat(
+            conversation: try await self.decrypt(conversation),
+            messenger: self,
+            metadata: metadata
+        )
+        
+        try await chat.sendRawMessage(
+            type: .magic,
+            messageSubtype: "_/ignore",
+            text: "",
+            preferredPushType: .none
+        )
+        return chat
     }
     
-    public func createPrivateChat(with otherUser: Username) -> EventLoopFuture<PrivateChat> {
+    public func createPrivateChat(with otherUser: Username) async throws -> PrivateChat {
         guard otherUser != self.username else {
-            return eventLoop.makeFailedFuture(CypherSDKError.badInput)
+            throw CypherSDKError.badInput
         }
         
-        return self.getPrivateChat(with: otherUser).flatMap { conversation -> EventLoopFuture<PrivateChat> in
-            if let conversation = conversation {
-                return self.eventLoop.makeSucceededFuture(conversation)
-            } else {
-                return self.eventHandler.createPrivateChatMetadata(
-                    withUser: otherUser,
-                    messenger: self
-                ).flatMap { metadata in
-                    self._createConversation(
-                        members: [otherUser],
-                        metadata: metadata
-                    )
-                }.map { conversation in
-                    PrivateChat(
-                        conversation: self.decrypt(conversation),
-                        messenger: self
-                    )
-                }
+        if let conversation = try await self.getPrivateChat(with: otherUser) {
+            return conversation
+        } else {
+            let metadata = try await self.eventHandler.createPrivateChatMetadata(
+                withUser: otherUser,
+                messenger: self
+            )
+            
+            let conversation = try await self._createConversation(
+                members: [otherUser],
+                metadata: metadata
+            )
+            
+            return PrivateChat(
+                conversation: try await self.decrypt(conversation),
+                messenger: self
+            )
+        }
+    }
+    
+    public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) async throws -> [PrivateChat] {
+        let conversations = try await cachedStore.fetchConversations()
+        return try await conversations.asyncCompactMap { conversation -> PrivateChat? in
+            let conversation = try await self.decrypt(conversation)
+            let members = conversation.members
+            guard
+                members.contains(self.username),
+                members.count == 2,
+                conversation.metadata["_type"] as? String != "group"
+            else {
+                return nil
             }
-        }
+            
+            return PrivateChat(conversation: conversation, messenger: self)
+        }.sorted(by: increasingOrder)
     }
     
-    public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) -> EventLoopFuture<[PrivateChat]> {
-        cachedStore.fetchConversations().flatMapThrowing { conversations in
-            return try conversations.compactMap { conversation -> PrivateChat? in
-                let conversation = self.decrypt(conversation)
-                guard
-                    conversation.members.contains(self.username),
-                    conversation.members.count == 2,
-                    conversation.metadata["_type"] as? String != "group"
-                else {
-                    return nil
-                }
+    public func listGroupChats(increasingOrder: @escaping (GroupChat, GroupChat) throws -> Bool) async throws -> [GroupChat] {
+        let conversations = try await cachedStore.fetchConversations()
+        return try await conversations.asyncCompactMap { conversation -> GroupChat? in
+            let conversation = try await self.decrypt(conversation)
+            let members = conversation.members
+            
+            guard
+                members.contains(self.username),
+                members.count >= 2,
+                conversation.metadata["_type"] as? String == "group"
+            else {
+                return nil
+            }
+            
+            do {
+                let groupMetadata = try BSONDecoder().decode(
+                    GroupMetadata.self,
+                    from: conversation.metadata
+                )
                 
-                return PrivateChat(conversation: conversation, messenger: self)
-            }.sorted(by: increasingOrder)
-        }
-    }
-    
-    public func listGroupChats(increasingOrder: @escaping (GroupChat, GroupChat) throws -> Bool) -> EventLoopFuture<[GroupChat]> {
-        cachedStore.fetchConversations().flatMapThrowing { conversations in
-            return try conversations.compactMap { conversation -> GroupChat? in
-                let conversation = self.decrypt(conversation)
-                
-                guard
-                    conversation.members.contains(self.username),
-                    conversation.members.count >= 2,
-                    conversation.metadata["_type"] as? String == "group"
-                else {
-                    return nil
-                }
-                
-                do {
-                    let groupMetadata = try BSONDecoder().decode(
-                        GroupMetadata.self,
-                        from: conversation.metadata
-                    )
-                    
-                    return GroupChat(conversation: conversation, messenger: self, metadata: groupMetadata)
-                } catch {
-                    return nil
-                }
-            }.sorted(by: increasingOrder)
-        }
+                return GroupChat(conversation: conversation, messenger: self, metadata: groupMetadata)
+            } catch {
+                return nil
+            }
+        }.sorted(by: increasingOrder)
     }
     
     public func listConversations(
         includingInternalConversation: Bool,
         increasingOrder: @escaping (TargetConversation.Resolved, TargetConversation.Resolved) throws -> Bool
-    ) -> EventLoopFuture<[TargetConversation.Resolved]> {
-        cachedStore.fetchConversations().flatMapThrowing { conversations in
-            return try conversations.compactMap { conversation -> TargetConversation.Resolved? in
-                let conversation = self.decrypt(conversation)
-                let resolved = TargetConversation.Resolved(conversation: conversation, messenger: self)
-                
-                if !includingInternalConversation, case .internalChat = resolved {
-                    return nil
-                }
-                
-                return resolved
-            }.sorted(by: increasingOrder)
-        }
+    ) async throws -> [TargetConversation.Resolved] {
+        let conversations = try await cachedStore.fetchConversations()
+        
+        return try await conversations.asyncCompactMap { conversation -> TargetConversation.Resolved? in
+            let conversation = try await self.decrypt(conversation)
+            let resolved = await TargetConversation.Resolved(conversation: conversation, messenger: self)
+            
+            if !includingInternalConversation, case .internalChat = resolved {
+                return nil
+            }
+            
+            return resolved
+        }.sorted(by: increasingOrder)
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public protocol AnyConversation {
     var conversation: DecryptedModel<ConversationModel> { get }
     var messenger: CypherMessenger { get }
-    var target: TargetConversation { get }
     var cache: Cache { get }
-    var resolvedTarget: TargetConversation.Resolved { get }
+    
+    func getTarget() async -> TargetConversation
+    func resolveTarget() async -> TargetConversation.Resolved
 }
 
+@available(macOS 12, iOS 15, *)
 extension AnyConversation {
-    public func listOpenP2PConnections() -> EventLoopFuture<[P2PClient]> {
-        return self.memberDevices().flatMap { devices in
-            let connections = devices.map { device in
-                return self.messenger.getEstablishedP2PConnection(with: device)
-            }
-            
-            return EventLoopFuture.whenAllSucceed(connections, on: self.messenger.eventLoop).map { connections in
-                return connections.compactMap { $0 }
-            }
+    public func listOpenP2PConnections() async throws -> [P2PClient] {
+        try await self.memberDevices().asyncCompactMap { device in
+            try await self.messenger.getEstablishedP2PConnection(with: device)
         }
     }
     
@@ -333,37 +304,33 @@ extension AnyConversation {
     /// Doing so will improve your connection performance and security
     public func buildP2PConnections(
         preferredTransportIdentifier: String? = nil
-    ) -> EventLoopFuture<Void> {
-        return self.memberDevices().flatMap { devices in
-            let created = devices.map { device in
-                return self.messenger.createP2PConnection(
-                    with: device,
-                    targetConversation: self.target,
-                    preferredTransportIdentifier: preferredTransportIdentifier
-                )
-            }
-            
-            return EventLoopFuture.andAllSucceed(created, on: self.messenger.eventLoop)
+    ) async throws {
+        for device in try await self.memberDevices() {
+            try await self.messenger.createP2PConnection(
+                with: device,
+                targetConversation: self.getTarget(),
+                preferredTransportIdentifier: preferredTransportIdentifier
+            )
         }
     }
     
     // TODO: This _could_ be cached
-    internal func memberDevices() -> EventLoopFuture<[DecryptedModel<DeviceIdentityModel>]> {
-        messenger._fetchDeviceIdentities(forUsers: conversation.members)
+    internal func memberDevices() async throws -> [DecryptedModel<DeviceIdentityModel>] {
+        try await messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
     
-    public func save() -> EventLoopFuture<Void> {
-        messenger.cachedStore.updateConversation(conversation.encrypted)
+    public func save() async throws {
+        try await messenger.cachedStore.updateConversation(conversation.encrypted)
+        messenger.eventHandler.onUpdateConversation(self)
     }
     
-    private func getNextLocalOrder() -> EventLoopFuture<Int> {
-        let order = conversation.props.getNextLocalOrder()
-        return messenger.cachedStore.updateConversation(conversation.encrypted).map {
-            order
-        }
+    private func getNextLocalOrder() async throws -> Int {
+        let order = try await conversation.getNextLocalOrder()
+        try await messenger.cachedStore.updateConversation(conversation.encrypted)
+        return order
     }
     
-    public func sendRawMessage(
+    @JobQueueActor public func sendRawMessage(
         type: CypherMessageType,
         messageSubtype: String? = nil,
         text: String,
@@ -371,24 +338,56 @@ extension AnyConversation {
         destructionTimer: TimeInterval? = nil,
         sentDate: Date = Date(),
         preferredPushType: PushType
-    ) -> EventLoopFuture<AnyChatMessage?> {
-        getNextLocalOrder().flatMap { order in
-            self._sendMessage(
-                SingleCypherMessage(
-                    messageType: type,
-                    messageSubtype: messageSubtype,
-                    text: text,
-                    metadata: metadata,
-                    destructionTimer: destructionTimer,
-                    sentDate: sentDate,
-                    preferredPushType: preferredPushType,
-                    order: order,
-                    target: target
-                ),
-                to: conversation.members,
-                pushType: preferredPushType
+    ) async throws -> AnyChatMessage? {
+        let order = try await getNextLocalOrder()
+        return try await self._sendMessage(
+            SingleCypherMessage(
+                messageType: type,
+                messageSubtype: messageSubtype,
+                text: text,
+                metadata: metadata,
+                destructionTimer: destructionTimer,
+                sentDate: sentDate,
+                preferredPushType: preferredPushType,
+                order: order,
+                target: getTarget()
+            ),
+            to: conversation.members,
+            pushType: preferredPushType
+        )
+    }
+    
+    @discardableResult
+    public func saveLocalMessage(
+        type: CypherMessageType,
+        messageSubtype: String? = nil,
+        text: String,
+        metadata: Document = [:],
+        destructionTimer: TimeInterval? = nil,
+        sentDate: Date = Date()
+    ) async throws -> DecryptedModel<ChatMessageModel> {
+        let order = try await getNextLocalOrder()
+        let message = await SingleCypherMessage(
+            messageType: type,
+            messageSubtype: messageSubtype,
+            text: text,
+            metadata: metadata,
+            destructionTimer: destructionTimer,
+            sentDate: sentDate,
+            preferredPushType: .some(.none),
+            order: order,
+            target: getTarget()
+        )
+        
+        return try await _saveMessage(
+            senderId: messenger.deviceIdentityId,
+            order: order,
+            props: .init(
+                sending: message,
+                senderUser: self.messenger.username,
+                senderDeviceId: self.messenger.deviceId
             )
-        }
+        )
     }
     
     internal func _saveMessage(
@@ -396,181 +395,163 @@ extension AnyConversation {
         order: Int,
         props: ChatMessageModel.SecureProps,
         remoteId: String = UUID().uuidString
-    ) -> EventLoopFuture<DecryptedModel<ChatMessageModel>> {
-        do {
-            let chatMessage = try ChatMessageModel(
-                conversationId: conversation.id,
-                senderId: senderId,
-                order: order,
-                remoteId: remoteId,
-                props: props,
-                encryptionKey: messenger.databaseEncryptionKey
+    ) async throws -> DecryptedModel<ChatMessageModel> {
+        let chatMessage = try ChatMessageModel(
+            conversationId: conversation.id,
+            senderId: senderId,
+            order: order,
+            remoteId: remoteId,
+            props: props,
+            encryptionKey: messenger.databaseEncryptionKey
+        )
+        
+        try await messenger.cachedStore.createChatMessage(chatMessage)
+        let message = try await self.messenger.decrypt(chatMessage)
+        
+        await self.messenger.eventHandler.onCreateChatMessage(
+            AnyChatMessage(
+                target: self.getTarget(),
+                messenger: self.messenger,
+                raw: message
             )
-            
-            return messenger.cachedStore.createChatMessage(chatMessage).map {
-                let message = self.messenger.decrypt(chatMessage)
-                
-                self.messenger.eventHandler.onCreateChatMessage(
-                    AnyChatMessage(
-                        target: self.target,
-                        messenger: self.messenger,
-                        raw: message
-                    )
-                )
-                
-                return message
-            }
-        } catch {
-            return messenger.eventLoop.makeFailedFuture(error)
-        }
+        )
+        
+        return message
     }
     
     internal func _sendMessage(
         _ message: SingleCypherMessage,
         to recipients: Set<Username>,
         pushType: PushType
-    ) -> EventLoopFuture<AnyChatMessage?> {
-        messenger.eventHandler.onSendMessage(
+    ) async throws -> AnyChatMessage? {
+        let action = try await messenger.eventHandler.onSendMessage(
             SentMessageContext(
                 recipients: recipients,
                 messenger: messenger,
                 message: message,
-                conversation: resolvedTarget
+                conversation: resolveTarget()
             )
-        ).flatMap { action in
-            switch action.raw {
-            case .send:
-                return messenger.eventLoop.makeSucceededFuture(nil)
-            case .saveAndSend:
-                return getNextLocalOrder().flatMap { order in
-                    _saveMessage(
-                        senderId: messenger.deviceIdentityId,
-                        order: order,
-                        props: .init(
-                            sending: message,
-                            senderUser: self.messenger.username,
-                            senderDeviceId: self.messenger.deviceId
-                        )
-                    ).map { $0 }
-                }
-            }
-        }.flatMap { (chatMessage: DecryptedModel<ChatMessageModel>?) in
-            messenger._queueTask(
-                .sendMultiRecipientMessage(
-                    SendMultiRecipientMessageTask(
-                        message: CypherMessage(message: message),
-                        // We _always_ attach a messageID so the protocol doesn't give away
-                        // The precense of magic packets
-                        messageId: chatMessage?.encrypted.remoteId ?? UUID().uuidString,
-                        recipients: recipients,
-                        localId: chatMessage?.id,
-                        pushType: pushType
-                    )
+        )
+        
+        var remoteId = UUID().uuidString
+        var localId: UUID?
+        var _chatMessage: DecryptedModel<ChatMessageModel>?
+        
+        switch action.raw {
+        case .send:
+            ()
+        case .saveAndSend:
+            let chatMessage = try await _saveMessage(
+                senderId: messenger.deviceIdentityId,
+                order: message.order,
+                props: .init(
+                    sending: message,
+                    senderUser: self.messenger.username,
+                    senderDeviceId: self.messenger.deviceId
                 )
-            ).flatMap {
-                messenger.cachedStore.updateConversation(conversation.encrypted)
-            }.map { () -> AnyChatMessage? in
-                if let chatMessage = chatMessage {
-                    return AnyChatMessage(
-                        target: self.target,
-                        messenger: messenger,
-                        raw: chatMessage
-                    )
-                } else {
-                    return nil
-                }
-            }
-        }
-    }
-    
-    internal func _writeMessage(
-        _ message: SingleCypherMessage,
-        to recipients: Set<Username>
-    ) -> EventLoopFuture<Void> {
-        let allMessagesQueues = recipients.map { recipient -> EventLoopFuture<Void> in
-            messenger._fetchDeviceIdentities(for: recipient).flatMap { devices in
-                let recipientMessagesQueued = devices.map { device in
-                    messenger._queueTask(
-                        .sendMessage(
-                            SendMessageTask(
-                                message: CypherMessage(message: message),
-                                recipient: recipient,
-                                recipientDeviceId: device.props.deviceId,
-                                localId: nil,
-                                messageId: ""
-                            )
-                        )
-                    )
-                }
-                
-                return EventLoopFuture.andAllSucceed(recipientMessagesQueued, on: self.messenger.eventLoop)
-            }
+            )
+            remoteId = chatMessage.encrypted.remoteId
+            localId = chatMessage.id
+            _chatMessage = chatMessage
         }
         
-        return EventLoopFuture.andAllSucceed(allMessagesQueues, on: self.messenger.eventLoop)
-    }
-    
-    public func message(byRemoteId remoteId: String) -> EventLoopFuture<AnyChatMessage> {
-        self.messenger.cachedStore.fetchChatMessage(byRemoteId: remoteId).map { message in
-            AnyChatMessage(
-                target: self.target,
-                messenger: self.messenger,
-                raw: self.messenger.decrypt(message)
+        try await messenger._queueTask(
+            .sendMultiRecipientMessage(
+                SendMultiRecipientMessageTask(
+                    message: CypherMessage(message: message),
+                    // We _always_ attach a messageID so the protocol doesn't give away
+                    // The precense of magic packets
+                    messageId: remoteId,
+                    recipients: recipients,
+                    localId: localId,
+                    pushType: pushType
+                )
             )
-        }
-    }
-    
-    public func message(byLocalId id: UUID) -> EventLoopFuture<AnyChatMessage> {
-        self.messenger.cachedStore.fetchChatMessage(byId: id).map { message in
-            AnyChatMessage(
-                target: self.target,
-                messenger: self.messenger,
-                raw: self.messenger.decrypt(message)
+        )
+        
+        try await messenger.cachedStore.updateConversation(conversation.encrypted)
+        
+        if let chatMessage = _chatMessage {
+            return await AnyChatMessage(
+                target: self.getTarget(),
+                messenger: messenger,
+                raw: chatMessage
             )
+        } else {
+            return nil
         }
     }
     
-    public func allMessages(sortedBy sortMode: SortMode) -> EventLoopFuture<[AnyChatMessage]> {
-        return cursor(sortedBy: sortMode).flatMap { cursor in
-            cursor.getMore(.max)
-        }
+    public func message(byRemoteId remoteId: String) async throws -> AnyChatMessage {
+        let message = try await self.messenger.cachedStore.fetchChatMessage(byRemoteId: remoteId)
+        
+        return await AnyChatMessage(
+            target: self.getTarget(),
+            messenger: self.messenger,
+            raw: try await self.messenger.decrypt(message)
+        )
     }
     
-    public func cursor(sortedBy sortMode: SortMode) -> EventLoopFuture<AnyChatMessageCursor> {
-        AnyChatMessageCursor.readingConversation(self)
+    public func message(byLocalId id: UUID) async throws -> AnyChatMessage {
+        let message = try await self.messenger.cachedStore.fetchChatMessage(byId: id)
+        
+        return await AnyChatMessage(
+            target: self.getTarget(),
+            messenger: self.messenger,
+            raw: try await self.messenger.decrypt(message)
+        )
+    }
+    
+    public func allMessages(sortedBy sortMode: SortMode) async throws -> [AnyChatMessage] {
+        let cursor = try await cursor(sortedBy: sortMode)
+        return try await cursor.getMore(.max)
+    }
+    
+    public func cursor(sortedBy sortMode: SortMode) async throws -> AnyChatMessageCursor {
+        try await AnyChatMessageCursor.readingConversation(self)
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public struct InternalConversation: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    public let target = TargetConversation.currentUser
     public let cache = Cache()
-    public var resolvedTarget: TargetConversation.Resolved {
+    
+    public func getTarget() async -> TargetConversation {
+        return .currentUser
+    }
+    
+    public func resolveTarget() async -> TargetConversation.Resolved {
         .internalChat(self)
     }
     
-    public func sendInternalMessage(_ message: SingleCypherMessage) -> EventLoopFuture<Void> {
-        self._writeMessage(message, to: [messenger.username])
+    public func sendInternalMessage(_ message: SingleCypherMessage) async throws {
+        // Refresh device identities
+        // TODO: Rate limit
+        _ = try await self.messenger._fetchDeviceIdentities(for: messenger.username)
+        try await messenger._writeMessage(message, to: messenger.username)
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public struct GroupChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    public var metadata: GroupMetadata
+    internal var metadata: GroupMetadata
     public let cache = Cache()
-    public var groupConfig: ReferencedBlob<GroupChatConfig> {
+    public func getGroupConfig() async -> ReferencedBlob<GroupChatConfig> {
         metadata.config
     }
-    public var target: TargetConversation {
-        return .groupChat(groupId)
-    }
-    public var groupId: GroupChatId {
-        GroupChatId(groupConfig.id)
+    public func getGroupId() async -> GroupChatId {
+        await GroupChatId(getGroupConfig().id)
     }
     
-    public var resolvedTarget: TargetConversation.Resolved {
+    public func getTarget() async -> TargetConversation {
+        await .groupChat(getGroupId())
+    }
+    
+    public func resolveTarget() async -> TargetConversation.Resolved {
         .groupChat(self)
     }
 }
@@ -581,14 +562,17 @@ public struct GroupMetadata: Codable {
     public internal(set) var config: ReferencedBlob<GroupChatConfig>
 }
 
+@available(macOS 12, iOS 15, *)
 public struct PrivateChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
     public let cache = Cache()
-    public var target: TargetConversation {
+    
+    public func getTarget() -> TargetConversation {
         .otherUser(conversationPartner)
     }
-    public var resolvedTarget: TargetConversation.Resolved {
+    
+    public func resolveTarget() -> TargetConversation.Resolved {
         .privateChat(self)
     }
     

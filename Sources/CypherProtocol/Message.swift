@@ -2,6 +2,9 @@ import BSON
 import Foundation
 import Crypto
 
+/// A container representing signed and encrypted data.
+///
+/// This container is used to store the message sent in a `MultiRecipientCypherMessage`.
 public struct MultiRecipientContainer: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -11,6 +14,7 @@ public struct MultiRecipientContainer: Codable {
     let message: Data
     let signature: Data
     
+    /// Decrypts  the message and verifies it's signature
     public func readAndValidateData(
         usingIdentity identity: PublicSigningKey,
         decryptingWith key: SymmetricKey
@@ -19,6 +23,7 @@ public struct MultiRecipientContainer: Codable {
         return try AES.GCM.open(AES.GCM.SealedBox(combined: message), using: key)
     }
     
+    /// Decrypts the message and verifies it's signature, then decodes the value assuming the contents are BSON.
     public func readAndValidate<C: Codable>(
         type: C.Type,
         usingIdentity identity: PublicSigningKey,
@@ -30,6 +35,13 @@ public struct MultiRecipientContainer: Codable {
     }
 }
 
+/// A single message with many recipients that supports end-to-end encryption.
+///
+/// A MultiRecipientMessage, also called MRM, has multiple recipients with a shared content.
+/// MRMs can share large data blobs efficiently with many recipients, by sharing the message's encryption key individually with each party.
+/// This allows each party to decrypt the message **and** to maintain efficiency in an end-to-end encrypted conversation.
+///
+/// This message type is the foundation of Multi-Device Support and end-to-end encrypted group chats.
 public struct MultiRecipientCypherMessage: Codable {
     public struct ContainerKey: Codable {
         private enum CodingKeys: String, CodingKey {
@@ -57,7 +69,7 @@ public struct MultiRecipientCypherMessage: Codable {
     
     private(set) var tag: CypherMesageTag?
     public let container: MultiRecipientContainer
-    public let keys: [ContainerKey]
+    public var keys: [ContainerKey]
     
     public init(
         encryptedMessage: Data,
@@ -73,11 +85,14 @@ public struct MultiRecipientCypherMessage: Codable {
     }
 }
 
+/// A tag that can be used to quickly identify the type of message being sent
 enum CypherMesageTag: String, Codable {
     case privateMessage = "a"
     case multiRecipientMessage = "b"
 }
 
+/// An end-to-end encrypted & signed blob targeting a single recipient
+/// More performant than a MultiRecipientMesasge, but far less efficient for use in multi-recipient scenarios.
 public struct RatchetedCypherMessage: Codable {
     private enum CodingKeys: String, CodingKey {
         case tag = "_"
@@ -86,7 +101,7 @@ public struct RatchetedCypherMessage: Codable {
         case rekey = "c"
     }
     
-    private(set) var tag: CypherMesageTag?
+    private(set) var tag: CypherMesageTag
     private let message: Data
     private let signature: Data
     
@@ -108,6 +123,9 @@ public struct RatchetedCypherMessage: Codable {
         self.rekey = rekey
     }
     
+    /// Reads the contents as an end-to-end encrypted message, and verifies the signature.
+    ///
+    /// - Returns: A `RatchetMessage` that can be decrypted using the recipient's `DefaultRatchetHKDF`
     public func readAndValidate(usingIdentity identity: PublicSigningKey) throws -> RatchetMessage {
         try identity.validateSignature(signature, forData: message)
         return try BSONDecoder().decode(RatchetMessage.self, from: Document(data: message))

@@ -1,0 +1,2 @@
+- Most metadata is encrypted
+- Unencrypted, queryable metadata is anonymised

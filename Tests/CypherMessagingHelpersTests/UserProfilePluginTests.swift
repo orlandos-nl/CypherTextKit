@@ -2,117 +2,140 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
+func XCTAssertThrowsAsyncError<T>(_ run: @autoclosure () async throws -> T) async {
+    do {
+        _ = try await run()
+        XCTFail("Expected test to throw error")
+    } catch {}
+}
+
+func XCTAssertAsyncNil<T>(_ run: @autoclosure () async throws -> T?) async {
+    do {
+        let value = try await run()
+        XCTAssertNil(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncNotNil<T>(_ run: @autoclosure () async throws -> T?) async {
+    do {
+        let value = try await run()
+        XCTAssertNotNil(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncEqual<T: Equatable>(_ run: @autoclosure () async throws -> T, _ otherValue: T) async {
+    do {
+        let value = try await run()
+        XCTAssertEqual(value, otherValue)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncFalse(_ run: @autoclosure () async throws -> Bool) async {
+    do {
+        let value = try await run()
+        XCTAssertFalse(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+func XCTAssertAsyncTrue(_ run: @autoclosure () async throws -> Bool) async {
+    do {
+        let value = try await run()
+        XCTAssertTrue(value)
+    } catch {
+        XCTFail("Unexpected error: \(error)")
+    }
+}
+
+@available(macOS 12, iOS 15, *)
 struct AcceptAllDeviceRegisteriesPlugin: Plugin {
     static let pluginIdentifier = "accept-all-device-registeries"
     
-    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.eventLoop.makeSucceededVoidFuture()
+    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {
+        try await messenger.addDevice(config)
     }
-    
-    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) -> EventLoopFuture<Void> {
-        messenger.addDevice(config)
-    }
-    
-    func onReceiveMessage(_ message: ReceivedMessageContext) -> EventLoopFuture<ProcessMessageAction?> {
-        message.messenger.eventLoop.makeSucceededFuture(nil)
-    }
-    
-    func onSendMessage(_ message: SentMessageContext) -> EventLoopFuture<SendMessageAction?> {
-        message.messenger.eventLoop.makeSucceededFuture(nil)
-    }
-    
-    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
-    
-    func createContactMetadata(for username: Username, messenger: CypherMessenger) -> EventLoopFuture<Document> {
-        messenger.eventLoop.makeSucceededFuture([:])
-    }
-    
-    func onMessageChange(_ message: AnyChatMessage) {}
-    func onCreateContact(_ contact: DecryptedModel<ContactModel>, messenger: CypherMessenger) {}
-    func onCreateConversation(_ conversation: AnyConversation) {}
-    func onCreateChatMessage(_ conversation: AnyChatMessage) {}
-    func onContactIdentityChange(username: Username, messenger: CypherMessenger) {}
-    func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {}
-    func onP2PClientClose(messenger: CypherMessenger) {}
 }
 
+@available(macOS 12, iOS 15, *)
 final class UserProfilePluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
     }
     
-    func testChangeStatus() throws {
-        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let eventLoop = elg.next()
-        
-        let m0 = try CypherMessenger.registerMessenger(
+    func testChangeStatus() async throws {
+        let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 UserProfilePlugin(),
                 AcceptAllDeviceRegisteriesPlugin()
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m0_2 = try CypherMessenger.registerMessenger(
+        let m0_2 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 UserProfilePlugin(),
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m1 = try CypherMessenger.registerMessenger(
+        let m1 = try await CypherMessenger.registerMessenger(
             username: "m1",
             authenticationMethod: .password("m1"),
             appPassword: "",
             usingTransport: SpoofTransportClient.self,
-            database: MemoryCypherMessengerStore(eventLoop: eventLoop),
+            database: MemoryCypherMessengerStore(),
             eventHandler: PluginEventHandler(plugins: [
                 UserProfilePlugin()
-            ]),
-            on: eventLoop
-        ).wait()
+            ])
+        )
         
-        let m0Chat = try m0.createPrivateChat(with: "m1").wait()
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
         
-        _ = try m0Chat.sendRawMessage(
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
+        
+        _ = try await m0Chat.sendRawMessage(
             type: .text,
             text: "Hello",
             preferredPushType: .none
-        ).wait()
+        )
         
-        sleep(3)
+        try await sync.synchronise()
         
-        let m1Chat = try m1.getPrivateChat(with: "m0").wait()!
+        let m1Chat = try await m1.getPrivateChat(with: "m0")!
         
-        sleep(2)
+        try await sync.synchronise()
         
-        try XCTAssertEqual(m0Chat.allMessages(sortedBy: .descending).wait().count, 1)
-        try XCTAssertEqual(m1Chat.allMessages(sortedBy: .descending).wait().count, 1)
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 1)
         
-        let contact = try m1.getContact(byUsername: "m0").wait()
+        let contact = try await m1.getContact(byUsername: "m0")!
         
-        XCTAssertEqual(contact?.status, nil)
-        XCTAssertEqual(try m0.readProfileMetadata().wait().status, nil)
-        XCTAssertEqual(try m0_2.readProfileMetadata().wait().status, nil)
+        XCTAssertNil(contact.status)
+        await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, nil)
+        await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, nil)
         
-        try m0.changeProfileStatus(to: "Available").wait()
+        try await m0.changeProfileStatus(to: "Available")
         
-        sleep(2)
+        try await sync.synchronise()
         
-        XCTAssertEqual(contact?.status, "Available")
-        XCTAssertEqual(try m0.readProfileMetadata().wait().status, "Available")
-        XCTAssertEqual(try m0_2.readProfileMetadata().wait().status, "Available")
+        XCTAssertEqual(contact.status, "Available")
+        await XCTAssertAsyncEqual(try await m0.readProfileMetadata().status, "Available")
+        await XCTAssertAsyncEqual(try await m0_2.readProfileMetadata().status, "Available")
     }
 }

@@ -5,8 +5,10 @@ import NIO
 
 let iterationSize = 50
 
+@available(macOS 12, iOS 15, *)
 fileprivate final class DeviceChatCursor {
     internal private(set) var messages = [AnyChatMessage]()
+    var offset = 0
     let target: TargetConversation
     let conversationId: UUID
     let messenger: CypherMessenger
@@ -29,15 +31,16 @@ fileprivate final class DeviceChatCursor {
         self.sortMode = sortMode
     }
     
-    public func popNext() -> EventLoopFuture<AnyChatMessage?> {
+    public func popNext() async throws -> AnyChatMessage? {
         if messages.isEmpty {
             if drained {
-                return messenger.eventLoop.makeSucceededFuture(nil)
+                return nil
             }
             
-            return getMore(iterationSize).flatMap(popNext)
+            try await getMore(iterationSize)
+            return try await popNext()
         } else {
-            return messenger.eventLoop.makeSucceededFuture(messages.removeFirst())
+            return messages.removeFirst()
         }
     }
     
@@ -47,47 +50,47 @@ fileprivate final class DeviceChatCursor {
         }
     }
     
-    public func peekNext() -> EventLoopFuture<AnyChatMessage?> {
+    public func peekNext() async throws -> AnyChatMessage? {
         if messages.isEmpty {
             if drained {
-                return messenger.eventLoop.makeSucceededFuture(nil)
+                return nil
             }
             
-            return getMore(iterationSize).flatMap(peekNext)
+            try await getMore(iterationSize)
+            return try await peekNext()
         } else {
-            return messenger.eventLoop.makeSucceededFuture(messages.first)
+            return messages.first
         }
     }
     
-    public func getMore(_ limit: Int) -> EventLoopFuture<Void> {
-        if drained {
-            return messenger.eventLoop.makeSucceededVoidFuture()
-        }
+    public func getMore(_ limit: Int) async throws {
+        if drained { return }
         
-        return messenger.cachedStore.listChatMessages(
+        let messages = try await messenger.cachedStore.listChatMessages(
             inConversation: conversationId,
             senderId: senderId,
             sortedBy: sortMode,
             minimumOrder: sortMode == .descending ? latestOrder : nil,
             maximumOrder: sortMode == .ascending ? latestOrder : nil,
-            offsetBy: 0,
+            offsetBy: self.offset,
             limit: limit
-        ).map { messages in
-            self.latestOrder = messages.last?.order ?? self.latestOrder
-            
-            self.drained = messages.count < limit
-            
-            self.messages.append(contentsOf: messages.map { message in
-                AnyChatMessage(
-                    target: self.target,
-                    messenger: self.messenger,
-                    raw: self.messenger.decrypt(message)
-                )
-            })
-        }
+        )
+        self.latestOrder = messages.last?.order ?? self.latestOrder
+        
+        self.drained = messages.count < limit
+        self.offset += messages.count
+                                            try await self.messages.append(
+                                                contentsOf: messages.asyncMap { message in
+                                                AnyChatMessage(
+                                                    target: self.target,
+                                                    messenger: self.messenger,
+                                                    raw: try await self.messenger.decrypt(message)
+                                                )
+                                            })
     }
 }
 
+@available(macOS 12, iOS 15, *)
 public final class AnyChatMessageCursor {
     let messenger: CypherMessenger
     private let devices: [DeviceChatCursor]
@@ -108,102 +111,94 @@ public final class AnyChatMessageCursor {
         self.sortMode = sortMode
     }
     
-    public func getNext() -> EventLoopFuture<AnyChatMessage?> {
+    public func getNext() async throws -> AnyChatMessage? {
         struct CursorResult {
             let device: DeviceChatCursor
             let message: AnyChatMessage
         }
         
-        let results = devices.map { device -> EventLoopFuture<CursorResult?> in
-            device.peekNext().map { message in
-                message.map { message in
-                    CursorResult(
-                        device: device,
-                        message: message
-                    )
-                }
+        var results = try await devices.asyncCompactMap { device -> (Date, CursorResult)? in
+            if let message = try await device.peekNext() {
+                let result = CursorResult(
+                    device: device,
+                    message: message
+                )
+                
+                return (message.sentDate ?? Date(), result)
+            } else {
+                return nil
             }
         }
         
-        return EventLoopFuture.whenAllSucceed(results, on: messenger.eventLoop).flatMap { results in
-            var results = results.compactMap { $0 }
-            results.sort { lhs, rhs in
-                switch self.sortMode {
-                case .ascending:
-                    return lhs.message.sendDate < rhs.message.sendDate
-                case .descending:
-                    return lhs.message.sendDate > rhs.message.sendDate
-                }
+        results.sort { lhs, rhs -> Bool in
+            switch self.sortMode {
+            case .ascending:
+                return lhs.0 < rhs.0
+                                case .descending:
+                                    return lhs.0 > rhs.0
             }
-            
-            guard let result = results.first else {
-                return self.messenger.eventLoop.makeSucceededFuture(nil)
-            }
-            
-            return result.device.popNext()
         }
+        
+        guard let result = results.first?.1 else {
+            return nil
+        }
+        
+        return try await result.device.popNext()
     }
     
-    private func _getMore(_ max: Int, joinedWith resultSet: ResultSet) -> EventLoopFuture<Void> {
+    private func _getMore(_ max: Int, joinedWith resultSet: ResultSet) async throws {
         if max <= 0 {
-            return messenger.eventLoop.makeSucceededVoidFuture()
+            return
         }
         
-        return getNext().flatMap { message in
-            guard let message = message else {
-                return self.messenger.eventLoop.makeSucceededVoidFuture()
-            }
-            
-            resultSet.messages.append(message)
-            
-            return self.messenger.eventLoop.flatSubmit {
-                self._getMore(max - 1, joinedWith: resultSet)
-            }
+        guard let message = try await getNext() else {
+            return
         }
+        
+        resultSet.messages.append(message)
+        
+        try await self._getMore(max - 1, joinedWith: resultSet)
     }
     
-    public func getMore(_ max: Int) -> EventLoopFuture<[AnyChatMessage]> {
+    public func getMore(_ max: Int) async throws -> [AnyChatMessage] {
         let resultSet = ResultSet()
         if max <= 500 {
             resultSet.messages.reserveCapacity(max)
         }
-        return _getMore(max, joinedWith: resultSet).map {
-            resultSet.messages
-        }
+        try await _getMore(max, joinedWith: resultSet)
+        return resultSet.messages
     }
     
     public static func readingConversation<Conversation: AnyConversation>(
         _ conversation: Conversation,
         sortMode: SortMode = .descending
-    ) -> EventLoopFuture<AnyChatMessageCursor> {
+    ) async throws -> AnyChatMessageCursor {
         assert(sortMode == .descending, "Unsupported ascending")
         
-        return conversation.memberDevices().map { devices in
-            var devices = devices.map { device in
-                DeviceChatCursor(
-                    target: conversation.target,
-                    conversationId: conversation.conversation.id,
-                    messenger: conversation.messenger,
-                    senderId: device.props.senderId,
-                    sortMode: sortMode
-                )
-            }
-            devices.append(
-                DeviceChatCursor(
-                    target: conversation.target,
-                    conversationId: conversation.conversation.id,
-                    messenger: conversation.messenger,
-                    senderId: conversation.messenger.deviceIdentityId,
-                    sortMode: sortMode
-                )
-            )
-            
-            return AnyChatMessageCursor(
-                conversationId: conversation.conversation.id,
+        var devices = try await conversation.memberDevices().asyncMap { device in
+            await DeviceChatCursor(
+                target: conversation.getTarget(),
+                conversationId: conversation.conversation.encrypted.id,
                 messenger: conversation.messenger,
-                devices: devices,
+                senderId: device.props.senderId,
                 sortMode: sortMode
             )
         }
+        await devices.append(
+            DeviceChatCursor(
+                target: conversation.getTarget(),
+                conversationId: conversation.conversation.encrypted.id,
+                messenger: conversation.messenger,
+                senderId: conversation.messenger.deviceIdentityId,
+                sortMode: sortMode
+            )
+        )
+        
+        return AnyChatMessageCursor(
+            conversationId: conversation.conversation.encrypted.id,
+            messenger: conversation.messenger,
+            devices: devices,
+            sortMode: sortMode
+        )
     }
 }
