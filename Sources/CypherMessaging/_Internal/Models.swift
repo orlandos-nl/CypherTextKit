@@ -6,6 +6,7 @@ import CypherProtocol
 public final class ConversationModel: Model {
     public struct SecureProps: Codable, MetadataProps {
         public var members: Set<Username>
+        public var kickedMembers: Set<Username>
         public var metadata: Document
         public var localOrder: Int
     }
@@ -31,6 +32,16 @@ public final class ConversationModel: Model {
 extension DecryptedModel where M == ConversationModel {
     public var members: Set<Username> {
         get { props.members }
+    }
+    public var kickedMembers: Set<Username> {
+        get { props.kickedMembers }
+    }
+    public var allHistoricMembers: Set<Username> {
+        get {
+            var members = members
+            members.formUnion(kickedMembers)
+            return members
+        }
     }
     public var metadata: Document {
         get { props.metadata }

@@ -81,6 +81,46 @@ final class JobQueue: ObservableObject {
         }
     }
     
+    @JobQueueActor public func queueTasks<T: StoredTask>(_ tasks: [T]) async throws {
+        guard let messenger = self.messenger else {
+            throw CypherSDKError.appLocked
+        }
+        
+        let jobs = try tasks.map { task in
+            try JobModel(
+                props: .init(task: task),
+                encryptionKey: databaseEncryptionKey
+            )
+        }
+        
+        var queuedJobs = [DecryptedModel<JobModel>]()
+        
+        for job in jobs {
+            queuedJobs.append(try await messenger.decrypt(job))
+        }
+        
+        do {
+            for job in jobs {
+                try await database.createJob(job)
+            }
+        } catch {
+            debugLog("Failed to queue all jobs of type \(T.self)")
+            
+            for job in jobs {
+                _ = try? await database.removeJob(job)
+            }
+            
+            throw error
+        }
+        
+        self.jobs.append(contentsOf: queuedJobs)
+        self.hasOutstandingTasks = true
+        
+        if !self.runningJobs {
+            self.startRunningTasks()
+        }
+    }
+    
     fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
     
     @JobQueueActor

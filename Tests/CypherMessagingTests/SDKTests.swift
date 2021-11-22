@@ -77,6 +77,10 @@ final class CypherSDKTests: XCTestCase {
         SpoofTransportClient.resetServer()
     }
     
+    func testDisableMultiRecipientMessage() async throws {
+        
+    }
+    
     func testPrivateChatWithYourself() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",

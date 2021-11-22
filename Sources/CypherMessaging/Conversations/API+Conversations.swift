@@ -69,6 +69,7 @@ extension CypherMessenger {
                 let conversation = try ConversationModel(
                     props: .init(
                         members: groupConfig.members,
+                        kickedMembers: [],
                         metadata: BSONEncoder().encode(groupMetadata),
                         localOrder: 0
                     ),
@@ -159,6 +160,7 @@ extension CypherMessenger {
             moderators: [self.username],
             metadata: sharedMetadata
         )
+        // TODO: Transparent Group Chats (no uploaded binary blobs)
         
         let referencedBlob = try await self.transport.publishBlob(self.sign(config))
         let metadata = GroupMetadata(
@@ -176,13 +178,13 @@ extension CypherMessenger {
             metadata: metadataDocument
         )
         
-        let chat = GroupChat(
+        let chat = GroupChat( 
             conversation: try await self.decrypt(conversation),
             messenger: self,
             metadata: metadata
         )
         
-        try await chat.sendRawMessage(
+        _ = try await chat.sendRawMessage(
             type: .magic,
             messageSubtype: "_/ignore",
             text: "",
@@ -318,13 +320,17 @@ extension AnyConversation {
     internal func memberDevices() async throws -> [DecryptedModel<DeviceIdentityModel>] {
         try await messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
+
+    internal func historicMemberDevices() async throws -> [DecryptedModel<DeviceIdentityModel>] {
+        try await messenger._fetchDeviceIdentities(forUsers: conversation.allHistoricMembers)
+    }
     
     public func save() async throws {
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         messenger.eventHandler.onUpdateConversation(self)
     }
     
-    private func getNextLocalOrder() async throws -> Int {
+    internal func getNextLocalOrder() async throws -> Int {
         let order = try await conversation.getNextLocalOrder()
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         return order
@@ -454,20 +460,41 @@ extension AnyConversation {
             localId = chatMessage.id
             _chatMessage = chatMessage
         }
-        
-        try await messenger._queueTask(
-            .sendMultiRecipientMessage(
-                SendMultiRecipientMessageTask(
-                    message: CypherMessage(message: message),
-                    // We _always_ attach a messageID so the protocol doesn't give away
-                    // The precense of magic packets
-                    messageId: remoteId,
-                    recipients: recipients,
-                    localId: localId,
-                    pushType: pushType
+       
+        if messenger.transport.supportsMultiRecipientMessages {
+            try await messenger._queueTask(
+                .sendMultiRecipientMessage(
+                    SendMultiRecipientMessageTask(
+                        message: CypherMessage(message: message),
+                        // We _always_ attach a messageID so the protocol doesn't give away
+                        // The precense of magic packets
+                        messageId: remoteId,
+                        recipients: recipients,
+                        localId: localId,
+                        pushType: pushType
+                    )
                 )
             )
-        )
+        } else {
+            var tasks = [CypherTask]()
+            
+            for device in try await memberDevices() {
+                tasks.append(
+                    .sendMessage(
+                        SendMessageTask(
+                            message: CypherMessage(message: message),
+                            recipient: device.username,
+                            recipientDeviceId: device.deviceId,
+                            localId: localId,
+                            pushType: pushType,
+                            messageId: remoteId
+                        )
+                    )
+                )
+            }
+            
+            try await messenger._queueTasks(tasks)
+        }
         
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         
@@ -554,6 +581,55 @@ public struct GroupChat: AnyConversation {
     public func resolveTarget() async -> TargetConversation.Resolved {
         .groupChat(self)
     }
+    
+//    public func kickMember(_ member: Username) async throws {
+//        if !conversation.members.contains(member) {
+//            throw CypherSDKError.notGroupMember
+//        }
+//
+//        try await conversation.modifyProps { props in
+//            props.members.remove(member)
+//            props.kickedMembers.insert(member)
+//        }
+//
+//        try await self.save()
+//
+//        // Send message to user explicitly, so that they know they're kicked
+//        let order = try await getNextLocalOrder()
+//        try await messenger._writeMessage(
+//            SingleCypherMessage(
+//                messageType: .magic,
+//                messageSubtype: "_/group/kick",
+//                text: member.raw,
+//                metadata: [:],
+//                destructionTimer: nil,
+//                sentDate: Date(),
+//                preferredPushType: PushType.none,
+//                order: order,
+//                target: await self.getTarget()
+//            ),
+//            to: member
+//        )
+//    }
+//
+//    public func inviteMember(_ member: Username) async throws {
+//        if conversation.members.contains(member) {
+//            return
+//        }
+//
+//        try await conversation.modifyProps { props in
+//            props.members.insert(member)
+//            props.kickedMembers.remove(member)
+//        }
+//
+//        try await self.save()
+//        _ = try await sendRawMessage(
+//            type: .magic,
+//            messageSubtype: "_/group/invite",
+//            text: member.raw,
+//            preferredPushType: .none
+//        )
+//    }
 }
 
 public struct GroupMetadata: Codable {

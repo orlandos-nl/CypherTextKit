@@ -413,6 +413,8 @@ enum TaskHelpers {
         task: SendMultiRecipientMessageTask,
         messenger: CypherMessenger
     ) async throws {
+        assert(messenger.transport.supportsMultiRecipientMessages)
+        
         guard messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
             _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
@@ -430,16 +432,16 @@ enum TaskHelpers {
             let index = devices.count - i - 1
             let device = devices[index]
             
-            do {
-                if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
-                    with: device.username,
-                    deviceId: device.deviceId
-                ) {
+            if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
+                with: device.username,
+                deviceId: device.deviceId
+            ) {
+                do {
                     try await p2pTransport.sendMessage(task.message, messageId: task.messageId)
                     devices.remove(at: index)
+                } catch {
+                    debugLog("Failed to send message over P2P connection", error)
                 }
-            } catch {
-                debugLog("Failed to send message over P2P connection", error)
             }
         }
         

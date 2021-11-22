@@ -418,7 +418,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         let data = try await database.readLocalDeviceConfig()
         let box = try AES.GCM.SealedBox(combined: data)
         let encryptedConfig = Encrypted<_CypherMessengerConfig>(representing: box)
-        let config = try encryptedConfig.decrypt(using: encryptionKey)
+        let config = try await encryptedConfig.decrypt(using: encryptionKey)
         let transportRequest = try TransportCreationRequest(
             username: config.username,
             deviceId: config.deviceKeys.deviceId,
@@ -452,7 +452,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             let data = try await self.cachedStore.readLocalDeviceConfig()
             let box = try AES.GCM.SealedBox(combined: data)
             let config = Encrypted<_CypherMessengerConfig>(representing: box)
-            _ = try config.decrypt(using: appEncryptionKey)
+            _ = try await config.decrypt(using: appEncryptionKey)
             return true
         } catch {
             return false

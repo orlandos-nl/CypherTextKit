@@ -2,8 +2,47 @@ import BSON
 import CypherProtocol
 import Foundation
 
-public enum PushType: String, Codable {
-    case none, call, message, contactRequest = "contactrequest", cancelCall = "cancelcall"
+public enum PushType: RawRepresentable, Codable {
+    case none
+    case call
+    case message
+    case contactRequest
+    case cancelCall
+    case custom(String)
+    
+    public init(rawValue: String) {
+        switch rawValue {
+        case "none":
+            self = .none
+        case "call":
+            self = .call
+        case "message":
+            self = .message
+        case "contact-request":
+            self = .contactRequest
+        case "cancel-call":
+            self = .cancelCall
+        default:
+            self = .custom(rawValue)
+        }
+    }
+    
+    public var rawValue: String {
+        switch self {
+        case .none:
+            return "none"
+        case .call:
+            return "call"
+        case .message:
+            return "message"
+        case .contactRequest:
+            return "contact-request"
+        case .cancelCall:
+            return "cancel-call"
+        case .custom(let string):
+            return string
+        }
+    }
 }
 
 public enum CypherMessageType: String, Codable {

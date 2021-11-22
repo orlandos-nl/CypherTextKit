@@ -175,7 +175,7 @@ public final class AnyChatMessageCursor {
     ) async throws -> AnyChatMessageCursor {
         assert(sortMode == .descending, "Unsupported ascending")
         
-        var devices = try await conversation.memberDevices().asyncMap { device in
+        var devices = try await conversation.historicMemberDevices().asyncMap { device in
             await DeviceChatCursor(
                 target: conversation.getTarget(),
                 conversationId: conversation.conversation.encrypted.id,

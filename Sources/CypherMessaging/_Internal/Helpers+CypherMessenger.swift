@@ -70,6 +70,7 @@ internal extension CypherMessenger {
         let conversation = try ConversationModel(
             props: .init(
                 members: members,
+                kickedMembers: [],
                 metadata: metadata,
                 localOrder: 0
             ),
@@ -88,6 +89,10 @@ internal extension CypherMessenger {
     
     func _queueTask(_ task: CypherTask) async throws {
         try await self.jobQueue.queueTask(task)
+    }
+    
+    func _queueTasks(_ task: [CypherTask]) async throws {
+        try await self.jobQueue.queueTasks(task)
     }
     
     func _updateUserIdentity(of username: Username, to config: UserConfig) async throws -> UserIdentityState {
@@ -390,6 +395,7 @@ internal extension CypherMessenger {
             if let subType = message.messageSubtype, subType.hasPrefix("_/") {
                 switch subType {
                 case "_/ignore":
+                    // Do nothing, it's like a `ping` message without `pong` reply
                     return
                 default:
                     debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)

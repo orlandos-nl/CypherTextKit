@@ -55,6 +55,7 @@ public struct GroupChatConfig: Codable {
         case moderators = "c"
         case metadata = "d"
         case admin = "e"
+        case kickedMembers = "f"
     }
     
     public private(set) var members: Set<Username>
@@ -62,6 +63,7 @@ public struct GroupChatConfig: Codable {
     public private(set) var moderators: Set<Username>
     public var metadata: Document
     public let admin: Username
+    public private(set) var kickedMembers: Set<Username>
     
     public init(
         admin: Username,
@@ -77,14 +79,18 @@ public struct GroupChatConfig: Codable {
         self.moderators = moderators
         self.createdAt = Date()
         self.metadata = metadata
+        self.kickedMembers = []
     }
     
     public mutating func addMember(_ username: Username) {
         members.insert(username)
+        kickedMembers.remove(username)
     }
     
     public mutating func removeMember(_ username: Username) {
-        members.remove(username)
+        if let member = members.remove(username) {
+            kickedMembers.insert(member)
+        }
         moderators.remove(username)
     }
     
