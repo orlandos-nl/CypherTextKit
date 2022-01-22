@@ -1,4 +1,4 @@
-//#if canImport(SwiftUI) && canImport(Combine)
+#if canImport(SwiftUI)
 import SwiftUI
 import CypherMessaging
 import Combine
@@ -109,4 +109,4 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         }
     }
 }
-//#endif
+#endif

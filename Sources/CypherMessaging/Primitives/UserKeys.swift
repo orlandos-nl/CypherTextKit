@@ -1,6 +1,10 @@
 import Foundation
 import CypherProtocol
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 /// The user's private keys are only stored on the user's main device
 public struct DevicePrivateKeys: Codable {

@@ -2,7 +2,11 @@ import NIOFoundationCompat
 import BSON
 import NIO
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 typealias PrivateSigningKeyAlg = Curve25519.Signing.PrivateKey
 typealias PublicSigningKeyAlg = Curve25519.Signing.PublicKey
