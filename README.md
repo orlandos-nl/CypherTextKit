@@ -2,7 +2,7 @@
 
 The SDK is designed so that it can be easily implemented in existing communication apps. This allows you to re-use your existing iOS and backend code, but still provide a more secure and private communication experience.
 
-[Read the Story](https://medium.com/@joannisorlandos/building-end-to-end-encrypted-ios-apps-4dd018a0290b)
+[Read the Story](https://medium.com/@joannisorlandos/building-end-to-end-encrypted-ios-apps-4dd018a0290b) or [Join our Discord](https://discord.gg/H6799jh) for any questions and friendly banter.
 
 ### Transparent End-to-end Encryption
 
