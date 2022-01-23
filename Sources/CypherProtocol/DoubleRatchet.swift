@@ -2,11 +2,7 @@
 // TODO: Header encryption
 
 import Foundation
-#if canImport(CryptoKit)
-import CryptoKit
-#else
 import Crypto
-#endif
 
 /// A symmetric key encryption & decryption helper
 public protocol RatchetSymmetricEncryption {

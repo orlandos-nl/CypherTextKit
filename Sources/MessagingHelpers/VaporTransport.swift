@@ -4,11 +4,14 @@ import CypherProtocol
 import CypherMessaging
 import JWTKit
 import WebSocketKit
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // TODO: Secondary servers
 
 enum VaporTransportError: Error {
-    case signUpFailed, usernameMismatch, sendMessageFailed
+    case signUpFailed, usernameMismatch, sendMessageFailed, urlResponseNil
 }
 
 extension TransportCreationRequest: JWTAlgorithm {
@@ -106,7 +109,19 @@ extension URLSession {
         if let token = token {
             request.addValue(token, forHTTPHeaderField: "X-API-Token")
         }
-        let (data, _) = try await self.data(for: request)
+
+#if canImport(FoundationNetworking)
+        let data: Data = await withCheckedContinuation { continuation in
+            self.dataTask(with: request) { data, _, _ in
+                guard let data = data else {
+                    fatalError("DataTask was nil while fetching BSON")
+                }
+                continuation.resume(returning: data)
+            }.resume()
+        }
+#else
+    let (data, _) = try await self.data(for: request)
+#endif   
         return try BSONDecoder().decode(type, from: Document(data: data))
     }
     
@@ -129,10 +144,28 @@ extension URLSession {
         let data = try BSONEncoder().encode(body).makeData()
         
         if data.count > maxBodySize {
+#if canImport(FoundationNetworking)
+            guard let res = URLResponse(coder: NSCoder()) else { throw  VaporTransportError.urlResponseNil }
+            return (Data(), res)
+#else
             return (Data(), URLResponse())
+#endif
         }
         
+#if canImport(FoundationNetworking)
+        let uploadTask: (Data, URLResponse) = await withCheckedContinuation { continuation in
+            let task = self.uploadTask(with: request, from: data)  { data, res, error in
+                guard error == nil else { return }
+                guard let response = res as? HTTPURLResponse else { return }
+                guard let data = data else { return }
+                continuation.resume(returning: (data, response))
+            }
+            task.resume()
+        }
+        return uploadTask
+#else
         return try await self.upload(for: request, from: data)
+#endif
     }
 }
 
@@ -409,7 +442,7 @@ public final class VaporTransport: CypherServerTransportClient {
                             }
                             
                             let ack = try BSONEncoder().encode(Ack(id: packet.id)).makeData()
-                            webSocket.send(raw: ack, opcode: .binary)
+                            try await webSocket.send(raw: ack, opcode: .binary)
                         } catch {
                             _ = await transport.disconnect()
                         }
@@ -449,7 +482,7 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func publishKeyBundle(_ data: UserConfig) async throws {
         _ = try await self.httpClient.postBSON(
-            httpHost: httpHost,
+                        httpHost: httpHost,
             url: "current-user/config",
             username: self.username,
             deviceId: self.deviceId,

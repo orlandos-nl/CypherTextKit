@@ -1,8 +1,9 @@
-#if canImport(SwiftUI)
 import BSON
 import Crypto
 import Foundation
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 import NIO
 
 @globalActor final actor JobQueueActor {
@@ -12,7 +13,7 @@ import NIO
 }
 
 @available(macOS 12, iOS 15, *)
-final class JobQueue: ObservableObject {
+final class JobQueue {
     weak private(set) var messenger: CypherMessenger?
     private let database: CypherMessengerStore
     private let databaseEncryptionKey: SymmetricKey
@@ -364,4 +365,6 @@ final class JobQueue: ObservableObject {
         }
     }
 }
+#if canImport(SwiftUI)
+extension JobQueue: ObservableObject {}
 #endif
