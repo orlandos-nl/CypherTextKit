@@ -145,8 +145,10 @@ extension URLSession {
         
         if data.count > maxBodySize {
 #if canImport(FoundationNetworking)
-            guard let res = URLResponse(coder: NSCoder()) else { throw  VaporTransportError.urlResponseNil }
-            return (Data(), res)
+             guard let response = URLResponse(URL(string: "\(httpHost)/\(url)")!) else {
+                 throw VaporTransportError.urlResponseNil 
+                 }
+            return (Data(), response)
 #else
             return (Data(), URLResponse())
 #endif
@@ -581,5 +583,11 @@ extension DataProtocol {
         }
         
         return String(bytesNoCopy: ptr, length: hexLen, encoding: .utf8, freeWhenDone: true)!
+    }
+}
+
+extension URLResponse {
+    convenience public init?(_ url: URL) {
+      self.init(url: url, mimeType: nil, expectedContentLength: 0, textEncodingName: "")
     }
 }
