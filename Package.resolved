@@ -12,7 +12,7 @@
       },
       {
         "package": "Dribble",
-        "repositoryURL": "git@github.com:orlandos-nl/Dribble.git",
+        "repositoryURL": "https://github.com/orlandos-nl/Dribble.git",
         "state": {
           "branch": "main",
           "revision": "c106d1834facac06742985d3558b0cdc5069585b",
