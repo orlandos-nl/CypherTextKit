@@ -1,24 +1,19 @@
 import BSON
 import Crypto
 import Foundation
-import SwiftUI
 import NIO
 
-@globalActor final actor JobQueueActor {
-    public static let shared = JobQueueActor()
-    
-    private init() {}
-}
+typealias JobQueueActor = CypherTextKitActor
 
-@available(macOS 12, iOS 15, *)
-final class JobQueue: ObservableObject {
+@available(macOS 10.15, iOS 13, *)
+final class JobQueue {
     weak private(set) var messenger: CypherMessenger?
     private let database: CypherMessengerStore
     private let databaseEncryptionKey: SymmetricKey
-    public private(set) var runningJobs = false
-    public private(set) var hasOutstandingTasks = true
-    private var pausing: EventLoopPromise<Void>?
-    private var jobs: [DecryptedModel<JobModel>] {
+    @JobQueueActor public private(set) var runningJobs = false
+    @JobQueueActor public private(set) var hasOutstandingTasks = true
+    @JobQueueActor private var pausing: EventLoopPromise<Void>?
+    @JobQueueActor private var jobs: [DecryptedModel<JobModel>] {
         didSet {
             markAsDone()
         }
@@ -26,13 +21,18 @@ final class JobQueue: ObservableObject {
     private let eventLoop: EventLoop
     private static var taskDecoders = [TaskKey: TaskDecoder]()
 
-    init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) async throws {
+    init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) {
         self.messenger = messenger
         self.eventLoop = messenger.eventLoop
         self.database = database
         self.databaseEncryptionKey = databaseEncryptionKey
+        self.jobs = []
+    }
+    
+    @JobQueueActor
+    func loadJobs() async throws {
         self.jobs = try await database.readJobs().asyncMap { job -> (Date, DecryptedModel<JobModel>) in
-            let job = try await messenger.decrypt(job)
+            let job = try messenger!.decrypt(job)
             return (job.scheduledAt, job)
         }.sorted { lhs, rhs in
             lhs.0 < rhs.0
@@ -62,7 +62,8 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    @JobQueueActor public func queueTask<T: StoredTask>(_ task: T) async throws {
+    @JobQueueActor
+    public func queueTask<T: StoredTask>(_ task: T) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.appLocked
         }
@@ -72,7 +73,7 @@ final class JobQueue: ObservableObject {
             encryptionKey: databaseEncryptionKey
         )
         
-        let queuedJob = try await messenger.decrypt(job)
+        let queuedJob = try messenger.decrypt(job)
         self.jobs.append(queuedJob)
         self.hasOutstandingTasks = true
         try await database.createJob(job)
@@ -81,7 +82,8 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    @JobQueueActor public func queueTasks<T: StoredTask>(_ tasks: [T]) async throws {
+    @JobQueueActor
+    public func queueTasks<T: StoredTask>(_ tasks: [T]) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.appLocked
         }
@@ -96,7 +98,7 @@ final class JobQueue: ObservableObject {
         var queuedJobs = [DecryptedModel<JobModel>]()
         
         for job in jobs {
-            queuedJobs.append(try await messenger.decrypt(job))
+            queuedJobs.append(try messenger.decrypt(job))
         }
         
         do {
@@ -121,7 +123,7 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
+    @JobQueueActor fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
     
     @JobQueueActor
     func awaitDoneProcessing() async throws -> SynchronisationResult {
@@ -139,6 +141,7 @@ final class JobQueue: ObservableObject {
         }
     }
     
+    @JobQueueActor
     func markAsDone() {
         if !hasOutstandingTasks && !isDoneNotifications.isEmpty {
             for notification in isDoneNotifications {
@@ -272,6 +275,7 @@ final class JobQueue: ObservableObject {
         resume()
     }
 
+    @JobQueueActor
     public func pause() async throws {
         let promise = eventLoop.makePromise(of: Void.self)
         pausing = promise
@@ -345,7 +349,7 @@ final class JobQueue: ObservableObject {
             switch task.retryMode.raw {
             case .retryAfter(let retryDelay, let maxAttempts):
                 debugLog("Delaying task for an hour")
-                try await job.delayExecution(retryDelay: retryDelay)
+                try job.delayExecution(retryDelay: retryDelay)
                 
                 if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {
                     try await self.cancelJob(job)

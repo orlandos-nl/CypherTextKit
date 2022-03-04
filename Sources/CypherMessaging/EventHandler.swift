@@ -6,7 +6,7 @@ public struct DeviceReference {
     public let deviceId: DeviceId
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct ReceivedMessageContext {
     public let sender: DeviceReference
     public let messenger: CypherMessenger
@@ -14,7 +14,7 @@ public struct ReceivedMessageContext {
     public let conversation: TargetConversation.Resolved
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct SentMessageContext {
     public let recipients: Set<Username>
     public let messenger: CypherMessenger
@@ -45,7 +45,7 @@ public struct ProcessMessageAction {
 }
 
 // TODO: Make this into a concrete type, so more events can be supported
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public protocol CypherMessengerEventHandler {
     func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws
     func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws

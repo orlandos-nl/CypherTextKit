@@ -10,7 +10,7 @@ public struct ContactMetadata: Codable {
 // TODO: Use synchronisation framework for own devices
 // TODO: Select contacts to share the profile changes with
 // TODO: Broadcast to a user that doesn't have a private chat
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct UserProfilePlugin: Plugin {
     enum RekeyAction {
         case none, resetProfile
@@ -111,33 +111,33 @@ public struct UserProfilePlugin: Plugin {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension Contact {
-    public var status: String? {
+    @CryptoActor public var status: String? {
         try? self.model.getProp(
-            fromMetadata: ContactMetadata.self,
+            ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
             run: \.status
         )
     }
     
-    public var image: Data? {
+    @CryptoActor public var image: Data? {
         try? self.model.getProp(
-            fromMetadata: ContactMetadata.self,
+            ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
             run: \.image
         )
     }
     
-    public var nickname: String {
+    @CryptoActor public var nickname: String {
         (try? self.model.getProp(
-            fromMetadata: ContactMetadata.self,
+            ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
             run: \.nickname
         )) ?? self.username.raw
     }
     
-    public func setNickname(to nickname: String) async throws {
+    @CryptoActor public func setNickname(to nickname: String) async throws {
         try await self.model.withMetadata(
             ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self
@@ -147,7 +147,7 @@ extension Contact {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension CypherMessenger {
     public func changeProfileStatus(
         to status: String

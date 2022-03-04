@@ -1,6 +1,6 @@
 import Foundation
 import CypherProtocol
-import CryptoKit
+import Crypto
 
 /// The user's private keys are only stored on the user's main device
 public struct DevicePrivateKeys: Codable {

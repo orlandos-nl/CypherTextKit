@@ -3,9 +3,9 @@ import Foundation
 import Crypto
 
 /// Used when encrypting a specific value
-public final class Encrypted<T: Codable>: Codable {
+public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
     private var value: AES.GCM.SealedBox
-    private var wrapped: T?
+    @CryptoActor private var wrapped: T?
     
     public init(_ value: T, encryptionKey: SymmetricKey) throws {
         // Wrap the type so it can be encoded by BSON
@@ -18,7 +18,7 @@ public final class Encrypted<T: Codable>: Codable {
     }
     
     @CryptoActor
-    public func update(to value: T, using encryptionKey: SymmetricKey) async throws {
+    public func update(to value: T, using encryptionKey: SymmetricKey) throws {
         self.wrapped = value
         let wrapper = PrimitiveWrapper(value: value)
         let data = try BSONEncoder().encode(wrapper).makeData()
@@ -40,7 +40,7 @@ public final class Encrypted<T: Codable>: Codable {
         
         // Return the value
         let value = wrapper.value
-//        wrapped = value
+        wrapped = value
         return value
     }
     

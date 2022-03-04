@@ -43,7 +43,7 @@ fileprivate final actor AcknowledgementManager {
 /// P2PClient is also used for static-length packets that are easily identified, such as status changes.
 ///
 /// You can interact with P2PClient as if you're sending and receiving cleartext messages, while the client itself applies the end-to-end encryption.
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public final class P2PClient {
     private weak var messenger: CypherMessenger?
     private let client: P2PTransportClient
@@ -66,16 +66,16 @@ public final class P2PClient {
     public var isConnected: Bool {
         client.connected == .connected
     }
-    private var _onStatusChange: ((P2PStatusMessage?) -> ())?
-    private var _onDisconnect: (() -> ())?
+    private var _onStatusChange: (@Sendable (P2PStatusMessage?) -> ())?
+    private var _onDisconnect: (@Sendable () -> ())?
     
     /// The provided closure is called when the client disconnects
-    public func onDisconnect(perform: @escaping () -> ()) {
+    public func onDisconnect(perform: @escaping @Sendable () -> ()) {
         _onDisconnect = perform
     }
     
     /// The provided closure is called when the remote device indicates it's status has changed
-    public func onStatusChange(perform: @escaping (P2PStatusMessage?) -> ()) {
+    public func onStatusChange(perform: @escaping @Sendable (P2PStatusMessage?) -> ()) {
         _onStatusChange = perform
     }
     

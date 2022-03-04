@@ -1,7 +1,7 @@
 import Foundation
 
 /// A helper wrapper around `String`, so that the type cannot be used interchangably with other String based types
-public struct DeviceId: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable {
+public struct DeviceId: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable, Sendable {
     public let raw: String
     
     public static func ==(lhs: DeviceId, rhs: DeviceId) -> Bool {

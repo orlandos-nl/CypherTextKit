@@ -1,3 +1,4 @@
+#if os(iOS) || os(macOS)
 import BSON
 import Foundation
 import CypherProtocol
@@ -89,7 +90,7 @@ struct ReadReceiptPacket: Codable {
 
 let maxBodySize = 500_000
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension URLSession {
     func getBSON<D: Decodable>(
         httpHost: String,
@@ -409,7 +410,7 @@ public final class VaporTransport: CypherServerTransportClient {
                             }
                             
                             let ack = try BSONEncoder().encode(Ack(id: packet.id)).makeData()
-                            webSocket.send(raw: ack, opcode: .binary)
+                            try await webSocket.send(raw: ack, opcode: .binary)
                         } catch {
                             _ = await transport.disconnect()
                         }
@@ -550,3 +551,4 @@ extension DataProtocol {
         return String(bytesNoCopy: ptr, length: hexLen, encoding: .utf8, freeWhenDone: true)!
     }
 }
+#endif
