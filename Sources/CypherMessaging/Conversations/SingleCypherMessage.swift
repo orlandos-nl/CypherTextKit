@@ -49,7 +49,7 @@ public enum CypherMessageType: String, Codable {
     case text, media, magic
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public enum TargetConversation {
     case currentUser
     case otherUser(Username)
@@ -82,13 +82,13 @@ public enum TargetConversation {
         case internalChat(InternalConversation)
         
         init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) async {
-            let members = conversation.members
+            let members = await conversation.members
             let username = messenger.username
             guard members.contains(username) else {
                 return nil
             }
             
-            let metadata = conversation.metadata
+            let metadata = await conversation.metadata
             switch members.count {
             case ..<0:
                 return nil
@@ -139,7 +139,7 @@ public enum TargetConversation {
         public func getTarget() async -> TargetConversation {
             switch self {
             case .privateChat(let chat):
-                return chat.getTarget()
+                return await chat.getTarget()
             case .groupChat(let chat):
                 return await chat.getTarget()
             case .internalChat(let chat):
@@ -168,7 +168,7 @@ public enum TargetConversation {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct ConversationTarget: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {
@@ -198,7 +198,7 @@ public struct ConversationTarget: Codable {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct SingleCypherMessage: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {

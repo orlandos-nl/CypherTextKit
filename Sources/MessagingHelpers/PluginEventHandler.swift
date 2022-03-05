@@ -1,6 +1,6 @@
 import CypherMessaging
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct PluginEventHandler: CypherMessengerEventHandler {
     private var plugins: [Plugin]
     

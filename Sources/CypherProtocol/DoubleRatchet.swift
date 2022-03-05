@@ -184,7 +184,7 @@ public struct SkippedKey: Codable {
 }
 
 public struct DoubleRatchetHKDF<Hash: HashFunction> {
-    public struct State: Codable {
+    public struct State: Codable, @unchecked Sendable {
         private enum CodingKeys: String, CodingKey {
             case rootKey = "a"
             case localPrivateKey = "b"

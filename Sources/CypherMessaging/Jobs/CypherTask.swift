@@ -29,7 +29,7 @@ struct HandshakeMessageTask: Codable {
     let messageId: String
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct CreateChatTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -50,7 +50,7 @@ struct CreateChatTask: Codable {
     let acceptedByOtherUser: Bool
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct AddContactTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -65,7 +65,7 @@ struct AddContactTask: Codable {
     let nickname: String
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -98,7 +98,7 @@ struct ReceiveMessageTask: Codable {
     let deviceId: DeviceId
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case localId = "a"
@@ -115,7 +115,7 @@ struct SendMessageDeliveryStateChangeTask: Codable {
     let newState: ChatMessageModel.DeliveryState
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct ReceiveMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case messageId = "a"
@@ -130,7 +130,7 @@ struct ReceiveMessageDeliveryStateChangeTask: Codable {
     let newState: ChatMessageModel.DeliveryState
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct ReceiveMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -145,7 +145,7 @@ struct ReceiveMultiRecipientMessageTask: Codable {
     let deviceId: DeviceId
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -207,7 +207,7 @@ public enum _CypherTaskConfig {
     public static var sendMessageRetryMode: TaskRetryMode? = nil
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 enum CypherTask: Codable, StoredTask {
     private enum CodingKeys: String, CodingKey {
         case key = "a"
@@ -407,7 +407,7 @@ enum CypherTask: Codable, StoredTask {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 enum TaskHelpers {
     fileprivate static func writeMultiRecipientMessageTask(
         task: SendMultiRecipientMessageTask,

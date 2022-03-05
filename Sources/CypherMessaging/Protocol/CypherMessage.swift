@@ -1,4 +1,4 @@
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct CypherMessage: Codable {
     private enum CodingKeys: String, CodingKey {
         case type = "a"

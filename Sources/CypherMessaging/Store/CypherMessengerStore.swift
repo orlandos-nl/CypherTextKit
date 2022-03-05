@@ -5,7 +5,7 @@ public enum SortMode {
     case ascending, descending
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public protocol CypherMessengerStore {
     func fetchContacts() async throws -> [ContactModel]
     func createContact(_ contact: ContactModel) async throws

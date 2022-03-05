@@ -54,7 +54,7 @@ func XCTAssertAsyncTrue(_ run: @autoclosure () async throws -> Bool) async {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct AcceptAllDeviceRegisteriesPlugin: Plugin {
     static let pluginIdentifier = "accept-all-device-registeries"
     
@@ -63,13 +63,13 @@ struct AcceptAllDeviceRegisteriesPlugin: Plugin {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 final class UserProfilePluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
     }
     
-    func testChangeStatus() async throws {
+    @CryptoActor func testChangeStatus() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),

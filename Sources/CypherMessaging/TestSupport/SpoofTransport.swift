@@ -14,7 +14,7 @@ public enum SpoofTransportClientSettings {
         case sendMessage(messageId: String)
     }
     
-    public static var shouldDropPacket: (Username, PacketType) async throws -> () = { _, _  in }
+    public static var shouldDropPacket: @Sendable @CryptoActor (Username, PacketType) async throws -> () = { _, _  in }
 }
 
 fileprivate final class SpoofServer {
