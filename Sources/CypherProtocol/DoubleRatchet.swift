@@ -2,7 +2,7 @@
 // TODO: Header encryption
 
 import Foundation
-import CryptoKit
+import Crypto
 
 /// A symmetric key encryption & decryption helper
 public protocol RatchetSymmetricEncryption {
@@ -184,7 +184,7 @@ public struct SkippedKey: Codable {
 }
 
 public struct DoubleRatchetHKDF<Hash: HashFunction> {
-    public struct State: Codable {
+    public struct State: Codable, @unchecked Sendable {
         private enum CodingKeys: String, CodingKey {
             case rootKey = "a"
             case localPrivateKey = "b"

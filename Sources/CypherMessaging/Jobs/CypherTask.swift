@@ -1,6 +1,6 @@
 import CypherProtocol
 import Foundation
-import CryptoKit
+import Crypto
 import BSON
 import NIO
 
@@ -29,7 +29,7 @@ struct HandshakeMessageTask: Codable {
     let messageId: String
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct CreateChatTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -50,7 +50,7 @@ struct CreateChatTask: Codable {
     let acceptedByOtherUser: Bool
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct AddContactTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -65,7 +65,7 @@ struct AddContactTask: Codable {
     let nickname: String
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -98,7 +98,7 @@ struct ReceiveMessageTask: Codable {
     let deviceId: DeviceId
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case localId = "a"
@@ -115,7 +115,7 @@ struct SendMessageDeliveryStateChangeTask: Codable {
     let newState: ChatMessageModel.DeliveryState
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct ReceiveMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case messageId = "a"
@@ -130,7 +130,7 @@ struct ReceiveMessageDeliveryStateChangeTask: Codable {
     let newState: ChatMessageModel.DeliveryState
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct ReceiveMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -145,7 +145,7 @@ struct ReceiveMultiRecipientMessageTask: Codable {
     let deviceId: DeviceId
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -207,7 +207,7 @@ public enum _CypherTaskConfig {
     public static var sendMessageRetryMode: TaskRetryMode? = nil
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 enum CypherTask: Codable, StoredTask {
     private enum CodingKeys: String, CodingKey {
         case key = "a"
@@ -407,12 +407,14 @@ enum CypherTask: Codable, StoredTask {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 enum TaskHelpers {
     fileprivate static func writeMultiRecipientMessageTask(
         task: SendMultiRecipientMessageTask,
         messenger: CypherMessenger
     ) async throws {
+        assert(messenger.transport.supportsMultiRecipientMessages)
+        
         guard messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
             _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
@@ -430,16 +432,16 @@ enum TaskHelpers {
             let index = devices.count - i - 1
             let device = devices[index]
             
-            do {
-                if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
-                    with: device.username,
-                    deviceId: device.deviceId
-                ) {
+            if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
+                with: device.username,
+                deviceId: device.deviceId
+            ) {
+                do {
                     try await p2pTransport.sendMessage(task.message, messageId: task.messageId)
                     devices.remove(at: index)
+                } catch {
+                    debugLog("Failed to send message over P2P connection", error)
                 }
-            } catch {
-                debugLog("Failed to send message over P2P connection", error)
             }
         }
         

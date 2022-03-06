@@ -1,4 +1,4 @@
-//#if canImport(SwiftUI) && canImport(Combine)
+#if canImport(SwiftUI) && canImport(Combine) && (os(macOS) || os(iOS))
 import SwiftUI
 import CypherMessaging
 import Combine
@@ -19,9 +19,9 @@ public final class SwiftUIEventEmitter: ObservableObject {
     
     @Published public private(set) var conversations = [TargetConversation.Resolved]()
     @Published public fileprivate(set) var contacts = [Contact]()
-    let sortChats: (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
+    let sortChats: @Sendable (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
     
-    public init(sortChats: @escaping (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
+    public init(sortChats: @escaping @Sendable (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
         self.sortChats = sortChats
     }
     
@@ -109,4 +109,4 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         }
     }
 }
-//#endif
+#endif

@@ -8,48 +8,51 @@ enum UserIdentityState {
     case consistent, newIdentity, changedIdentity
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 internal extension CypherMessenger {
+    @CryptoActor
     func _markMessage(byRemoteId remoteId: String, updatedBy user: Username, as newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
         let message = try await cachedStore.fetchChatMessage(byRemoteId: remoteId)
-        let decryptedMessage = try await self.decrypt(message)
+        let decryptedMessage = try self.decrypt(message)
         
         guard decryptedMessage.props.senderUser == self.username else {
             throw CypherSDKError.badInput
         }
         
         let oldState = decryptedMessage.deliveryState
-        let result = try await decryptedMessage.transitionDeliveryState(to: newState)
+        let result = try decryptedMessage.transitionDeliveryState(to: newState)
         
         do {
             try await self._updateChatMessage(decryptedMessage)
             return result
         } catch {
-            try await decryptedMessage.setProp(at: \.deliveryState, to: oldState)
+            try decryptedMessage.setProp(at: \.deliveryState, to: oldState)
             throw error
         }
     }
     
+    @CryptoActor
     func _markMessage(byId id: UUID?, as newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
         guard let id = id else {
             return .error
         }
         
         let message = try await cachedStore.fetchChatMessage(byId: id)
-        let decryptedMessage = try await self.decrypt(message)
+        let decryptedMessage = try self.decrypt(message)
         let oldState = decryptedMessage.deliveryState
         
-        let result = try await decryptedMessage.transitionDeliveryState(to: newState)
+        let result = try decryptedMessage.transitionDeliveryState(to: newState)
         
         do {
             try await self._updateChatMessage(decryptedMessage)
             return result
         } catch {
-            try await decryptedMessage.setProp(at: \.deliveryState, to: oldState)
+            try decryptedMessage.setProp(at: \.deliveryState, to: oldState)
             throw error
         }
     }
     
+    @CryptoActor
     func _updateChatMessage(_ message: DecryptedModel<ChatMessageModel>) async throws {
         try await self.cachedStore.updateChatMessage(message.encrypted)
         self.eventHandler.onMessageChange(
@@ -61,6 +64,7 @@ internal extension CypherMessenger {
         )
     }
     
+    @CryptoActor
     func _createConversation(
         members: Set<Username>,
         metadata: Document
@@ -70,6 +74,7 @@ internal extension CypherMessenger {
         let conversation = try ConversationModel(
             props: .init(
                 members: members,
+                kickedMembers: [],
                 metadata: metadata,
                 localOrder: 0
             ),
@@ -77,7 +82,7 @@ internal extension CypherMessenger {
         )
         
         try await cachedStore.createConversation(conversation)
-        let decrypted = try await self.decrypt(conversation)
+        let decrypted = try self.decrypt(conversation)
         guard let resolved = await TargetConversation.Resolved(conversation: decrypted, messenger: self) else {
             throw CypherSDKError.internalError
         }
@@ -86,10 +91,17 @@ internal extension CypherMessenger {
         return conversation
     }
     
+    @CryptoActor
     func _queueTask(_ task: CypherTask) async throws {
         try await self.jobQueue.queueTask(task)
     }
     
+    @CryptoActor
+    func _queueTasks(_ task: [CypherTask]) async throws {
+        try await self.jobQueue.queueTasks(task)
+    }
+    
+    @CryptoActor
     func _updateUserIdentity(of username: Username, to config: UserConfig) async throws -> UserIdentityState {
         if username == self.username {
             return .consistent
@@ -97,7 +109,7 @@ internal extension CypherMessenger {
         
         let contacts = try await cachedStore.fetchContacts()
         for contact in contacts {
-            let contact = try await self.decrypt(contact)
+            let contact = try self.decrypt(contact)
             
             guard contact.props.username == username else {
                 continue
@@ -106,7 +118,7 @@ internal extension CypherMessenger {
             if contact.config.identity.data == config.identity.data {
                 return .consistent
             } else {
-                try await contact.updateConfig(to: config)
+                try contact.updateConfig(to: config)
                 try await self.cachedStore.updateContact(contact.encrypted)
                 return .changedIdentity
             }
@@ -128,16 +140,17 @@ internal extension CypherMessenger {
         
         try await self.cachedStore.createContact(contact)
         self.eventHandler.onCreateContact(
-            Contact(messenger: self, model: try await self.decrypt(contact)),
+            Contact(messenger: self, model: try self.decrypt(contact)),
             messenger: self
         )
         return .newIdentity
     }
     
+    @CryptoActor
     func _createDeviceIdentity(from device: UserDeviceConfig, forUsername username: Username) async throws -> DecryptedModel<DeviceIdentityModel> {
         let deviceIdentities = try await cachedStore.fetchDeviceIdentities()
         for deviceIdentity in deviceIdentities {
-            let deviceIdentity = try await self.decrypt(deviceIdentity)
+            let deviceIdentity = try self.decrypt(deviceIdentity)
             
             if
                 deviceIdentity.props.username == username,
@@ -166,12 +179,12 @@ internal extension CypherMessenger {
         // New device
         // TODO: Emit notification?
         
-        let decryptedDevice = try await self.decrypt(newDevice)
+        let decryptedDevice = try self.decrypt(newDevice)
         try await self.cachedStore.createDeviceIdentity(newDevice)
         return decryptedDevice
     }
     
-    
+    @CryptoActor
     func _refreshDeviceIdentities(
         for username: Username
     ) async throws {
@@ -180,6 +193,7 @@ internal extension CypherMessenger {
     }
     
     // TODO: Rate limit
+    @CryptoActor
     func _rediscoverDeviceIdentities(
         for username: Username,
         knownDevices: [DecryptedModel<DeviceIdentityModel>]
@@ -217,6 +231,7 @@ internal extension CypherMessenger {
         }
     }
     
+    @CryptoActor
     func _receiveMultiRecipientMessage(
         _ message: MultiRecipientCypherMessage,
         messageId: String,
@@ -238,6 +253,7 @@ internal extension CypherMessenger {
         )
     }
     
+    @CryptoActor
     func _receiveMessage(
         _ inbound: RatchetedCypherMessage,
         multiRecipientContainer: MultiRecipientContainer?,
@@ -292,6 +308,7 @@ internal extension CypherMessenger {
         }
     }
     
+    @CryptoActor
     func _processMessage(
         message: SingleCypherMessage,
         remoteMessageId: String,
@@ -390,6 +407,7 @@ internal extension CypherMessenger {
             if let subType = message.messageSubtype, subType.hasPrefix("_/") {
                 switch subType {
                 case "_/ignore":
+                    // Do nothing, it's like a `ping` message without `pong` reply
                     return
                 default:
                     debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
@@ -506,11 +524,12 @@ internal extension CypherMessenger {
         }
     }
     
+    @CryptoActor
     func _fetchKnownDeviceIdentities(
         for username: Username
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
         try await cachedStore.fetchDeviceIdentities().asyncCompactMap { deviceIdentity in
-            let deviceIdentity = try await self.decrypt(deviceIdentity)
+            let deviceIdentity = try self.decrypt(deviceIdentity)
             
             if deviceIdentity.username == username {
                 return deviceIdentity
@@ -520,6 +539,7 @@ internal extension CypherMessenger {
         }
     }
     
+    @CryptoActor
     func _fetchDeviceIdentity(
         for username: Username,
         deviceId: DeviceId
@@ -537,6 +557,7 @@ internal extension CypherMessenger {
         }
     }
     
+    @CryptoActor
     func _fetchDeviceIdentities(
         for username: Username
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
@@ -548,12 +569,13 @@ internal extension CypherMessenger {
         return knownDevices
     }
     
-    @Sendable func _fetchDeviceIdentities(
+    @CryptoActor
+    func _fetchDeviceIdentities(
         forUsers usernames: Set<Username>
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
         let devices = try await cachedStore.fetchDeviceIdentities()
         let knownDevices = try await devices.asyncCompactMap { deviceIdentity -> DecryptedModel<DeviceIdentityModel>? in
-            let deviceIdentity = try await self.decrypt(deviceIdentity)
+            let deviceIdentity = try self.decrypt(deviceIdentity)
             
             if usernames.contains(deviceIdentity.username) {
                 return deviceIdentity

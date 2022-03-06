@@ -16,4 +16,5 @@ enum CypherSDKError: Error {
     case invalidTransport
     case unsupportedTransport
     case internalError
+    case notGroupMember, notGroupModerator
 }

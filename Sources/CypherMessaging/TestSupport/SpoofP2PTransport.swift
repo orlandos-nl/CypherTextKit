@@ -4,7 +4,7 @@ enum SpoofP2PTransportError: Error {
     case disconnected
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public final class SpoofP2PTransportClient: P2PTransportClient {
     public weak var delegate: P2PTransportClientDelegate?
     public fileprivate(set) var connected: ConnectionState = .connecting
@@ -55,7 +55,7 @@ public final class SpoofP2PTransportClient: P2PTransportClient {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 fileprivate final class SpoofTransportFactoryMedium {
     var clients = [String: SpoofP2PTransportClient]()
     
@@ -63,7 +63,7 @@ fileprivate final class SpoofTransportFactoryMedium {
     static let `default` = SpoofTransportFactoryMedium()
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public final class SpoofP2PTransportFactory: P2PTransportClientFactory {
     public init() {}
     

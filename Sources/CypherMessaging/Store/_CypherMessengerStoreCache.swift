@@ -12,7 +12,7 @@ struct Weak<O: AnyObject> {
     private init() {}
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 internal final class _CypherMessengerStoreCache: CypherMessengerStore {
     internal let base: CypherMessengerStore
     

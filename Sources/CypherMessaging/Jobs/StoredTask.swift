@@ -2,7 +2,7 @@ import NIO
 import BSON
 import Foundation
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public protocol StoredTask: Codable {
     var key: TaskKey { get }
     var isBackgroundTask: Bool { get }
@@ -14,7 +14,7 @@ public protocol StoredTask: Codable {
     func onDelayed(on messenger: CypherMessenger) async throws
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 typealias TaskDecoder = (Document) throws -> StoredTask
 
 public struct TaskPriority {

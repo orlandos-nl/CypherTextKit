@@ -2,7 +2,7 @@ import NIOFoundationCompat
 import BSON
 import NIO
 import Foundation
-import CryptoKit
+import Crypto
 
 typealias PrivateSigningKeyAlg = Curve25519.Signing.PrivateKey
 typealias PublicSigningKeyAlg = Curve25519.Signing.PublicKey
@@ -46,7 +46,7 @@ public struct PrivateSigningKey: Codable {
 /// A wrapper around Curve25519 public _signing_ keys that provides Codable support using `Foundation.Data`
 ///
 /// Public signing keys are used to verify signatures by the matching private key.
-public struct PublicSigningKey: Codable {
+public struct PublicSigningKey: Codable, @unchecked Sendable {
     fileprivate let publicKey: PublicSigningKeyAlg
     
     fileprivate init(publicKey: PublicSigningKeyAlg) {
@@ -142,7 +142,7 @@ public struct PrivateKey: Codable {
 
 /// A key that is derived from `PrivateKey`.
 /// Used to create a shared secret, known only to the owner of the PrivateKeys that shared their PublicKey.
-public struct PublicKey: Codable, Equatable {
+public struct PublicKey: Codable, Equatable, @unchecked Sendable {
     fileprivate let publicKey: PublicKeyAgreementKeyAlg
     
     fileprivate init(publicKey: PublicKeyAgreementKeyAlg) {

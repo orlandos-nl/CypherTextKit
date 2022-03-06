@@ -3,7 +3,7 @@ import BSON
 import Foundation
 import NIO
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension CypherMessenger {
     public func getConversation(byId id: UUID) async throws -> TargetConversation.Resolved? {
         let conversations = try await cachedStore.fetchConversations()
@@ -21,10 +21,10 @@ extension CypherMessenger {
         return nil
     }
     
-    public func getInternalConversation() async throws -> InternalConversation {
+    @CryptoActor public func getInternalConversation() async throws -> InternalConversation {
         let conversations = try await cachedStore.fetchConversations()
         for conversation in conversations {
-            let conversation = try await self.decrypt(conversation)
+            let conversation = try self.decrypt(conversation)
             
             if conversation.members == [self.username] {
                 return InternalConversation(conversation: conversation, messenger: self)
@@ -37,7 +37,7 @@ extension CypherMessenger {
         )
         
         return InternalConversation(
-            conversation: try await self.decrypt(conversation),
+            conversation: try self.decrypt(conversation),
             messenger: self
         )
     }
@@ -60,7 +60,7 @@ extension CypherMessenger {
         
         let devices = try await self._fetchDeviceIdentities(for: groupConfig.admin)
         for device in devices {
-            if config.blob.isSigned(by: device.props.identity) {
+            if await config.blob.isSigned(by: device.props.identity) {
                 let config = ReferencedBlob(id: config.id, blob: groupConfig)
                 let groupMetadata = GroupMetadata(
                     custom: [:],
@@ -69,6 +69,7 @@ extension CypherMessenger {
                 let conversation = try ConversationModel(
                     props: .init(
                         members: groupConfig.members,
+                        kickedMembers: [],
                         metadata: BSONEncoder().encode(groupMetadata),
                         localOrder: 0
                     ),
@@ -89,10 +90,10 @@ extension CypherMessenger {
         throw CypherSDKError.invalidGroupConfig
     }
     
-    public func getGroupChat(byId id: GroupChatId) async throws -> GroupChat? {
+    @CryptoActor public func getGroupChat(byId id: GroupChatId) async throws -> GroupChat? {
         let conversations = try await cachedStore.fetchConversations()
         nextConversation: for conversation in conversations {
-            let conversation = try await self.decrypt(conversation)
+            let conversation = try self.decrypt(conversation)
             guard
                 conversation.members.count >= 2,
                 conversation.members.contains(self.username)
@@ -123,10 +124,10 @@ extension CypherMessenger {
         return nil
     }
     
-    public func getPrivateChat(with otherUser: Username) async throws -> PrivateChat? {
+    @CryptoActor public func getPrivateChat(with otherUser: Username) async throws -> PrivateChat? {
         let conversations = try await cachedStore.fetchConversations()
         nextConversation: for conversation in conversations {
-            let conversation = try await self.decrypt(conversation)
+            let conversation = try self.decrypt(conversation)
             let members = conversation.members
             
             if
@@ -159,6 +160,7 @@ extension CypherMessenger {
             moderators: [self.username],
             metadata: sharedMetadata
         )
+        // TODO: Transparent Group Chats (no uploaded binary blobs)
         
         let referencedBlob = try await self.transport.publishBlob(self.sign(config))
         let metadata = GroupMetadata(
@@ -176,13 +178,13 @@ extension CypherMessenger {
             metadata: metadataDocument
         )
         
-        let chat = GroupChat(
+        let chat = GroupChat( 
             conversation: try await self.decrypt(conversation),
             messenger: self,
             metadata: metadata
         )
         
-        try await chat.sendRawMessage(
+        _ = try await chat.sendRawMessage(
             type: .magic,
             messageSubtype: "_/ignore",
             text: "",
@@ -216,10 +218,10 @@ extension CypherMessenger {
         }
     }
     
-    public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) async throws -> [PrivateChat] {
+    @CryptoActor public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) async throws -> [PrivateChat] {
         let conversations = try await cachedStore.fetchConversations()
         return try await conversations.asyncCompactMap { conversation -> PrivateChat? in
-            let conversation = try await self.decrypt(conversation)
+            let conversation = try self.decrypt(conversation)
             let members = conversation.members
             guard
                 members.contains(self.username),
@@ -233,10 +235,10 @@ extension CypherMessenger {
         }.sorted(by: increasingOrder)
     }
     
-    public func listGroupChats(increasingOrder: @escaping (GroupChat, GroupChat) throws -> Bool) async throws -> [GroupChat] {
+    @CryptoActor public func listGroupChats(increasingOrder: @escaping (GroupChat, GroupChat) throws -> Bool) async throws -> [GroupChat] {
         let conversations = try await cachedStore.fetchConversations()
         return try await conversations.asyncCompactMap { conversation -> GroupChat? in
-            let conversation = try await self.decrypt(conversation)
+            let conversation = try self.decrypt(conversation)
             let members = conversation.members
             
             guard
@@ -279,7 +281,7 @@ extension CypherMessenger {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public protocol AnyConversation {
     var conversation: DecryptedModel<ConversationModel> { get }
     var messenger: CypherMessenger { get }
@@ -289,7 +291,7 @@ public protocol AnyConversation {
     func resolveTarget() async -> TargetConversation.Resolved
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension AnyConversation {
     public func listOpenP2PConnections() async throws -> [P2PClient] {
         try await self.memberDevices().asyncCompactMap { device in
@@ -318,18 +320,23 @@ extension AnyConversation {
     internal func memberDevices() async throws -> [DecryptedModel<DeviceIdentityModel>] {
         try await messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
+
+    internal func historicMemberDevices() async throws -> [DecryptedModel<DeviceIdentityModel>] {
+        try await messenger._fetchDeviceIdentities(forUsers: conversation.allHistoricMembers)
+    }
     
     public func save() async throws {
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         messenger.eventHandler.onUpdateConversation(self)
     }
     
-    private func getNextLocalOrder() async throws -> Int {
+    internal func getNextLocalOrder() async throws -> Int {
         let order = try await conversation.getNextLocalOrder()
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         return order
     }
     
+    @discardableResult
     @JobQueueActor public func sendRawMessage(
         type: CypherMessageType,
         messageSubtype: String? = nil,
@@ -419,7 +426,7 @@ extension AnyConversation {
         return message
     }
     
-    internal func _sendMessage(
+    @CryptoActor internal func _sendMessage(
         _ message: SingleCypherMessage,
         to recipients: Set<Username>,
         pushType: PushType
@@ -454,20 +461,41 @@ extension AnyConversation {
             localId = chatMessage.id
             _chatMessage = chatMessage
         }
-        
-        try await messenger._queueTask(
-            .sendMultiRecipientMessage(
-                SendMultiRecipientMessageTask(
-                    message: CypherMessage(message: message),
-                    // We _always_ attach a messageID so the protocol doesn't give away
-                    // The precense of magic packets
-                    messageId: remoteId,
-                    recipients: recipients,
-                    localId: localId,
-                    pushType: pushType
+       
+        if messenger.transport.supportsMultiRecipientMessages {
+            try await messenger._queueTask(
+                .sendMultiRecipientMessage(
+                    SendMultiRecipientMessageTask(
+                        message: CypherMessage(message: message),
+                        // We _always_ attach a messageID so the protocol doesn't give away
+                        // The precense of magic packets
+                        messageId: remoteId,
+                        recipients: recipients,
+                        localId: localId,
+                        pushType: pushType
+                    )
                 )
             )
-        )
+        } else {
+            var tasks = [CypherTask]()
+            
+            for device in try await memberDevices() {
+                tasks.append(
+                    .sendMessage(
+                        SendMessageTask(
+                            message: CypherMessage(message: message),
+                            recipient: device.username,
+                            recipientDeviceId: device.deviceId,
+                            localId: localId,
+                            pushType: pushType,
+                            messageId: remoteId
+                        )
+                    )
+                )
+            }
+            
+            try await messenger._queueTasks(tasks)
+        }
         
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         
@@ -482,23 +510,23 @@ extension AnyConversation {
         }
     }
     
-    public func message(byRemoteId remoteId: String) async throws -> AnyChatMessage {
+    @CryptoActor public func message(byRemoteId remoteId: String) async throws -> AnyChatMessage {
         let message = try await self.messenger.cachedStore.fetchChatMessage(byRemoteId: remoteId)
         
         return await AnyChatMessage(
             target: self.getTarget(),
             messenger: self.messenger,
-            raw: try await self.messenger.decrypt(message)
+            raw: try self.messenger.decrypt(message)
         )
     }
     
-    public func message(byLocalId id: UUID) async throws -> AnyChatMessage {
+    @CryptoActor public func message(byLocalId id: UUID) async throws -> AnyChatMessage {
         let message = try await self.messenger.cachedStore.fetchChatMessage(byId: id)
         
         return await AnyChatMessage(
             target: self.getTarget(),
             messenger: self.messenger,
-            raw: try await self.messenger.decrypt(message)
+            raw: try self.messenger.decrypt(message)
         )
     }
     
@@ -512,11 +540,11 @@ extension AnyConversation {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct InternalConversation: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    public let cache = Cache()
+    @CacheActor public let cache = Cache()
     
     public func getTarget() async -> TargetConversation {
         return .currentUser
@@ -534,12 +562,12 @@ public struct InternalConversation: AnyConversation {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct GroupChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
     internal var metadata: GroupMetadata
-    public let cache = Cache()
+    @CacheActor public let cache = Cache()
     public func getGroupConfig() async -> ReferencedBlob<GroupChatConfig> {
         metadata.config
     }
@@ -554,6 +582,55 @@ public struct GroupChat: AnyConversation {
     public func resolveTarget() async -> TargetConversation.Resolved {
         .groupChat(self)
     }
+    
+//    public func kickMember(_ member: Username) async throws {
+//        if !conversation.members.contains(member) {
+//            throw CypherSDKError.notGroupMember
+//        }
+//
+//        try await conversation.modifyProps { props in
+//            props.members.remove(member)
+//            props.kickedMembers.insert(member)
+//        }
+//
+//        try await self.save()
+//
+//        // Send message to user explicitly, so that they know they're kicked
+//        let order = try await getNextLocalOrder()
+//        try await messenger._writeMessage(
+//            SingleCypherMessage(
+//                messageType: .magic,
+//                messageSubtype: "_/group/kick",
+//                text: member.raw,
+//                metadata: [:],
+//                destructionTimer: nil,
+//                sentDate: Date(),
+//                preferredPushType: PushType.none,
+//                order: order,
+//                target: await self.getTarget()
+//            ),
+//            to: member
+//        )
+//    }
+//
+//    public func inviteMember(_ member: Username) async throws {
+//        if conversation.members.contains(member) {
+//            return
+//        }
+//
+//        try await conversation.modifyProps { props in
+//            props.members.insert(member)
+//            props.kickedMembers.remove(member)
+//        }
+//
+//        try await self.save()
+//        _ = try await sendRawMessage(
+//            type: .magic,
+//            messageSubtype: "_/group/invite",
+//            text: member.raw,
+//            preferredPushType: .none
+//        )
+//    }
 }
 
 public struct GroupMetadata: Codable {
@@ -562,21 +639,21 @@ public struct GroupMetadata: Codable {
     public internal(set) var config: ReferencedBlob<GroupChatConfig>
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct PrivateChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    public let cache = Cache()
+    @CacheActor public let cache = Cache()
     
-    public func getTarget() -> TargetConversation {
-        .otherUser(conversationPartner)
+    public func getTarget() async -> TargetConversation {
+        .otherUser(await conversationPartner)
     }
     
     public func resolveTarget() -> TargetConversation.Resolved {
         .privateChat(self)
     }
     
-    public var conversationPartner: Username {
+    @CryptoActor public var conversationPartner: Username {
         // PrivateChats always have exactly 2 members
         var members = conversation.members
         members.remove(messenger.username)

@@ -5,7 +5,7 @@ import NIO
 
 let iterationSize = 50
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 fileprivate final class DeviceChatCursor {
     internal private(set) var messages = [AnyChatMessage]()
     var offset = 0
@@ -90,7 +90,7 @@ fileprivate final class DeviceChatCursor {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public final class AnyChatMessageCursor {
     let messenger: CypherMessenger
     private let devices: [DeviceChatCursor]
@@ -111,7 +111,7 @@ public final class AnyChatMessageCursor {
         self.sortMode = sortMode
     }
     
-    public func getNext() async throws -> AnyChatMessage? {
+    @CryptoActor public func getNext() async throws -> AnyChatMessage? {
         struct CursorResult {
             let device: DeviceChatCursor
             let message: AnyChatMessage
@@ -175,7 +175,7 @@ public final class AnyChatMessageCursor {
     ) async throws -> AnyChatMessageCursor {
         assert(sortMode == .descending, "Unsupported ascending")
         
-        var devices = try await conversation.memberDevices().asyncMap { device in
+        var devices = try await conversation.historicMemberDevices().asyncMap { device in
             await DeviceChatCursor(
                 target: conversation.getTarget(),
                 conversationId: conversation.conversation.encrypted.id,

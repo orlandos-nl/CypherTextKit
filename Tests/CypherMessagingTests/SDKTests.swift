@@ -6,7 +6,7 @@ import CypherMessaging
 import SystemConfiguration
 import CypherProtocol
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct Synchronisation {
     let apps: [CypherMessenger]
     
@@ -71,10 +71,14 @@ func XCTAssertAsyncEqual<T: Equatable>(_ run: @autoclosure () async throws -> T,
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 final class CypherSDKTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
+    }
+    
+    func testDisableMultiRecipientMessage() async throws {
+        
     }
     
     func testPrivateChatWithYourself() async throws {
@@ -350,7 +354,16 @@ final class CypherSDKTests: XCTestCase {
     
     func testMultiDevicePrivateChatUnderLoad() async throws {
         struct DroppedPacket: Error {}
-        var droppedMessageIds = Set<String>()
+        actor Result {
+            var droppedMessageIds = Set<String>()
+            func addMessagedId(_ id: String) throws {
+                if !droppedMessageIds.contains(id) {
+                    droppedMessageIds.insert(id)
+                    throw DroppedPacket()
+                }
+            }
+        }
+        let result = Result()
         // Always retry, because we don't want the test to take forever
         _CypherTaskConfig.sendMessageRetryMode = .always
         SpoofTransportClientSettings.shouldDropPacket = { username, type in
@@ -364,10 +377,7 @@ final class CypherSDKTests: XCTestCase {
                     .readReceipt(remoteId: let id, otherUser: _),
                     .receiveReceipt(remoteId: let id, otherUser: _):
                 // Cause as much chaos as possible
-                if !droppedMessageIds.contains(id) {
-                    droppedMessageIds.insert(id)
-                    throw DroppedPacket()
-                }
+                try await result.addMessagedId(id)
             case .readKeyBundle, .publishBlob, .readBlob:
                 if Bool.random() {
                     throw DroppedPacket()
