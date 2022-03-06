@@ -169,7 +169,7 @@ fileprivate final actor CypherMessengerActor {
 ///
 /// CypherMessenger can be created as a singleton, but multiple clients in the same process is supported.
 @available(macOS 10.15, iOS 13, *)
-public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate {
+public final actor CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate {
     internal let eventLoop: EventLoop
     private(set) var jobQueue: JobQueue!
     private var inactiveP2PSessionsTimeout: Int? = 30

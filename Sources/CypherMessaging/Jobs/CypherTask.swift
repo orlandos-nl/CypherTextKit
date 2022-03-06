@@ -415,7 +415,7 @@ enum TaskHelpers {
     ) async throws {
         assert(messenger.transport.supportsMultiRecipientMessages)
         
-        guard messenger.authenticated == .authenticated else {
+        guard await messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
             _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
             throw CypherSDKError.offline
@@ -459,7 +459,7 @@ enum TaskHelpers {
         task: SendMessageTask,
         messenger: CypherMessenger
     ) async throws {
-        guard messenger.authenticated == .authenticated else {
+        guard await messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
             _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
             throw CypherSDKError.offline
