@@ -1,10 +1,12 @@
-#if os(iOS) || os(macOS)
 import BSON
 import Foundation
 import CypherProtocol
 import CypherMessaging
 import JWTKit
 import WebSocketKit
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // TODO: Secondary servers
 
@@ -107,7 +109,19 @@ extension URLSession {
         if let token = token {
             request.addValue(token, forHTTPHeaderField: "X-API-Token")
         }
-        let (data, _) = try await self.data(for: request)
+
+#if canImport(FoundationNetworking)
+        let data: Data = await withCheckedContinuation { continuation in
+            self.dataTask(with: request) { data, _, _ in
+                guard let data = data else {
+                    fatalError("DataTask was nil while fetching BSON")
+                }
+                continuation.resume(returning: data)
+            }.resume()
+        }
+#else
+    let (data, _) = try await self.data(for: request)
+#endif
         return try BSONDecoder().decode(type, from: Document(data: data))
     }
     
@@ -130,10 +144,30 @@ extension URLSession {
         let data = try BSONEncoder().encode(body).makeData()
         
         if data.count > maxBodySize {
+#if canImport(FoundationNetworking)
+             guard let response = URLResponse(URL(string: "\(httpHost)/\(url)")!) else {
+                 throw VaporTransportError.urlResponseNil
+                 }
+            return (Data(), response)
+#else
             return (Data(), URLResponse())
+#endif
         }
         
+#if canImport(FoundationNetworking)
+        let uploadTask: (Data, URLResponse) = await withCheckedContinuation { continuation in
+            let task = self.uploadTask(with: request, from: data)  { data, res, error in
+                guard error == nil else { return }
+                guard let response = res as? HTTPURLResponse else { return }
+                guard let data = data else { return }
+                continuation.resume(returning: (data, response))
+            }
+            task.resume()
+        }
+        return uploadTask
+#else
         return try await self.upload(for: request, from: data)
+#endif
     }
 }
 
