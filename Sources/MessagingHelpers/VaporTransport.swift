@@ -585,4 +585,4 @@ extension DataProtocol {
         return String(bytesNoCopy: ptr, length: hexLen, encoding: .utf8, freeWhenDone: true)!
     }
 }
-#endif
+

@@ -700,7 +700,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
     }
     
-    @CryptoActor private let cache = ModelCache()
+    @CryptoActor
+    private let cache = ModelCache()
     
     /// Decrypts a model as provided by the database
     /// It is critical to call this method for decryption for stability reasons, as CypherMessenger prevents duplicate representations of a Model from existing at the same time.
