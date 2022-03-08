@@ -5,12 +5,38 @@ public enum ConnectionState {
     case connecting, connected, disconnecting, disconnected
 }
 
+public struct Peer: Codable {
+    public let username: Username
+    public let deviceConfig: UserDeviceConfig
+    public var deviceId: DeviceId { deviceConfig.deviceId }
+    public var identity: PublicSigningKey { deviceConfig.identity }
+    public var publicKey: PublicKey { deviceConfig.publicKey }
+}
+
+public struct P2PAdvertisement: Codable {
+    internal struct Advertisement: Codable {
+        let origin: Peer
+    }
+    
+    internal let advertisement: Signed<Advertisement>
+}
+
+internal actor P2PMeshState {
+    
+}
+
 /// Can only be initialised by the CypherTextKit
 /// Contains internal and public information about the connection and conncted clients
 public struct P2PFrameworkState {
-    internal let username: Username
-    internal let deviceId: DeviceId
-    internal let identity: PublicSigningKey
+    public let remote: Peer
+    internal var username: Username { remote.username }
+    internal var deviceId: DeviceId { remote.deviceId }
+    internal var identity: PublicSigningKey { remote.identity }
+    internal let isMeshEnabled: Bool
+    
+    // TODO: Attempt Offline Verification
+    internal var verified = true
+    internal let mesh = P2PMeshState()
 }
 
 /// PeerToPeerTransportClient is used to create a direct connection between two devices.
@@ -53,6 +79,16 @@ public protocol P2PTransportClientDelegate: AnyObject {
     func p2pConnection(_ connection: P2PTransportClient, closedWithOptions: Set<P2PTransportClosureOption>) async throws
 }
 
+@available(macOS 10.15, iOS 13, *)
+public protocol P2PTransportFactoryDelegate: AnyObject {
+    func p2pTransportDiscovered(
+        _ connection: P2PTransportClient,
+        remotePeer: Peer
+    ) async throws
+    
+    func createLocalDeviceAdvertisement() async throws -> P2PAdvertisement
+}
+
 public struct P2PTransportCreationRequest {
     public let state: P2PFrameworkState
 }
@@ -68,8 +104,16 @@ public typealias PeerToPeerConnectionBuilder = (P2PTransportCreationRequest) -> 
 ///
 /// Example: WebRTC based implementations are likely to make use of the handle to send and receive SDPs. The factory can then make use of internal state for storing incomplete connections.
 @available(macOS 10.15, iOS 13, *)
-public protocol P2PTransportClientFactory {
+public protocol P2PTransportClientFactory: AnyObject {
     var transportLayerIdentifier: String { get }
+    
+    /// Whether this transport type supports relaying messages for between two peers
+    var isMeshEnabled: Bool { get }
+    
+    /// The delegate receives signals of factory-discovered peers. MUST be `weak` to prevent memory leaks.
+    ///
+    /// CypherTextKit is responsible for managing and delegating data received from this channel
+    var delegate: P2PTransportFactoryDelegate? { get set }
     
     func receiveMessage(
         _ text: String,
@@ -86,6 +130,25 @@ public protocol P2PTransportClientFactory {
     func createConnection(
         handle: P2PTransportFactoryHandle
     ) async throws -> P2PTransportClient?
+}
+
+extension P2PTransportClientFactory {
+    public var isMeshEnabled: Bool { false }
+    
+    public func createLocalTransportState(
+        advertisement: P2PAdvertisement
+    ) async throws -> P2PFrameworkState {
+        let remote = try advertisement.advertisement.readWithoutVerifying()
+        guard advertisement.advertisement.isSigned(by: remote.origin.identity) else {
+            throw CypherSDKError.invalidSignature
+        }
+        
+        return P2PFrameworkState(
+            remote: remote.origin,
+            isMeshEnabled: isMeshEnabled,
+            verified: false
+        )
+    }
 }
 
 /// An interface through which can be communicated with the remote device

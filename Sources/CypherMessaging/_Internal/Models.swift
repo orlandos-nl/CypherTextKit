@@ -66,6 +66,9 @@ public final class DeviceIdentityModel: Model, @unchecked Sendable {
         let identity: PublicSigningKey
         let isMasterDevice: Bool
         var doubleRatchet: DoubleRatchetHKDF<SHA512>.State?
+        
+        // TODO: Verify identity on the server later when possible
+        var serverVerified: Bool?
     }
     
     public let id: UUID

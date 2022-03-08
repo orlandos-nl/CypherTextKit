@@ -199,7 +199,7 @@ public struct ConversationTarget: Codable {
 }
 
 @available(macOS 10.15, iOS 13, *)
-public struct SingleCypherMessage: Codable {
+public struct SingleCypherMessage: Codable, @unchecked Sendable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {
         case messageType = "a"

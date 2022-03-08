@@ -26,8 +26,13 @@ extension TransportCreationRequest: JWTAlgorithm {
 }
 
 public struct UserDeviceId: Hashable, Codable {
-    let user: Username
-    let device: DeviceId
+    public let user: Username
+    public let device: DeviceId
+    
+    public init(user: Username, device: DeviceId) {
+        self.user = user
+        self.device = device
+    }
 }
 
 struct Token: JWTPayload {
@@ -178,6 +183,8 @@ public final class VaporTransport: CypherServerTransportClient {
     let host: String
     var httpHost: String { "https://\(host)" }
     var appleToken: String?
+    public let isConnected = true
+    public private(set) var authenticated = AuthenticationState.unauthenticated
     private var wantsConnection = true
     private var webSocket: WebSocket?
     private(set) var signer: TransportCreationRequest
@@ -284,8 +291,6 @@ public final class VaporTransport: CypherServerTransportClient {
         
         return transport
     }
-    
-    public private(set) var authenticated = AuthenticationState.unauthenticated
     
     private func makeToken() -> String? {
         return try? JWTSigner(algorithm: signer).sign(

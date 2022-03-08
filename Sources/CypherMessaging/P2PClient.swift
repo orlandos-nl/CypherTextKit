@@ -3,7 +3,7 @@ import BSON
 import CypherProtocol
 
 struct Acknowledgement {
-    public let id: ObjectId
+    public let id: String
     fileprivate let done: EventLoopFuture<Void>
     
     public func completion() async throws {
@@ -12,10 +12,10 @@ struct Acknowledgement {
 }
 
 fileprivate final actor AcknowledgementManager {
-    var acks = [ObjectId: EventLoopPromise<Void>]()
+    var acks = [String: EventLoopPromise<Void>]()
     
     func next(on eventLoop: EventLoop, deadline: TimeAmount = .seconds(10)) -> Acknowledgement {
-        let id = ObjectId()
+        let id = UUID().uuidString
         let promise = eventLoop.makePromise(of: Void.self)
         acks[id] = promise
         
@@ -26,7 +26,7 @@ fileprivate final actor AcknowledgementManager {
         return Acknowledgement(id: id, done: promise.futureResult)
     }
     
-    func acknowledge(_ id: ObjectId) {
+    func acknowledge(_ id: String) {
         acks[id]?.succeed(())
     }
     
@@ -39,17 +39,26 @@ fileprivate final actor AcknowledgementManager {
     }
 }
 
+fileprivate struct ForwardedBroadcast: Hashable {
+    let username: Username
+    let deviceId: DeviceId
+    let messageId: String
+}
+
 /// A peer-to-peer connection with a remote device. Used for low-latency communication with a third-party device.
 /// P2PClient is also used for static-length packets that are easily identified, such as status changes.
 ///
 /// You can interact with P2PClient as if you're sending and receiving cleartext messages, while the client itself applies the end-to-end encryption.
 @available(macOS 10.15, iOS 13, *)
 public final class P2PClient {
+    public static let maximumMeshPacketSize = 16_000
     private weak var messenger: CypherMessenger?
     private let client: P2PTransportClient
     let eventLoop: EventLoop
     private let ack = AcknowledgementManager()
     internal private(set) var lastActivity = Date()
+    public var isMeshEnabled: Bool { client.state.isMeshEnabled }
+    @CypherTextKitActor private var forwardedBroadcasts = [ForwardedBroadcast]()
     public private(set) var remoteStatus: P2PStatusMessage? {
         didSet {
             _onStatusChange?(remoteStatus)
@@ -114,27 +123,29 @@ public final class P2PClient {
     }
     
     /// This function is called whenever a P2PTransportClient receives information from a remote device
-    internal func receiveBuffer(
+    @CypherTextKitActor internal func receiveBuffer(
         _ buffer: ByteBuffer
     ) async throws {
         guard let messenger = messenger else {
             return
         }
         
+        // TODO: DOS prevention against repeating malicious peers
+        
         self.lastActivity = Date()
         let document = Document(buffer: buffer)
         
-        let ratchetMessage = try BSONDecoder().decode(RatchetedCypherMessage.self, from: document)
-        
-        let device = try await messenger._fetchDeviceIdentity(for: username, deviceId: deviceId)
-        let data = try await device._readWithRatchetEngine(
-            ofUser: client.state.username,
-            deviceId: client.state.deviceId,
-            message: ratchetMessage,
-            messenger: messenger
-        )
-        let messageBson = Document(data: data)
-        let message = try BSONDecoder().decode(P2PMessage.self, from: messageBson)
+        // TODO: Replace this with symmetric key decryption?
+//        let ratchetMessage = try BSONDecoder().decode(RatchetedCypherMessage.self, from: document)
+//
+//        let device = try await messenger._fetchDeviceIdentity(for: username, deviceId: deviceId)
+//        let data = try await device._readWithRatchetEngine(
+//            message: ratchetMessage,
+//            messenger: messenger
+//        )
+//        let messageBson = Document(data: data)
+//        let message = try BSONDecoder().decode(P2PMessage.self, from: messageBson)
+        let message = try BSONDecoder().decode(P2PMessage.self, from: document)
         
         switch message.box {
         case .status(let status):
@@ -160,6 +171,118 @@ public final class P2PClient {
             }
         case .ack:
             await ack.acknowledge(message.ack)
+        case .broadcast(var broadcast):
+            guard
+                // Ignore broadcasts on non-mesh clients
+                client.state.isMeshEnabled,
+                // 2KB packaging overhead over payload
+                buffer.readableBytes <= P2PClient.maximumMeshPacketSize + 2_000,
+                // Prevent infinite hopping
+                broadcast.hops <= 64
+            else {
+                // Ignore broadcast
+                return
+            }
+            
+            broadcast.hops -= 1
+            let unverifiedBroadcast = try broadcast.value.readWithoutVerifying()
+            let claimedOrigin = unverifiedBroadcast.origin
+            let destination = unverifiedBroadcast.target
+            
+            // TODO: Prevent Denial-of-Service spammers from spamming us through the mesh
+            
+            let forwardedBroadcast = ForwardedBroadcast(
+                username: claimedOrigin.username,
+                deviceId: claimedOrigin.deviceId,
+                messageId: unverifiedBroadcast.messageId
+            )
+            
+            guard !forwardedBroadcasts.contains(forwardedBroadcast) else {
+                // Don't re-process the same message
+                return
+            }
+            
+            forwardedBroadcasts.append(forwardedBroadcast)
+            
+            if forwardedBroadcasts.count > 200 {
+                // Clean up historic broadcasts list in bulk
+                // To clean up memory, and to allow re-broadcasts in case things changed
+                forwardedBroadcasts.removeFirst(100)
+            }
+            
+            let broadcast: P2PBroadcastMessage
+            let deviceModel: DecryptedModel<DeviceIdentityModel>
+            let knownDevices = try await messenger._fetchKnownDeviceIdentities(for: claimedOrigin.username)
+            
+            if let knownPeer = knownDevices.first(where: { $0.deviceId == claimedOrigin.deviceId }) {
+                // Device is known, accept!
+                deviceModel = knownPeer
+                broadcast = try signedBroadcast.readAndVerifySignature(signedBy: knownPeer.identity)
+            } else if knownDevices.isEmpty {
+                // User is not known, so assume the device is plausible although unverified
+                broadcast = try signedBroadcast.readAndVerifySignature(signedBy: claimedOrigin.identity)
+                deviceModel = try await messenger._createDeviceIdentity(
+                    from: claimedOrigin.deviceConfig,
+                    forUsername: claimedOrigin.username,
+                    serverVerified: false
+                )
+            } else {
+                // User is known, but device is not known. Abort, might be malicious
+                return
+            }
+            
+            if destination.username == messenger.username && destination.deviceId == messenger.deviceId {
+                // It's for us!
+                let payloadData = try await deviceModel._readWithRatchetEngine(message: broadcast.payload, messenger: messenger)
+                let message = try BSONDecoder().decode(CypherMessage.self, from: Document(data: payloadData))
+                
+                switch message.box {
+                case .single(let message):
+                    try await messenger._processMessage(
+                        message: message,
+                        remoteMessageId: broadcast.messageId,
+                        sender: deviceModel
+                    )
+                case .array(let messages):
+                    for message in messages {
+                        try await messenger._processMessage(
+                            message: message,
+                            remoteMessageId: broadcast.messageId,
+                            sender: deviceModel
+                        )
+                    }
+                }
+                
+                // TODO: Broadcast ack back? How does the client know it's arrived?
+            }
+            
+            let p2pConnections = await messenger.listOpenP2PConnections()
+            
+            if let p2pConnection = p2pConnections.first(where: {
+                $0.client.state.username == destination.username && $0.client.state.deviceId == destination.deviceId
+            }) {
+                // We know who to send it to!
+                return try await p2pConnection.sendMessage(.broadcast(broadcast))
+            }
+            
+            if broadcast.hops <= 0 {
+                // End of reach, let's stop here
+                return
+            }
+            
+            // Try to pass it on to other peers, maybe they can help
+            for p2pConnection in p2pConnections {
+                if p2pConnection.username == client.state.username && p2pConnection.deviceId == client.state.deviceId {
+                    // Ignore, since we're just cascading it back to the origin of this broadcast
+                } else {
+                    Task {
+                        // Ignore (connection) errors, we've tried our best
+                        try await p2pConnection.sendMessage(.broadcast(broadcast))
+                    }
+                }
+            }
+            
+            // TODO: Forward to/broadcast to the internet services?
         }
     }
     
@@ -192,7 +315,7 @@ public final class P2PClient {
     
     /// Sends a message (cleartext) to a remote peer
     /// This function then applies end-to-end encryption before transmitting the information over the internet.
-    private func sendMessage(_ box: P2PMessage.Box) async throws {
+    internal func sendMessage(_ box: P2PMessage.Box) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.offline
         }
@@ -205,17 +328,20 @@ public final class P2PClient {
             ack: ack.id
         )
         
-        try await messenger._writeWithRatchetEngine(
-            ofUser: client.state.username,
-            deviceId: client.state.deviceId
-        ) { ratchetEngine, rekey in
-            let messageBson = try BSONEncoder().encode(message)
-            let encryptedMessage = try ratchetEngine.ratchetEncrypt(messageBson.makeData())
-            let signedMessage = try await messenger._signRatchetMessage(encryptedMessage, rekey: rekey)
-            let signedMessageBson = try BSONEncoder().encode(signedMessage)
-            
-            try await self.client.sendMessage(signedMessageBson.makeByteBuffer())
-        }
+        // TODO: Replace this with symmetric key encryption? Make sure to prevent replay attacks
+//        try await messenger._writeWithRatchetEngine(
+//            ofUser: client.state.username,
+//            deviceId: client.state.deviceId
+//        ) { ratchetEngine, rekey in
+//            let messageBson = try BSONEncoder().encode(message)
+//            let encryptedMessage = try ratchetEngine.ratchetEncrypt(messageBson.makeData())
+//            let signedMessage = try await messenger._signRatchetMessage(encryptedMessage, rekey: rekey)
+//            let signedMessageBson = try BSONEncoder().encode(signedMessage)
+//
+//            try await self.client.sendMessage(signedMessageBson.makeByteBuffer())
+//        }
+        let signedMessageBson = try BSONEncoder().encode(message)
+        try await self.client.sendMessage(signedMessageBson.makeByteBuffer())
         
         try await ack.completion()
     }

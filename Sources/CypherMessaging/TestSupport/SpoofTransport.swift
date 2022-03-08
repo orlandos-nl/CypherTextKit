@@ -14,6 +14,7 @@ public enum SpoofTransportClientSettings {
         case sendMessage(messageId: String)
     }
     
+    public static var isOffline = false
     public static var shouldDropPacket: @Sendable @CryptoActor (Username, PacketType) async throws -> () = { _, _  in }
 }
 
@@ -131,6 +132,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     private let server: SpoofServer
     public private(set) var authenticated = AuthenticationState.unauthenticated
     public let supportsMultiRecipientMessages = true
+    public var isConnected: Bool { !SpoofTransportClientSettings.isOffline }
     public weak var delegate: CypherTransportClientDelegate?
     
     public func setDelegate(to delegate: CypherTransportClientDelegate) async throws {
@@ -153,7 +155,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public static func login(_ request: TransportCreationRequest) async throws -> SpoofTransportClient {
-        try await SpoofServer.local.login(username: request.username, deviceId: request.deviceId)
+        return try await SpoofServer.local.login(username: request.username, deviceId: request.deviceId)
     }
     
     public func receiveServerEvent(_ event: CypherServerEvent) async throws {
@@ -161,6 +163,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func reconnect() async throws {
+        if SpoofTransportClientSettings.isOffline {
+            throw SpoofP2PTransportError.disconnected
+        }
+        
         server.connectUser(self)
         authenticated = .authenticated
     }
@@ -171,6 +177,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func sendMessageReadReceipt(byRemoteId remoteId: String, to otherUser: Username) async throws {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .readReceipt(remoteId: remoteId, otherUser: otherUser)
@@ -179,6 +189,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func sendMessageReceivedReceipt(byRemoteId remoteId: String, to otherUser: Username) async throws {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .receiveReceipt(remoteId: remoteId, otherUser: otherUser)
@@ -187,6 +201,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func requestDeviceRegistery(_ userDeviceConfig: UserDeviceConfig) async throws {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .deviceRegistery
@@ -207,6 +225,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func readKeyBundle(forUsername username: Username) async throws -> UserConfig {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .readKeyBundle(username: username)
@@ -220,6 +242,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func publishKeyBundle(_ keys: UserConfig) async throws {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .publishKeyBundle
@@ -234,6 +260,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func publishBlob<C: Codable>(_ blob: C) async throws -> ReferencedBlob<C> {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .publishBlob
@@ -245,6 +275,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) async throws -> ReferencedBlob<C>? {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .readBlob(id: id)
@@ -264,6 +298,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
         pushType: PushType,
         messageId: String
     ) async throws {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .sendMessage(messageId: messageId)
@@ -285,6 +323,10 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
         pushType: PushType,
         messageId: String
     ) async throws {
+        if !isConnected {
+            throw CypherSDKError.offline
+        }
+        
         try await SpoofTransportClientSettings.shouldDropPacket(
             self.username,
             .sendMessage(messageId: messageId)

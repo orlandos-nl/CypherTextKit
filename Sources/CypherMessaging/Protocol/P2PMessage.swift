@@ -6,6 +6,18 @@ public struct P2PSendMessage: Codable {
     let id: String
 }
 
+public struct P2PBroadcast {
+    public struct Message: Codable {
+        let origin: Peer
+        let target: Peer
+        let messageId: String
+        let payload: RatchetedCypherMessage
+    }
+    
+    var hops: Int
+    let value: Signed<Message>
+}
+
 public struct P2PMessage: Codable {
     private enum CodingKeys: String, CodingKey {
         case type = "a"
@@ -17,43 +29,46 @@ public struct P2PMessage: Codable {
         case status = 0
         case sendMessage = 1
         case ack = 2
+        case broadcast = 3
     }
     
     internal enum Box {
         case status(P2PStatusMessage)
         case sendMessage(P2PSendMessage)
         case ack
+        case broadcast(P2PBroadcast)
     }
     
     let box: Box
-    let ack: ObjectId
+    let ack: String
     
-    init(box: Box, ack: ObjectId) {
+    init(box: Box, ack: String) {
         self.box = box
         self.ack = ack
     }
     
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ack, forKey: .ack)
         
         switch box {
         case .status(let status):
             try container.encode(MessageType.status, forKey: .type)
             try container.encode(status, forKey: .box)
-            try container.encode(ack, forKey: .ack)
         case .sendMessage(let message):
             try container.encode(MessageType.sendMessage, forKey: .type)
             try container.encode(message, forKey: .box)
-            try container.encode(ack, forKey: .ack)
         case .ack:
             try container.encode(MessageType.ack, forKey: .type)
-            try container.encode(ack, forKey: .ack)
+        case .broadcast(let message):
+            try container.encode(MessageType.broadcast, forKey: .type)
+            try container.encode(message, forKey: .box)
         }
     }
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.ack = try container.decode(ObjectId.self, forKey: .ack)
+        self.ack = try container.decode(String.self, forKey: .ack)
         
         switch try container.decode(MessageType.self, forKey: .type) {
         case .status:
@@ -62,6 +77,8 @@ public struct P2PMessage: Codable {
             self.box = try .sendMessage(container.decode(P2PSendMessage.self, forKey: .box))
         case .ack:
             self.box = .ack
+        case .broadcast:
+            self.box = try .broadcast(container.decode(Signed<P2PBroadcastMessage>.self, forKey: .box))
         }
     }
 }
