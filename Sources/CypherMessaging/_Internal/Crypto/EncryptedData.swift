@@ -14,7 +14,7 @@ public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
         let data = try BSONEncoder().encode(wrapper).makeData()
         
         // Encrypt & store the encoded data
-        self.value = try AES.GCM.seal(data, using: encryptionKey)
+        self.value = try! AES.GCM.seal(data, using: encryptionKey)
     }
     
     @CryptoActor

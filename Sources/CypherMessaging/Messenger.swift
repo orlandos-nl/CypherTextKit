@@ -812,7 +812,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
     }
     
-    @CryptoActor fileprivate func _formSharedSecret(with publicKey: PublicKey) throws -> SharedSecret {
+    @CryptoActor internal func _formSharedSecret(with publicKey: PublicKey) throws -> SharedSecret {
         try state.config.deviceKeys.privateKey.sharedSecretFromKeyAgreement(
             with: publicKey
         )
@@ -854,7 +854,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     @CypherTextKitActor public func p2pTransportDiscovered(_ connection: P2PTransportClient, remotePeer: Peer) async throws {
         connection.delegate = self
-        state.registerSession(
+        try await state.registerSession(
             P2PSession(
                 peer: remotePeer,
                 transport: connection,
@@ -869,20 +869,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     // TODO: Make internal
     /// An internal implementation that allows CypherMessenger to respond to information received by a P2PConnection
-    public func p2pConnection(
-        _ connection: P2PTransportClient,
-        closedWithOptions: Set<P2PTransportClosureOption>
-    ) async throws {
+    public func p2pConnectionClosed(_ connection: P2PTransportClient) async throws {
         debugLog("P2P session disconnecting")
-        
-        if closedWithOptions.contains(.reconnnectPossible) {
-            do {
-                return try await connection.reconnect()
-            } catch {
-                debugLog("Reconnecting P2P connection failed")
-                return await state.closeP2PConnection(connection)
-            }
-        }
         
         return await state.closeP2PConnection(connection)
     }
@@ -934,7 +922,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What is a P2P session already exists?
         if let client = client {
             client.delegate = self
-            state.registerSession(
+            try await state.registerSession(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,
@@ -1045,7 +1033,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         // TODO: What if a P2P session already exists?
         if let client = client {
             client.delegate = self
-            self.state.registerSession(
+            try await self.state.registerSession(
                 P2PSession(
                     deviceIdentity: device,
                     transport: client,

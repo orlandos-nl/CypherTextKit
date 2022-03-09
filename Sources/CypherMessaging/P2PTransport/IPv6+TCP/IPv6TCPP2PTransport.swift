@@ -44,10 +44,6 @@ final class IPv6TCPP2PTransportClient: P2PTransportClient {
         self.channel = channel
     }
     
-    public func reconnect() async throws {
-        throw IPv6TCPP2PError.reconnectFailed
-    }
-    
     public func disconnect() async {
         do {
             try await channel.close()
