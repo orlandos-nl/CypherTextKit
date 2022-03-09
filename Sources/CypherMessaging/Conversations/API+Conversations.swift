@@ -552,7 +552,7 @@ extension AnyConversation {
     }
 }
 
-@CacheActor public let globalCache = Cache()
+@CacheActor public let internalCache = Cache()
 
 @available(macOS 10.15, iOS 13, *)
 public struct InternalConversation: AnyConversation {
@@ -564,7 +564,7 @@ public struct InternalConversation: AnyConversation {
     }
     
     init(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
-        cache = globalCache
+        cache = internalCache
         self.conversation = conversation
         self.messenger = messenger
     }
@@ -581,12 +581,22 @@ public struct InternalConversation: AnyConversation {
     }
 }
 
+@CacheActor public let groupCache = Cache()
+
 @available(macOS 10.15, iOS 13, *)
 public struct GroupChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
     internal var metadata: GroupMetadata
-    @CacheActor public let cache = Cache()
+    public var cache: Cache
+    
+    init(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger, metadata: GroupMetadata) {
+        cache = groupCache
+        self.conversation = conversation
+        self.messenger = messenger
+        self.metadata = metadata
+    }
+    
     public func getGroupConfig() async -> ReferencedBlob<GroupChatConfig> {
         metadata.config
     }
@@ -658,11 +668,18 @@ public struct GroupMetadata: Codable {
     public internal(set) var config: ReferencedBlob<GroupChatConfig>
 }
 
+@CacheActor public let privateCache = Cache()
 @available(macOS 10.15, iOS 13, *)
 public struct PrivateChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    @CacheActor public let cache = Cache()
+    public var cache: Cache
+    
+    init(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
+        cache = privateCache
+        self.conversation = conversation
+        self.messenger = messenger
+    }
     
     public func getTarget() async -> TargetConversation {
         .otherUser(await conversationPartner)
