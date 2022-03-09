@@ -415,7 +415,7 @@ enum TaskHelpers {
     ) async throws {
         assert(messenger.transport.supportsMultiRecipientMessages)
         
-        guard await messenger.authenticated == .authenticated else {
+        guard messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
             _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
             throw CypherSDKError.offline
@@ -459,12 +459,6 @@ enum TaskHelpers {
         task: SendMessageTask,
         messenger: CypherMessenger
     ) async throws {
-        guard await messenger.authenticated == .authenticated else {
-            debugLog("Not connected with the server")
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
-            throw CypherSDKError.offline
-        }
-
         // Fetch the identity
         debugLog("Executing task: Send message")
             
@@ -484,18 +478,37 @@ enum TaskHelpers {
             }
         }
         
-        try await messenger._writeWithRatchetEngine(ofUser: task.recipient, deviceId: task.recipientDeviceId) { ratchetEngine, rekeyState in
+        let device = try await messenger._fetchDeviceIdentity(for: task.recipient, deviceId: task.recipientDeviceId)
+        try await device._writeWithRatchetEngine(messenger: messenger) { ratchetEngine, rekeyState in
             let encodedMessage = try BSONEncoder().encode(task.message).makeData()
             let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
 
             let encryptedMessage = try await messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
-            try await messenger.transport.sendMessage(
-                encryptedMessage,
-                toUser: task.recipient,
-                otherUserDeviceId: task.recipientDeviceId,
-                pushType: task.pushType,
-                messageId: task.messageId
-            )
+            if messenger.isOnline {
+                try await messenger.transport.sendMessage(
+                    encryptedMessage,
+                    toUser: task.recipient,
+                    otherUserDeviceId: task.recipientDeviceId,
+                    pushType: task.pushType,
+                    messageId: task.messageId
+                )
+            } else if messenger.canBroadcastInMesh, encodedMessage.count <= P2PClient.maximumMeshPacketSize {
+                try await messenger._writeMessageOverMesh(
+                    encryptedMessage,
+                    messageId: task.messageId,
+                    to: Peer(
+                        username: device.username,
+                        deviceConfig: UserDeviceConfig(
+                            deviceId: device.deviceId,
+                            identity: device.identity,
+                            publicKey: device.publicKey,
+                            isMasterDevice: device.isMasterDevice
+                        )
+                    )
+                )
+            } else {
+                throw CypherSDKError.offline
+            }
         }
         
         // Message may be a magic packet

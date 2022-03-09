@@ -147,7 +147,11 @@ internal extension CypherMessenger {
     }
     
     @CryptoActor
-    func _createDeviceIdentity(from device: UserDeviceConfig, forUsername username: Username) async throws -> DecryptedModel<DeviceIdentityModel> {
+    func _createDeviceIdentity(
+        from device: UserDeviceConfig,
+        forUsername username: Username,
+        serverVerified: Bool = true
+    ) async throws -> DecryptedModel<DeviceIdentityModel> {
         let deviceIdentities = try await cachedStore.fetchDeviceIdentities()
         for deviceIdentity in deviceIdentities {
             let deviceIdentity = try self.decrypt(deviceIdentity)
@@ -172,7 +176,8 @@ internal extension CypherMessenger {
                 publicKey: device.publicKey,
                 identity: device.identity,
                 isMasterDevice: device.isMasterDevice,
-                doubleRatchet: nil
+                doubleRatchet: nil,
+                serverVerified: serverVerified
             ),
             encryptionKey: self.databaseEncryptionKey
         )
@@ -267,7 +272,7 @@ internal extension CypherMessenger {
         let deviceIdentity = try await self._fetchDeviceIdentity(for: sender, deviceId: senderDevice)
         let message: CypherMessage
         do {
-            let data = try await deviceIdentity._readWithRatchetEngine(ofUser: sender, deviceId: senderDevice, message: inbound, messenger: self)
+            let data = try await deviceIdentity._readWithRatchetEngine(message: inbound, messenger: self)
             
             if let multiRecipientContainer = multiRecipientContainer {
                 guard data.count == 32 else {
@@ -540,6 +545,22 @@ internal extension CypherMessenger {
     }
     
     @CryptoActor
+    func _fetchKnownDeviceIdentity(
+        for username: Username,
+        deviceId: DeviceId
+    ) async throws -> DecryptedModel<DeviceIdentityModel>? {
+        for deviceIdentity in try await cachedStore.fetchDeviceIdentities() {
+            let deviceIdentity = try self.decrypt(deviceIdentity)
+            
+            if deviceIdentity.username == username, deviceIdentity.deviceId == deviceId {
+                return deviceIdentity
+            }
+        }
+        
+        return nil
+    }
+    
+    @CryptoActor
     func _fetchDeviceIdentity(
         for username: Username,
         deviceId: DeviceId
@@ -562,7 +583,7 @@ internal extension CypherMessenger {
         for username: Username
     ) async throws -> [DecryptedModel<DeviceIdentityModel>] {
         let knownDevices = try await self._fetchKnownDeviceIdentities(for: username)
-        if knownDevices.isEmpty, username != self.username {
+        if knownDevices.isEmpty && username != self.username && isOnline {
             return try await self._rediscoverDeviceIdentities(for: username, knownDevices: knownDevices)
         }
             
@@ -586,9 +607,9 @@ internal extension CypherMessenger {
         
         var newDevices = [DecryptedModel<DeviceIdentityModel>]()
         for username in usernames {
-            if username != self.username, await !knownDevices.asyncContains(where: {
+            if username != self.username, !knownDevices.contains(where: {
                 $0.props.username == username
-            }) {
+            }), isOnline {
                 let rediscovered = try await self._rediscoverDeviceIdentities(for: username, knownDevices: knownDevices)
                 newDevices.append(contentsOf: rediscovered)
             }

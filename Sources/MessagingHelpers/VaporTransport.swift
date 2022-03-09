@@ -1,12 +1,10 @@
+#if os(iOS) || os(macOS)
 import BSON
 import Foundation
 import CypherProtocol
 import CypherMessaging
 import JWTKit
 import WebSocketKit
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 
 // TODO: Secondary servers
 
@@ -28,8 +26,13 @@ extension TransportCreationRequest: JWTAlgorithm {
 }
 
 public struct UserDeviceId: Hashable, Codable {
-    let user: Username
-    let device: DeviceId
+    public let user: Username
+    public let device: DeviceId
+    
+    public init(user: Username, device: DeviceId) {
+        self.user = user
+        self.device = device
+    }
 }
 
 struct Token: JWTPayload {
@@ -109,19 +112,7 @@ extension URLSession {
         if let token = token {
             request.addValue(token, forHTTPHeaderField: "X-API-Token")
         }
-
-#if canImport(FoundationNetworking)
-        let data: Data = await withCheckedContinuation { continuation in
-            self.dataTask(with: request) { data, _, _ in
-                guard let data = data else {
-                    fatalError("DataTask was nil while fetching BSON")
-                }
-                continuation.resume(returning: data)
-            }.resume()
-        }
-#else
-    let (data, _) = try await self.data(for: request)
-#endif
+        let (data, _) = try await self.data(for: request)
         return try BSONDecoder().decode(type, from: Document(data: data))
     }
     
@@ -144,30 +135,10 @@ extension URLSession {
         let data = try BSONEncoder().encode(body).makeData()
         
         if data.count > maxBodySize {
-#if canImport(FoundationNetworking)
-             guard let response = URLResponse(URL(string: "\(httpHost)/\(url)")!) else {
-                 throw VaporTransportError.urlResponseNil
-                 }
-            return (Data(), response)
-#else
             return (Data(), URLResponse())
-#endif
         }
         
-#if canImport(FoundationNetworking)
-        let uploadTask: (Data, URLResponse) = await withCheckedContinuation { continuation in
-            let task = self.uploadTask(with: request, from: data)  { data, res, error in
-                guard error == nil else { return }
-                guard let response = res as? HTTPURLResponse else { return }
-                guard let data = data else { return }
-                continuation.resume(returning: (data, response))
-            }
-            task.resume()
-        }
-        return uploadTask
-#else
         return try await self.upload(for: request, from: data)
-#endif
     }
 }
 
@@ -212,6 +183,8 @@ public final class VaporTransport: CypherServerTransportClient {
     let host: String
     var httpHost: String { "https://\(host)" }
     var appleToken: String?
+    public let isConnected = true
+    public private(set) var authenticated = AuthenticationState.unauthenticated
     private var wantsConnection = true
     private var webSocket: WebSocket?
     private(set) var signer: TransportCreationRequest
@@ -318,8 +291,6 @@ public final class VaporTransport: CypherServerTransportClient {
         
         return transport
     }
-    
-    public private(set) var authenticated = AuthenticationState.unauthenticated
     
     private func makeToken() -> String? {
         return try? JWTSigner(algorithm: signer).sign(
@@ -585,4 +556,4 @@ extension DataProtocol {
         return String(bytesNoCopy: ptr, length: hexLen, encoding: .utf8, freeWhenDone: true)!
     }
 }
-
+#endif

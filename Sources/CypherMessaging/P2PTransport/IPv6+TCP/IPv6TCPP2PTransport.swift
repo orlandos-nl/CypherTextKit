@@ -104,6 +104,8 @@ public struct StunConfig {
 @available(macOS 10.15, iOS 13, *)
 public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
     public let transportLayerIdentifier = "_ipv6-tcp"
+    public let isMeshEnabled = false
+    public weak var delegate: P2PTransportFactoryDelegate?
     let eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     let stun: StunConfig?
     

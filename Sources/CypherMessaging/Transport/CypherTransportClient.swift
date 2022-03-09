@@ -41,6 +41,9 @@ public protocol CypherServerTransportClient: AnyObject {
     /// `true` when logged in, `false` on incorrect login, `nil` when no server request has been executed yet
     var authenticated: AuthenticationState { get }
     
+    /// `true` if the client is able to communicate with a/the server
+    var isConnected: Bool { get }
+    
     /// When `true`, the CypherMessenger's internals may call the `sendMultiRecipientMessage` method.
     /// Supporting MultiRecipient Messages allows the app to expend less data uploading files to multiple recipients.
     var supportsMultiRecipientMessages: Bool { get }

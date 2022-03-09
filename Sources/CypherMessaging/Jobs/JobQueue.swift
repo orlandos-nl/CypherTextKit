@@ -334,7 +334,7 @@ final class JobQueue {
             throw CypherSDKError.appLocked
         }
         
-        if task.requiresConnectivity, messenger.transport.authenticated != .authenticated {
+        if task.requiresConnectivity, messenger.isOnline, messenger.authenticated != .authenticated {
             debugLog("Job required connectivity, but app is offline")
             throw CypherSDKError.offline
         }

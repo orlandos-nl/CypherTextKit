@@ -161,6 +161,7 @@ extension CypherMessenger {
             metadata: sharedMetadata
         )
         // TODO: Transparent Group Chats (no uploaded binary blobs)
+        // TODO: Predefined group members?
         
         let referencedBlob = try await self.transport.publishBlob(self.sign(config))
         let metadata = GroupMetadata(
@@ -178,7 +179,7 @@ extension CypherMessenger {
             metadata: metadataDocument
         )
         
-        let chat = GroupChat( 
+        let chat = GroupChat(
             conversation: try await self.decrypt(conversation),
             messenger: self,
             metadata: metadata
@@ -397,12 +398,22 @@ extension AnyConversation {
         )
     }
     
-    internal func _saveMessage(
+    @CypherTextKitActor internal func _saveMessage(
         senderId: Int,
         order: Int,
         props: ChatMessageModel.SecureProps,
         remoteId: String = UUID().uuidString
     ) async throws -> DecryptedModel<ChatMessageModel> {
+        if let existingMessage = try? await messenger.cachedStore.fetchChatMessage(byRemoteId: remoteId) {
+            let existingMessage = try messenger.decrypt(existingMessage)
+            
+            if existingMessage.senderUser == props.senderUser, existingMessage.senderDeviceId == props.senderDeviceId {
+                throw CypherSDKError.duplicateChatMessage
+            } else {
+                // TODO: Allow duplicate remote IDs, if they originate from different users
+            }
+        }
+        
         let chatMessage = try ChatMessageModel(
             conversationId: conversation.id,
             senderId: senderId,
@@ -413,7 +424,7 @@ extension AnyConversation {
         )
         
         try await messenger.cachedStore.createChatMessage(chatMessage)
-        let message = try await self.messenger.decrypt(chatMessage)
+        let message = try self.messenger.decrypt(chatMessage)
         
         await self.messenger.eventHandler.onCreateChatMessage(
             AnyChatMessage(
@@ -462,7 +473,8 @@ extension AnyConversation {
             _chatMessage = chatMessage
         }
        
-        if messenger.transport.supportsMultiRecipientMessages {
+        if messenger.transport.supportsMultiRecipientMessages && messenger.isOnline {
+            // If offline, try to leverage a potential peer-to-peer mesh
             try await messenger._queueTask(
                 .sendMultiRecipientMessage(
                     SendMultiRecipientMessageTask(
