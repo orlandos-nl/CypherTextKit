@@ -1,4 +1,3 @@
-#if os(iOS) || os(macOS)
 import CypherProtocol
 import BSON
 import Foundation
@@ -673,4 +672,3 @@ public struct PrivateChat: AnyConversation {
         return members.first!
     }
 }
-#endif

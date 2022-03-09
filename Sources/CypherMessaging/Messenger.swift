@@ -1,4 +1,3 @@
-#if os(iOS) || os(macOS)
 import BSON
 import Foundation
 import Crypto
@@ -1212,4 +1211,3 @@ fileprivate let doubleRatchetConfig = DoubleRatchetConfiguration<SHA512>(
     headerAssociatedDataGenerator: .constant("Cypher ChatMessage".data(using: .ascii)!),
     maxSkippedMessageKeys: 100
 )
-#endif
