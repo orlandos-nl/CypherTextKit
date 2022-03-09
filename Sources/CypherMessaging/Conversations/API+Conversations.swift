@@ -552,14 +552,21 @@ extension AnyConversation {
     }
 }
 
+@CacheActor public let globalCache = Cache()
+
 @available(macOS 10.15, iOS 13, *)
 public struct InternalConversation: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    @CacheActor public let cache = Cache()
-    
+    public var cache: Cache
     public func getTarget() async -> TargetConversation {
         return .currentUser
+    }
+    
+    init(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
+        cache = globalCache
+        self.conversation = conversation
+        self.messenger = messenger
     }
     
     public func resolveTarget() async -> TargetConversation.Resolved {
