@@ -1,3 +1,4 @@
+#if os(iOS) || os(macOS)
 import CypherProtocol
 import BSON
 import Foundation
@@ -552,21 +553,14 @@ extension AnyConversation {
     }
 }
 
-@CacheActor public let internalCache = Cache()
-
 @available(macOS 10.15, iOS 13, *)
 public struct InternalConversation: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    public var cache: Cache
+    @CacheActor public let cache = Cache()
+    
     public func getTarget() async -> TargetConversation {
         return .currentUser
-    }
-    
-    init(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
-        cache = internalCache
-        self.conversation = conversation
-        self.messenger = messenger
     }
     
     public func resolveTarget() async -> TargetConversation.Resolved {
@@ -581,22 +575,12 @@ public struct InternalConversation: AnyConversation {
     }
 }
 
-@CacheActor public let groupCache = Cache()
-
 @available(macOS 10.15, iOS 13, *)
 public struct GroupChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
     internal var metadata: GroupMetadata
-    public var cache: Cache
-    
-    init(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger, metadata: GroupMetadata) {
-        cache = groupCache
-        self.conversation = conversation
-        self.messenger = messenger
-        self.metadata = metadata
-    }
-    
+    @CacheActor public let cache = Cache()
     public func getGroupConfig() async -> ReferencedBlob<GroupChatConfig> {
         metadata.config
     }
@@ -668,18 +652,11 @@ public struct GroupMetadata: Codable {
     public internal(set) var config: ReferencedBlob<GroupChatConfig>
 }
 
-@CacheActor public let privateCache = Cache()
 @available(macOS 10.15, iOS 13, *)
 public struct PrivateChat: AnyConversation {
     public let conversation: DecryptedModel<ConversationModel>
     public let messenger: CypherMessenger
-    public var cache: Cache
-    
-    init(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) {
-        cache = privateCache
-        self.conversation = conversation
-        self.messenger = messenger
-    }
+    @CacheActor public let cache = Cache()
     
     public func getTarget() async -> TargetConversation {
         .otherUser(await conversationPartner)
@@ -696,3 +673,4 @@ public struct PrivateChat: AnyConversation {
         return members.first!
     }
 }
+#endif

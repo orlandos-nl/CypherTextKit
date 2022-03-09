@@ -1,3 +1,4 @@
+#if os(iOS) || os(macOS)
 import BSON
 import Foundation
 import Crypto
@@ -764,7 +765,18 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
     }
     
-
+    @CryptoActor final class ModelCache {
+        private var cache = [UUID: Weak<AnyObject>]()
+        @CryptoActor func getModel<M: Model>(ofType: M.Type, forId id: UUID) -> DecryptedModel<M>? {
+            cache[id]?.object as? DecryptedModel<M>
+        }
+        
+        @CryptoActor func addModel<M: Model>(_ model: DecryptedModel<M>, forId id: UUID) {
+            cache[id] = Weak(object: model)
+        }
+    }
+    
+    @CryptoActor private let cache = ModelCache()
     
     /// Decrypts a model as provided by the database
     /// It is critical to call this method for decryption for stability reasons, as CypherMessenger prevents duplicate representations of a Model from existing at the same time.
@@ -1200,17 +1212,4 @@ fileprivate let doubleRatchetConfig = DoubleRatchetConfiguration<SHA512>(
     headerAssociatedDataGenerator: .constant("Cypher ChatMessage".data(using: .ascii)!),
     maxSkippedMessageKeys: 100
 )
-
-
-@CryptoActor final class ModelCache {
-    private var cache = [UUID: Weak<AnyObject>]()
-    @CryptoActor func getModel<M: Model>(ofType: M.Type, forId id: UUID) -> DecryptedModel<M>? {
-        cache[id]?.object as? DecryptedModel<M>
-    }
-    
-    @CryptoActor func addModel<M: Model>(_ model: DecryptedModel<M>, forId id: UUID) {
-        cache[id] = Weak(object: model)
-    }
-}
-
-@CryptoActor private let cache = ModelCache()
+#endif
