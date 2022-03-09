@@ -185,7 +185,8 @@ public final class P2PClient {
             }
             
             broadcast.hops -= 1
-            let unverifiedBroadcast = try broadcast.value.readWithoutVerifying()
+            let signedBroadcast = broadcast.value
+            let unverifiedBroadcast = try signedBroadcast.readWithoutVerifying()
             let claimedOrigin = unverifiedBroadcast.origin
             let destination = unverifiedBroadcast.target
             
@@ -210,17 +211,17 @@ public final class P2PClient {
                 forwardedBroadcasts.removeFirst(100)
             }
             
-            let broadcast: P2PBroadcastMessage
+            let broadcastMessage: P2PBroadcast.Message
             let deviceModel: DecryptedModel<DeviceIdentityModel>
             let knownDevices = try await messenger._fetchKnownDeviceIdentities(for: claimedOrigin.username)
             
             if let knownPeer = knownDevices.first(where: { $0.deviceId == claimedOrigin.deviceId }) {
                 // Device is known, accept!
                 deviceModel = knownPeer
-                broadcast = try signedBroadcast.readAndVerifySignature(signedBy: knownPeer.identity)
+                broadcastMessage = try signedBroadcast.readAndVerifySignature(signedBy: knownPeer.identity)
             } else if knownDevices.isEmpty {
                 // User is not known, so assume the device is plausible although unverified
-                broadcast = try signedBroadcast.readAndVerifySignature(signedBy: claimedOrigin.identity)
+                broadcastMessage = try signedBroadcast.readAndVerifySignature(signedBy: claimedOrigin.identity)
                 deviceModel = try await messenger._createDeviceIdentity(
                     from: claimedOrigin.deviceConfig,
                     forUsername: claimedOrigin.username,
@@ -233,21 +234,21 @@ public final class P2PClient {
             
             if destination.username == messenger.username && destination.deviceId == messenger.deviceId {
                 // It's for us!
-                let payloadData = try await deviceModel._readWithRatchetEngine(message: broadcast.payload, messenger: messenger)
+                let payloadData = try await deviceModel._readWithRatchetEngine(message: broadcastMessage.payload, messenger: messenger)
                 let message = try BSONDecoder().decode(CypherMessage.self, from: Document(data: payloadData))
                 
                 switch message.box {
                 case .single(let message):
                     try await messenger._processMessage(
                         message: message,
-                        remoteMessageId: broadcast.messageId,
+                        remoteMessageId: broadcastMessage.messageId,
                         sender: deviceModel
                     )
                 case .array(let messages):
                     for message in messages {
                         try await messenger._processMessage(
                             message: message,
-                            remoteMessageId: broadcast.messageId,
+                            remoteMessageId: broadcastMessage.messageId,
                             sender: deviceModel
                         )
                     }
@@ -275,6 +276,7 @@ public final class P2PClient {
                 if p2pConnection.username == client.state.username && p2pConnection.deviceId == client.state.deviceId {
                     // Ignore, since we're just cascading it back to the origin of this broadcast
                 } else {
+                    let broadcast = broadcast
                     Task {
                         // Ignore (connection) errors, we've tried our best
                         try await p2pConnection.sendMessage(.broadcast(broadcast))

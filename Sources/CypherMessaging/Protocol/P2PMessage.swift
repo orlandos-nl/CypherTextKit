@@ -6,7 +6,7 @@ public struct P2PSendMessage: Codable {
     let id: String
 }
 
-public struct P2PBroadcast {
+public struct P2PBroadcast: Codable {
     public struct Message: Codable {
         let origin: Peer
         let target: Peer
@@ -78,7 +78,7 @@ public struct P2PMessage: Codable {
         case .ack:
             self.box = .ack
         case .broadcast:
-            self.box = try .broadcast(container.decode(Signed<P2PBroadcastMessage>.self, forKey: .box))
+            self.box = try .broadcast(container.decode(P2PBroadcast.self, forKey: .box))
         }
     }
 }
