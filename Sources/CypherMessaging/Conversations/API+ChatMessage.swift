@@ -1,48 +1,48 @@
 import Foundation
 
 @available(macOS 10.15, iOS 13, *)
-public struct AnyChatMessage {
+public struct AnyChatMessage: Sendable {
     public let target: TargetConversation
     public let messenger: CypherMessenger
     public let raw: DecryptedModel<ChatMessageModel>
     
-    @CryptoActor public func markAsRead() async throws {
+    @MainActor public func markAsRead() async throws {
         if raw.deliveryState == .read || sender == messenger.username {
             return
         }
         
-        _ = try await messenger._markMessage(byId: raw.encrypted.id, as: .read)
+        try await messenger._markMessage(byId: raw.encrypted.id, as: .read)
     }
     
-    @CryptoActor public var text: String {
+    @MainActor public var text: String {
         raw.message.text
     }
     
-    @CryptoActor public var metadata: Document {
+    @MainActor public var metadata: Document {
         raw.message.metadata
     }
     
-    @CryptoActor public var messageType: CypherMessageType {
+    @MainActor public var messageType: CypherMessageType {
         raw.message.messageType
     }
     
-    @CryptoActor public var messageSubtype: String? {
+    @MainActor public var messageSubtype: String? {
         raw.message.messageSubtype
     }
     
-    @CryptoActor public var sentDate: Date? {
+    @MainActor public var sentDate: Date? {
         raw.message.sentDate
     }
     
-    @CryptoActor public var destructionTimer: TimeInterval? {
+    @MainActor public var destructionTimer: TimeInterval? {
         raw.message.destructionTimer
     }
     
-    @CryptoActor public var sender: Username {
+    @MainActor public var sender: Username {
         raw.senderUser
     }
     
-    @CryptoActor public func remove() async throws {
+    @MainActor public func remove() async throws {
         try await messenger.cachedStore.removeChatMessage(raw.encrypted)
         messenger.eventHandler.onRemoveChatMessage(self)
     }

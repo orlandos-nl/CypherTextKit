@@ -114,7 +114,7 @@ public final class P2PClient {
             outputByteCount: 32
         )
         
-        messenger.eventHandler.onP2PClientOpen(self, messenger: messenger)
+        await messenger.eventHandler.onP2PClientOpen(self, messenger: messenger)
         
         if let seconds = seconds {
             assert(seconds > 0 && seconds <= 3600, "Invalid inactivity timer")
@@ -260,21 +260,17 @@ public final class P2PClient {
             }
             
             let broadcastMessage: P2PBroadcast.Message
-            let deviceModel: DecryptedModel<DeviceIdentityModel>
             let knownDevices = try await messenger._fetchKnownDeviceIdentities(for: claimedOrigin.username)
+            let verified: Bool
             
             if let knownPeer = knownDevices.first(where: { $0.deviceId == claimedOrigin.deviceId }) {
                 // Device is known, accept!
-                deviceModel = knownPeer
                 broadcastMessage = try signedBroadcast.readAndVerifySignature(signedBy: knownPeer.identity)
+                verified = true
             } else if knownDevices.isEmpty {
                 // User is not known, so assume the device is plausible although unverified
                 broadcastMessage = try signedBroadcast.readAndVerifySignature(signedBy: claimedOrigin.identity)
-                deviceModel = try await messenger._createDeviceIdentity(
-                    from: claimedOrigin.deviceConfig,
-                    forUsername: claimedOrigin.username,
-                    serverVerified: false
-                )
+                verified = false
             } else {
                 // User is known, but device is not known. Abort, might be malicious
                 return
@@ -282,25 +278,16 @@ public final class P2PClient {
             
             if destination.username == messenger.username && destination.deviceId == messenger.deviceId {
                 // It's for us!
-                let payloadData = try await deviceModel._readWithRatchetEngine(message: broadcastMessage.payload, messenger: messenger)
-                let message = try BSONDecoder().decode(CypherMessage.self, from: Document(data: payloadData))
-                
-                switch message.box {
-                case .single(let message):
-                    try await messenger._processMessage(
-                        message: message,
-                        remoteMessageId: broadcastMessage.messageId,
-                        sender: deviceModel
-                    )
-                case .array(let messages):
-                    for message in messages {
-                        try await messenger._processMessage(
-                            message: message,
-                            remoteMessageId: broadcastMessage.messageId,
-                            sender: deviceModel
+                try await messenger._queueTask(
+                    .processMessage(
+                        ReceiveMessageTask(
+                            message: broadcastMessage.payload,
+                            messageId: broadcastMessage.messageId,
+                            sender: claimedOrigin.username,
+                            deviceId: claimedOrigin.deviceId
                         )
-                    }
-                }
+                    )
+                )
                 
                 // TODO: Broadcast ack back? How does the client know it's arrived?
             }
@@ -406,7 +393,7 @@ public final class P2PClient {
     /// Disconnects the transport layer
     public func disconnect() async {
         if let messenger = self.messenger {
-            messenger.eventHandler.onP2PClientClose(messenger: messenger)
+            await messenger.eventHandler.onP2PClientClose(messenger: messenger)
         }
         
         await client.disconnect()

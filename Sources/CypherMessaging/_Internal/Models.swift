@@ -30,29 +30,29 @@ public final class ConversationModel: Model, @unchecked Sendable {
 }
 
 extension DecryptedModel where M == ConversationModel {
-    @CryptoActor public var members: Set<Username> {
+    @MainActor public var members: Set<Username> {
         get { props.members }
     }
-    @CryptoActor public var kickedMembers: Set<Username> {
+    @MainActor public var kickedMembers: Set<Username> {
         get { props.kickedMembers }
     }
-    @CryptoActor public var allHistoricMembers: Set<Username> {
+    @MainActor public var allHistoricMembers: Set<Username> {
         get {
             var members = members
             members.formUnion(kickedMembers)
             return members
         }
     }
-    @CryptoActor public var metadata: Document {
+    @MainActor public var metadata: Document {
         get { props.metadata }
     }
-    @CryptoActor public var localOrder: Int {
+    @MainActor public var localOrder: Int {
         get { props.localOrder }
     }
     
-    @CryptoActor func getNextLocalOrder() throws -> Int {
-        let order = localOrder
-        try setProp(at: \.localOrder, to: order &+ 1)
+    @CryptoActor func getNextLocalOrder() async throws -> Int {
+        let order = await localOrder
+        try await setProp(at: \.localOrder, to: order &+ 1)
         return order
    }
 }
@@ -89,29 +89,29 @@ public final class DeviceIdentityModel: Model, @unchecked Sendable {
     }
 }
 
-extension DecryptedModel where M == DeviceIdentityModel {
-    @CryptoActor public var username: Username {
+extension _DecryptedModel where M == DeviceIdentityModel {
+    @CryptoActor var username: Username {
         get { props.username }
     }
-    @CryptoActor public var deviceId: DeviceId {
+    @CryptoActor var deviceId: DeviceId {
         get { props.deviceId }
     }
-    @CryptoActor public var isMasterDevice: Bool {
+    @CryptoActor var isMasterDevice: Bool {
         get { props.isMasterDevice }
     }
-    @CryptoActor public var senderId: Int {
+    @CryptoActor var senderId: Int {
         get { props.senderId }
     }
-    @CryptoActor public var publicKey: PublicKey {
+    @CryptoActor var publicKey: PublicKey {
         get { props.publicKey }
     }
-    @CryptoActor public var identity: PublicSigningKey {
+    @CryptoActor var identity: PublicSigningKey {
         get { props.identity }
     }
-    @CryptoActor public var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
+    @CryptoActor var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
         get { props.doubleRatchet }
     }
-    @CryptoActor func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) async throws {
+    @CryptoActor func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) throws {
         try setProp(at: \.doubleRatchet, to: newValue)
     }
 }
@@ -142,21 +142,21 @@ public final class ContactModel: Model, @unchecked Sendable {
 }
 
 extension DecryptedModel where M == ContactModel {
-    @CryptoActor public var username: Username {
+    @MainActor public var username: Username {
         get { props.username }
     }
-    @CryptoActor public var config: UserConfig {
+    @MainActor public var config: UserConfig {
         get { props.config }
     }
-    @CryptoActor public var metadata: Document {
+    @MainActor public var metadata: Document {
         get { props.metadata }
     }
-    @CryptoActor func updateConfig(to newValue: UserConfig) throws {
-        try self.setProp(at: \.config, to: newValue)
+    @CryptoActor func updateConfig(to newValue: UserConfig) async throws {
+        try await self.setProp(at: \.config, to: newValue)
     }
 }
 
-public enum MarkMessageResult {
+public enum MarkMessageResult: Sendable {
     case success, error, notModified
 }
 
@@ -274,30 +274,30 @@ public final class ChatMessageModel: Model, @unchecked Sendable {
 }
 
 extension DecryptedModel where M == ChatMessageModel {
-    @CryptoActor  public var sendDate: Date {
+    @MainActor  public var sendDate: Date {
         get { props.sendDate }
     }
-    @CryptoActor public var receiveDate: Date {
+    @MainActor public var receiveDate: Date {
         get { props.receiveDate }
     }
-    @CryptoActor public var deliveryState: ChatMessageModel.DeliveryState {
+    @MainActor public var deliveryState: ChatMessageModel.DeliveryState {
         get { props.deliveryState }
     }
-    @CryptoActor public var message: SingleCypherMessage {
+    @MainActor public var message: SingleCypherMessage {
         get { props.message }
     }
-    @CryptoActor public var senderUser: Username {
+    @MainActor public var senderUser: Username {
         get { props.senderUser }
     }
-    @CryptoActor public var senderDeviceId: DeviceId {
+    @MainActor public var senderDeviceId: DeviceId {
         get { props.senderDeviceId }
     }
     
     @discardableResult
-    @CryptoActor func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) throws -> MarkMessageResult {
-        var state = self.deliveryState
+    @CryptoActor func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
+        var state = await self.deliveryState
         let result = state.transition(to: newState)
-        try setProp(at: \.deliveryState, to: state)
+        try await setProp(at: \.deliveryState, to: state)
         return result
     }
 }
@@ -345,23 +345,23 @@ public final class JobModel: Model, @unchecked Sendable {
     }
 }
 
-extension DecryptedModel where M == JobModel {
-    @CryptoActor public var taskKey: String {
+extension _DecryptedModel where M == JobModel {
+    @CryptoActor var taskKey: String {
         get { props.taskKey }
     }
-    @CryptoActor public var task: Document {
+    @CryptoActor var task: Document {
         get { props.task }
     }
-    @CryptoActor public var delayedUntil: Date? {
+    @CryptoActor var delayedUntil: Date? {
         get { props.delayedUntil }
     }
-    @CryptoActor public var scheduledAt: Date {
+    @CryptoActor var scheduledAt: Date {
         get { props.scheduledAt }
     }
-    @CryptoActor public var attempts: Int {
+    @CryptoActor var attempts: Int {
         get { props.attempts }
     }
-    @CryptoActor public var isBackgroundTask: Bool {
+    @CryptoActor var isBackgroundTask: Bool {
         get { props.isBackgroundTask }
     }
     @CryptoActor func delayExecution(retryDelay: TimeInterval) throws {

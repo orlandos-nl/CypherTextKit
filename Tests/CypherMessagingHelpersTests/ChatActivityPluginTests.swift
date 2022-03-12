@@ -8,7 +8,7 @@ final class ChatActivityPluginTests: XCTestCase {
         SpoofTransportClient.resetServer()
     }
     
-    @CryptoActor func testPrivateChat() async throws {
+    @MainActor func testPrivateChat() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
@@ -50,7 +50,7 @@ final class ChatActivityPluginTests: XCTestCase {
         XCTAssertNotNil(m1Chat.lastActivity)
     }
     
-    @CryptoActor func testGroupChat() async throws {
+    @MainActor func testGroupChat() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),

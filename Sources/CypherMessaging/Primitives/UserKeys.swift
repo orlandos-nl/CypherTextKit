@@ -3,7 +3,7 @@ import CypherProtocol
 import Crypto
 
 /// The user's private keys are only stored on the user's main device
-public struct DevicePrivateKeys: Codable {
+public struct DevicePrivateKeys: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case deviceId = "a"
         case identity = "b"
@@ -22,7 +22,7 @@ public struct DevicePrivateKeys: Codable {
     }
 }
 
-public struct UserConfig: Codable {
+public struct UserConfig: Codable, @unchecked Sendable {
     private enum CodingKeys: String, CodingKey {
         case identity = "a"
         case devices = "b"

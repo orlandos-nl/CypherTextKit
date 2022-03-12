@@ -2,7 +2,7 @@ import BSON
 import CypherProtocol
 import Foundation
 
-public enum PushType: RawRepresentable, Codable {
+public enum PushType: RawRepresentable, Codable, Sendable {
     case none
     case call
     case message
@@ -50,7 +50,7 @@ public enum CypherMessageType: String, Codable {
 }
 
 @available(macOS 10.15, iOS 13, *)
-public enum TargetConversation {
+public enum TargetConversation: Sendable {
     case currentUser
     case otherUser(Username)
     case groupChat(GroupChatId)
@@ -76,7 +76,7 @@ public enum TargetConversation {
         }
     }
     
-    public enum Resolved: AnyConversation, Identifiable {
+    public enum Resolved: AnyConversation, Identifiable, Sendable {
         case privateChat(PrivateChat)
         case groupChat(GroupChat)
         case internalChat(InternalConversation)

@@ -3,7 +3,7 @@ import BSON
 import Foundation
 
 @available(macOS 10.15, iOS 13, *)
-public protocol StoredTask: Codable {
+public protocol StoredTask: Codable, Sendable {
     var key: TaskKey { get }
     var isBackgroundTask: Bool { get }
     var retryMode: TaskRetryMode { get }

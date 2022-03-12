@@ -17,7 +17,7 @@ enum CypherProtocolError: Error {
 ///
 /// Private keys are used to sign data, as to authenticate that it was sent by the owner of this private key.
 /// The `publicKey` can be shared, and can then be used to verify the signature's validity.
-public struct PrivateSigningKey: Codable {
+public struct PrivateSigningKey: Codable, @unchecked Sendable {
     fileprivate let privateKey: PrivateSigningKeyAlg
     
     /// The public key that can verify signatures of this private key, wrapped in a Codable container.

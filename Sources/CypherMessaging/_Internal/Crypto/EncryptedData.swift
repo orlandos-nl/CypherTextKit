@@ -5,7 +5,7 @@ import Crypto
 /// Used when encrypting a specific value
 public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
     private var value: AES.GCM.SealedBox
-    @CryptoActor private var wrapped: T?
+    private var wrapped: T?
     
     public init(_ value: T, encryptionKey: SymmetricKey) throws {
         // Wrap the type so it can be encoded by BSON
@@ -17,7 +17,6 @@ public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
         self.value = try! AES.GCM.seal(data, using: encryptionKey)
     }
     
-    @CryptoActor
     public func update(to value: T, using encryptionKey: SymmetricKey) throws {
         self.wrapped = value
         let wrapper = PrimitiveWrapper(value: value)
@@ -26,7 +25,6 @@ public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
     }
     
     // The inverse of the initializer
-    @CryptoActor
     public func decrypt(using encryptionKey: SymmetricKey) throws -> T {
         if let wrapped = wrapped {
             return wrapped
@@ -44,7 +42,6 @@ public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
         return value
     }
     
-    @CryptoActor
     public func makeData() -> Data {
         value.combined!
     }

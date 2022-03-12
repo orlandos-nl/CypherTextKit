@@ -3,7 +3,7 @@ import Foundation
 import NIO
 
 public enum SpoofTransportClientSettings {
-    public enum PacketType {
+    public enum PacketType: Sendable {
         case readReceipt(remoteId: String, otherUser: Username)
         case receiveReceipt(remoteId: String, otherUser: Username)
         case deviceRegistery

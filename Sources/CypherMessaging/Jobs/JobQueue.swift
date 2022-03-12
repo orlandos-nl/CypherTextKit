@@ -3,8 +3,6 @@ import Crypto
 import Foundation
 import NIO
 
-typealias JobQueueActor = CypherTextKitActor
-
 @available(macOS 10.15, iOS 13, *)
 final class JobQueue {
     weak private(set) var messenger: CypherMessenger?
@@ -13,7 +11,7 @@ final class JobQueue {
     @JobQueueActor public private(set) var runningJobs = false
     @JobQueueActor public private(set) var hasOutstandingTasks = true
     @JobQueueActor private var pausing: EventLoopPromise<Void>?
-    @JobQueueActor private var jobs: [DecryptedModel<JobModel>] {
+    @JobQueueActor private var jobs: [_DecryptedModel<JobModel>] {
         didSet {
             markAsDone()
         }
@@ -31,8 +29,8 @@ final class JobQueue {
     
     @JobQueueActor
     func loadJobs() async throws {
-        self.jobs = try await database.readJobs().asyncMap { job -> (Date, DecryptedModel<JobModel>) in
-            let job = try messenger!.decrypt(job)
+        self.jobs = try await database.readJobs().asyncMap { job -> (Date, _DecryptedModel<JobModel>) in
+            let job = try messenger!._cachelessDecrypt(job)
             return (job.scheduledAt, job)
         }.sorted { lhs, rhs in
             lhs.0 < rhs.0
@@ -46,13 +44,13 @@ final class JobQueue {
     }
     
     @JobQueueActor
-    func cancelJob(_ job: DecryptedModel<JobModel>) async throws {
+    func cancelJob(_ job: _DecryptedModel<JobModel>) async throws {
         // TODO: What if the job is cancelled while executing and succeeding?
         try await dequeueJob(job)
     }
     
     @JobQueueActor
-    func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
+    func dequeueJob(_ job: _DecryptedModel<JobModel>) async throws {
         try await database.removeJob(job.encrypted)
         for i in 0..<self.jobs.count {
             if self.jobs[i].id == job.id {
@@ -73,7 +71,7 @@ final class JobQueue {
             encryptionKey: databaseEncryptionKey
         )
         
-        let queuedJob = try messenger.decrypt(job)
+        let queuedJob = try messenger._cachelessDecrypt(job)
         self.jobs.append(queuedJob)
         self.hasOutstandingTasks = true
         try await database.createJob(job)
@@ -95,10 +93,10 @@ final class JobQueue {
             )
         }
         
-        var queuedJobs = [DecryptedModel<JobModel>]()
+        var queuedJobs = [_DecryptedModel<JobModel>]()
         
         for job in jobs {
-            queuedJobs.append(try messenger.decrypt(job))
+            queuedJobs.append(try messenger._cachelessDecrypt(job))
         }
         
         do {

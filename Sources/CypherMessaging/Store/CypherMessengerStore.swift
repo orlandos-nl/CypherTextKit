@@ -1,7 +1,7 @@
 import Foundation
 import NIO
 
-public enum SortMode {
+public enum SortMode: Sendable {
     case ascending, descending
 }
 

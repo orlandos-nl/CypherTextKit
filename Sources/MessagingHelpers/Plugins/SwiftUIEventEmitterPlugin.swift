@@ -25,7 +25,7 @@ public final class SwiftUIEventEmitter: ObservableObject {
         self.sortChats = sortChats
     }
     
-    public func boot(for messenger: CypherMessenger) async {
+    @MainActor public func boot(for messenger: CypherMessenger) async {
         do {
             self.conversations = try await messenger.listConversations(includingInternalConversation: true, increasingOrder: sortChats)
             self.contacts = try await messenger.listContacts()

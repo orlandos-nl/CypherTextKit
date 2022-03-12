@@ -113,7 +113,7 @@ public struct UserProfilePlugin: Plugin {
 
 @available(macOS 10.15, iOS 13, *)
 extension Contact {
-    @CryptoActor public var status: String? {
+    @MainActor public var status: String? {
         try? self.model.getProp(
             ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
@@ -121,7 +121,7 @@ extension Contact {
         )
     }
     
-    @CryptoActor public var image: Data? {
+    @MainActor public var image: Data? {
         try? self.model.getProp(
             ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
@@ -129,7 +129,7 @@ extension Contact {
         )
     }
     
-    @CryptoActor public var nickname: String {
+    @MainActor public var nickname: String {
         (try? self.model.getProp(
             ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,

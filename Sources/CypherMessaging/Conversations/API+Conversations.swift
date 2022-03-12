@@ -21,7 +21,7 @@ extension CypherMessenger {
         return nil
     }
     
-    @CryptoActor public func getInternalConversation() async throws -> InternalConversation {
+    @MainActor public func getInternalConversation() async throws -> InternalConversation {
         let conversations = try await cachedStore.fetchConversations()
         for conversation in conversations {
             let conversation = try self.decrypt(conversation)
@@ -82,7 +82,7 @@ extension CypherMessenger {
                     messenger: self,
                     metadata: groupMetadata
                 )
-                self.eventHandler.onCreateConversation(chat)
+                await self.eventHandler.onCreateConversation(chat)
                 return chat
             }
         }
@@ -90,7 +90,7 @@ extension CypherMessenger {
         throw CypherSDKError.invalidGroupConfig
     }
     
-    @CryptoActor public func getGroupChat(byId id: GroupChatId) async throws -> GroupChat? {
+    @MainActor public func getGroupChat(byId id: GroupChatId) async throws -> GroupChat? {
         let conversations = try await cachedStore.fetchConversations()
         nextConversation: for conversation in conversations {
             let conversation = try self.decrypt(conversation)
@@ -124,7 +124,7 @@ extension CypherMessenger {
         return nil
     }
     
-    @CryptoActor public func getPrivateChat(with otherUser: Username) async throws -> PrivateChat? {
+    @MainActor public func getPrivateChat(with otherUser: Username) async throws -> PrivateChat? {
         let conversations = try await cachedStore.fetchConversations()
         nextConversation: for conversation in conversations {
             let conversation = try self.decrypt(conversation)
@@ -219,7 +219,7 @@ extension CypherMessenger {
         }
     }
     
-    @CryptoActor public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) async throws -> [PrivateChat] {
+    @MainActor public func listPrivateChats(increasingOrder: @escaping (PrivateChat, PrivateChat) throws -> Bool) async throws -> [PrivateChat] {
         let conversations = try await cachedStore.fetchConversations()
         return try await conversations.asyncCompactMap { conversation -> PrivateChat? in
             let conversation = try self.decrypt(conversation)
@@ -236,7 +236,7 @@ extension CypherMessenger {
         }.sorted(by: increasingOrder)
     }
     
-    @CryptoActor public func listGroupChats(increasingOrder: @escaping (GroupChat, GroupChat) throws -> Bool) async throws -> [GroupChat] {
+    @MainActor public func listGroupChats(increasingOrder: @escaping (GroupChat, GroupChat) throws -> Bool) async throws -> [GroupChat] {
         let conversations = try await cachedStore.fetchConversations()
         return try await conversations.asyncCompactMap { conversation -> GroupChat? in
             let conversation = try self.decrypt(conversation)
@@ -283,7 +283,7 @@ extension CypherMessenger {
 }
 
 @available(macOS 10.15, iOS 13, *)
-public protocol AnyConversation {
+public protocol AnyConversation: Sendable {
     var conversation: DecryptedModel<ConversationModel> { get }
     var messenger: CypherMessenger { get }
     var cache: Cache { get }
@@ -318,15 +318,15 @@ extension AnyConversation {
     }
     
     // TODO: This _could_ be cached
-    internal func memberDevices() async throws -> [DecryptedModel<DeviceIdentityModel>] {
+    internal func memberDevices() async throws -> [_DecryptedModel<DeviceIdentityModel>] {
         try await messenger._fetchDeviceIdentities(forUsers: conversation.members)
     }
 
-    internal func historicMemberDevices() async throws -> [DecryptedModel<DeviceIdentityModel>] {
+    internal func historicMemberDevices() async throws -> [_DecryptedModel<DeviceIdentityModel>] {
         try await messenger._fetchDeviceIdentities(forUsers: conversation.allHistoricMembers)
     }
     
-    public func save() async throws {
+    @MainActor public func save() async throws {
         try await messenger.cachedStore.updateConversation(conversation.encrypted)
         messenger.eventHandler.onUpdateConversation(self)
     }
@@ -405,9 +405,9 @@ extension AnyConversation {
         remoteId: String = UUID().uuidString
     ) async throws -> DecryptedModel<ChatMessageModel> {
         if let existingMessage = try? await messenger.cachedStore.fetchChatMessage(byRemoteId: remoteId) {
-            let existingMessage = try messenger.decrypt(existingMessage)
+            let existingMessage = try await messenger.decrypt(existingMessage)
             
-            if existingMessage.senderUser == props.senderUser, existingMessage.senderDeviceId == props.senderDeviceId {
+            if await existingMessage.senderUser == props.senderUser, await existingMessage.senderDeviceId == props.senderDeviceId {
                 throw CypherSDKError.duplicateChatMessage
             } else {
                 // TODO: Allow duplicate remote IDs, if they originate from different users
@@ -424,7 +424,7 @@ extension AnyConversation {
         )
         
         try await messenger.cachedStore.createChatMessage(chatMessage)
-        let message = try self.messenger.decrypt(chatMessage)
+        let message = try await self.messenger.decrypt(chatMessage)
         
         await self.messenger.eventHandler.onCreateChatMessage(
             AnyChatMessage(
@@ -437,7 +437,7 @@ extension AnyConversation {
         return message
     }
     
-    @CryptoActor internal func _sendMessage(
+    @MainActor internal func _sendMessage(
         _ message: SingleCypherMessage,
         to recipients: Set<Username>,
         pushType: PushType
@@ -492,7 +492,7 @@ extension AnyConversation {
             var tasks = [CypherTask]()
             
             for device in try await memberDevices() {
-                tasks.append(
+                await tasks.append(
                     .sendMessage(
                         SendMessageTask(
                             message: CypherMessage(message: message),
@@ -522,7 +522,7 @@ extension AnyConversation {
         }
     }
     
-    @CryptoActor public func message(byRemoteId remoteId: String) async throws -> AnyChatMessage {
+    @MainActor public func message(byRemoteId remoteId: String) async throws -> AnyChatMessage {
         let message = try await self.messenger.cachedStore.fetchChatMessage(byRemoteId: remoteId)
         
         return await AnyChatMessage(
@@ -532,7 +532,7 @@ extension AnyConversation {
         )
     }
     
-    @CryptoActor public func message(byLocalId id: UUID) async throws -> AnyChatMessage {
+    @MainActor public func message(byLocalId id: UUID) async throws -> AnyChatMessage {
         let message = try await self.messenger.cachedStore.fetchChatMessage(byId: id)
         
         return await AnyChatMessage(
@@ -542,12 +542,12 @@ extension AnyConversation {
         )
     }
     
-    public func allMessages(sortedBy sortMode: SortMode) async throws -> [AnyChatMessage] {
+    @MainActor public func allMessages(sortedBy sortMode: SortMode) async throws -> [AnyChatMessage] {
         let cursor = try await cursor(sortedBy: sortMode)
         return try await cursor.getMore(.max)
     }
-    
-    public func cursor(sortedBy sortMode: SortMode) async throws -> AnyChatMessageCursor {
+
+    @MainActor public func cursor(sortedBy sortMode: SortMode) async throws -> AnyChatMessageCursor {
         try await AnyChatMessageCursor.readingConversation(self)
     }
 }
@@ -595,57 +595,57 @@ public struct GroupChat: AnyConversation {
         .groupChat(self)
     }
     
-//    public func kickMember(_ member: Username) async throws {
-//        if !conversation.members.contains(member) {
-//            throw CypherSDKError.notGroupMember
-//        }
-//
-//        try await conversation.modifyProps { props in
-//            props.members.remove(member)
-//            props.kickedMembers.insert(member)
-//        }
-//
-//        try await self.save()
-//
-//        // Send message to user explicitly, so that they know they're kicked
-//        let order = try await getNextLocalOrder()
-//        try await messenger._writeMessage(
-//            SingleCypherMessage(
-//                messageType: .magic,
-//                messageSubtype: "_/group/kick",
-//                text: member.raw,
-//                metadata: [:],
-//                destructionTimer: nil,
-//                sentDate: Date(),
-//                preferredPushType: PushType.none,
-//                order: order,
-//                target: await self.getTarget()
-//            ),
-//            to: member
-//        )
-//    }
-//
-//    public func inviteMember(_ member: Username) async throws {
-//        if conversation.members.contains(member) {
-//            return
-//        }
-//
-//        try await conversation.modifyProps { props in
-//            props.members.insert(member)
-//            props.kickedMembers.remove(member)
-//        }
-//
-//        try await self.save()
-//        _ = try await sendRawMessage(
-//            type: .magic,
-//            messageSubtype: "_/group/invite",
-//            text: member.raw,
-//            preferredPushType: .none
-//        )
-//    }
+    @MainActor public func kickMember(_ member: Username) async throws {
+        if !conversation.members.contains(member) {
+            throw CypherSDKError.notGroupMember
+        }
+
+        try await conversation.modifyProps { props in
+            props.members.remove(member)
+            props.kickedMembers.insert(member)
+        }
+
+        try await self.save()
+
+        // Send message to user explicitly, so that they know they're kicked
+        let order = try await getNextLocalOrder()
+        try await messenger._writeMessage(
+            SingleCypherMessage(
+                messageType: .magic,
+                messageSubtype: "_/group/kick",
+                text: member.raw,
+                metadata: [:],
+                destructionTimer: nil,
+                sentDate: Date(),
+                preferredPushType: PushType.none,
+                order: order,
+                target: await self.getTarget()
+            ),
+            to: member
+        )
+    }
+
+    @MainActor public func inviteMember(_ member: Username) async throws {
+        if conversation.members.contains(member) {
+            return
+        }
+
+        try await conversation.modifyProps { props in
+            props.members.insert(member)
+            props.kickedMembers.remove(member)
+        }
+
+        try await self.save()
+        _ = try await sendRawMessage(
+            type: .magic,
+            messageSubtype: "_/group/invite",
+            text: member.raw,
+            preferredPushType: .none
+        )
+    }
 }
 
-public struct GroupMetadata: Codable {
+public struct GroupMetadata: Codable, Sendable {
     public private(set) var _type = "group"
     public var custom: Document
     public internal(set) var config: ReferencedBlob<GroupChatConfig>
@@ -665,7 +665,7 @@ public struct PrivateChat: AnyConversation {
         .privateChat(self)
     }
     
-    @CryptoActor public var conversationPartner: Username {
+    @MainActor public var conversationPartner: Username {
         // PrivateChats always have exactly 2 members
         var members = conversation.members
         members.remove(messenger.username)

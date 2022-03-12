@@ -4,7 +4,7 @@ import Crypto
 import NIO
 import CypherProtocol
 
-public enum DeviceRegisteryMode: Int, Codable {
+public enum DeviceRegisteryMode: Int, Codable, Sendable {
     case masterDevice, childDevice, unregistered
 }
 
@@ -15,8 +15,9 @@ public enum DeviceRegisteryMode: Int, Codable {
 }
 
 public typealias CryptoActor = CypherTextKitActor
+typealias JobQueueActor = CypherTextKitActor
 
-internal struct _CypherMessengerConfig: Codable {
+internal struct _CypherMessengerConfig: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case databaseEncryptionKey = "a"
         case deviceKeys = "b"
@@ -34,12 +35,12 @@ internal struct _CypherMessengerConfig: Codable {
     let deviceIdentityId: Int
 }
 
-enum RekeyState {
+enum RekeyState: Sendable {
     case rekey, next
 }
 
 /// Provided by CypherMessenger to a factory (function) so that it can create a Transport Client to the app's servers
-public struct TransportCreationRequest {
+public struct TransportCreationRequest: Sendable {
     public let username: Username
     public let deviceId: DeviceId
     public let userConfig: UserConfig
@@ -92,7 +93,7 @@ internal struct P2PSession {
     }
     
     @CryptoActor init(
-        deviceIdentity: DecryptedModel<DeviceIdentityModel>,
+        deviceIdentity: _DecryptedModel<DeviceIdentityModel>,
         transport: P2PTransportClient,
         client: P2PClient
     ) {
@@ -182,7 +183,7 @@ fileprivate final class CypherMessengerActor {
 ///
 /// CypherMessenger can be created as a singleton, but multiple clients in the same process is supported.
 @available(macOS 10.15, iOS 13, *)
-public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate, P2PTransportFactoryDelegate {
+public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportClientDelegate, P2PTransportFactoryDelegate, @unchecked Sendable {
     @CypherTextKitActor public func createLocalDeviceAdvertisement() async throws -> P2PAdvertisement {
         let advertisement = P2PAdvertisement.Advertisement(
             origin: Peer(
@@ -464,7 +465,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         let data = try await database.readLocalDeviceConfig()
         let box = try AES.GCM.SealedBox(combined: data)
         let encryptedConfig = Encrypted<_CypherMessengerConfig>(representing: box)
-        let config = try await encryptedConfig.decrypt(using: encryptionKey)
+        let config = try encryptedConfig.decrypt(using: encryptionKey)
         let transportRequest = try TransportCreationRequest(
             username: config.username,
             deviceId: config.deviceKeys.deviceId,
@@ -498,7 +499,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             let data = try await self.cachedStore.readLocalDeviceConfig()
             let box = try AES.GCM.SealedBox(combined: data)
             let config = Encrypted<_CypherMessengerConfig>(representing: box)
-            _ = try await config.decrypt(using: appEncryptionKey)
+            _ = try config.decrypt(using: appEncryptionKey)
             return true
         } catch {
             return false
@@ -623,7 +624,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     /// Adds a new device to this user's devices. This device can from now on receive all messages, and communicate in name of this user.
-    public func addDevice(_ deviceConfig: UserDeviceConfig) async throws {
+    @MainActor public func addDevice(_ deviceConfig: UserDeviceConfig) async throws {
         var config = try await transport.readKeyBundle(forUsername: self.username)
         guard await config.identity.data == state.config.deviceKeys.identity.publicKey.data else {
             throw CypherSDKError.corruptUserConfig
@@ -649,7 +650,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         
         try await internalConversation.sendInternalMessage(message)
         
-        for contact in try await self.listContacts() {
+        for contact in try await listContacts() {
             try await _writeMessage(message, to: contact.username)
         }
         
@@ -708,9 +709,9 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
     }
     
-    func _withCreatedMultiRecipientMessage<T>(
+    @CryptoActor func _withCreatedMultiRecipientMessage<T>(
         encrypting message: CypherMessage,
-        forDevices devices: [DecryptedModel<DeviceIdentityModel>],
+        forDevices devices: [_DecryptedModel<DeviceIdentityModel>],
         run: @Sendable (MultiRecipientCypherMessage) async throws -> T
     ) async throws -> T {
         let key = SymmetricKey(size: .bits256)
@@ -722,13 +723,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         let encryptedMessage = try AES.GCM.seal(messageData, using: key).combined!
         
         var keyMessages = [MultiRecipientCypherMessage.ContainerKey]()
-        var rekeyDevices = [DecryptedModel<DeviceIdentityModel>]()
+        var rekeyDevices = [_DecryptedModel<DeviceIdentityModel>]()
         
         for device in devices {
             let keyMessage = try await device._writeWithRatchetEngine(messenger: self) { ratchetEngine, rekeyState -> MultiRecipientCypherMessage.ContainerKey in
                 let ratchetMessage = try ratchetEngine.ratchetEncrypt(keyData)
                 
-                return try await MultiRecipientCypherMessage.ContainerKey(
+                return try MultiRecipientCypherMessage.ContainerKey(
                     user: device.props.username,
                     deviceId: device.props.deviceId,
                     message: self._signRatchetMessage(
@@ -748,7 +749,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         do {
             let message = try MultiRecipientCypherMessage(
                 encryptedMessage: encryptedMessage,
-                signWith: await state.config.deviceKeys.identity,
+                signWith: state.config.deviceKeys.identity,
                 keys: keyMessages
             )
             
@@ -757,29 +758,59 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             for device in rekeyDevices {
                 // Device was instantiated with a rekey, but the message wasn't sent
                 // So to prevent any further confusion & issues, just reset this
-                try await device.updateDoubleRatchetState(to: nil)
+                try device.updateDoubleRatchetState(to: nil)
             }
             
             throw error
         }
     }
     
-    @CryptoActor final class ModelCache {
+    @MainActor final class ModelCache {
         private var cache = [UUID: Weak<AnyObject>]()
-        @CryptoActor func getModel<M: Model>(ofType: M.Type, forId id: UUID) -> DecryptedModel<M>? {
+        @MainActor func getModel<M: Model>(ofType: M.Type, forId id: UUID) -> DecryptedModel<M>? {
             cache[id]?.object as? DecryptedModel<M>
         }
         
-        @CryptoActor func addModel<M: Model>(_ model: DecryptedModel<M>, forId id: UUID) {
+        @MainActor func addModel<M: Model>(_ model: DecryptedModel<M>, forId id: UUID) {
             cache[id] = Weak(object: model)
         }
     }
     
-    @CryptoActor private let cache = ModelCache()
+    @CryptoActor final class InternalModelCache {
+        private var cache = [UUID: Weak<AnyObject>]()
+        @CryptoActor func getModel<M: Model>(ofType: M.Type, forId id: UUID) -> _DecryptedModel<M>? {
+            cache[id]?.object as? _DecryptedModel<M>
+        }
+        
+        @CryptoActor func addModel<M: Model>(_ model: _DecryptedModel<M>, forId id: UUID) {
+            cache[id] = Weak(object: model)
+        }
+    }
+    
+    @MainActor private let cache = ModelCache()
+    @CryptoActor private let _cache = InternalModelCache()
     
     /// Decrypts a model as provided by the database
     /// It is critical to call this method for decryption for stability reasons, as CypherMessenger prevents duplicate representations of a Model from existing at the same time.
-    @CryptoActor public func decrypt<M: Model>(_ model: M) throws -> DecryptedModel<M> {
+    @CryptoActor internal func _cachelessDecrypt<M: Model>(_ model: M) throws -> _DecryptedModel<M> {
+        try _DecryptedModel(model: model, encryptionKey: databaseEncryptionKey)
+    }
+    
+    /// Decrypts a model as provided by the database
+    /// It is critical to call this method for decryption for stability reasons, as CypherMessenger prevents duplicate representations of a Model from existing at the same time.
+    @CryptoActor func _decrypt<M: Model>(_ model: M) throws -> _DecryptedModel<M> {
+        if let decrypted = _cache.getModel(ofType: M.self, forId: model.id) {
+            return decrypted
+        }
+        
+        let decrypted = try _DecryptedModel(model: model, encryptionKey: databaseEncryptionKey)
+        _cache.addModel(decrypted, forId: model.id)
+        return decrypted
+    }
+    
+    /// Decrypts a model as provided by the database
+    /// It is critical to call this method for decryption for stability reasons, as CypherMessenger prevents duplicate representations of a Model from existing at the same time.
+    @MainActor public func decrypt<M: Model>(_ model: M) throws -> DecryptedModel<M> {
         if let decrypted = cache.getModel(ofType: M.self, forId: model.id) {
             return decrypted
         }
@@ -878,7 +909,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     @CryptoActor internal func _processP2PMessage(
         _ message: SingleCypherMessage,
         remoteMessageId: String,
-        sender device: DecryptedModel<DeviceIdentityModel>
+        sender device: _DecryptedModel<DeviceIdentityModel>
     ) async throws {
         var subType = message.messageSubtype ?? ""
         
@@ -972,7 +1003,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     @CryptoActor internal func getEstablishedP2PConnection(
-        with device: DecryptedModel<DeviceIdentityModel>
+        with device: _DecryptedModel<DeviceIdentityModel>
     ) async throws -> P2PClient? {
         state.p2pSessions.first(where: { user in
             user.username == device.username && user.deviceId == device.deviceId
@@ -980,7 +1011,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     @CryptoActor internal func createP2PConnection(
-        with device: DecryptedModel<DeviceIdentityModel>,
+        with device: _DecryptedModel<DeviceIdentityModel>,
         targetConversation: TargetConversation,
         preferredTransportIdentifier: String? = nil
     ) async throws {
@@ -1048,14 +1079,14 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
 }
 
-extension DecryptedModel where M == DeviceIdentityModel {
+extension _DecryptedModel where M == DeviceIdentityModel {
     @CryptoActor func _readWithRatchetEngine(
         message: RatchetedCypherMessage,
         messenger: CypherMessenger
     ) async throws -> Data {
-        func rekey() async throws {
+        @CryptoActor func rekey() async throws {
             debugLog("Rekeying - removing ratchet state")
-            try await self.updateDoubleRatchetState(to: nil)
+            try self.updateDoubleRatchetState(to: nil)
             
             try await messenger.eventHandler.onRekey(
                 withUser: username,
@@ -1129,7 +1160,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
             }
         }
         
-        try await self.updateDoubleRatchetState(to: ratchet.state)
+        try self.updateDoubleRatchetState(to: ratchet.state)
         
         try await messenger.cachedStore.updateDeviceIdentity(encrypted)
         return data
@@ -1160,7 +1191,7 @@ extension DecryptedModel where M == DeviceIdentityModel {
         }
         
         let result = try await run(&ratchet, rekey ? .rekey : .next)
-        try await updateDoubleRatchetState(to: ratchet.state)
+        try updateDoubleRatchetState(to: ratchet.state)
         
         try await messenger.cachedStore.updateDeviceIdentity(encrypted)
         return result

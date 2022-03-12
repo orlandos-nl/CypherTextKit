@@ -4,7 +4,7 @@ import CypherMessaging
 public struct ModifyMessagePlugin: Plugin {
     public static let pluginIdentifier = "@/messaging/mutate-history"
     
-    @CryptoActor public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
+    @MainActor public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         guard
             message.message.messageType == .magic,
             var subType = message.message.messageSubtype,

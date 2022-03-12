@@ -49,7 +49,7 @@ public struct ChatActivityPlugin: Plugin {
 
 @available(macOS 10.15, iOS 13, *)
 extension AnyConversation {
-    @CryptoActor public var lastActivity: Date? {
+    @MainActor public var lastActivity: Date? {
         try? self.conversation.getProp(
             ofType: ChatActivityMetadata.self,
             forPlugin: ChatActivityPlugin.self,

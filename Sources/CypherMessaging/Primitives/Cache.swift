@@ -11,7 +11,7 @@ public protocol CacheKey {
     associatedtype Value
 }
 
-@CacheActor public final class Cache {
+@CacheActor public final class Cache: Sendable {
     internal init() {}
     
     private var values = [ObjectIdentifier: Any]()

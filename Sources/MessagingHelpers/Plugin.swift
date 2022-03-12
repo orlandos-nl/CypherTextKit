@@ -51,7 +51,7 @@ extension Plugin {
 }
 
 extension Contact {
-    @CryptoActor public func modifyMetadata<P: Plugin, C: Codable, Result>(
+    @MainActor public func modifyMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
@@ -64,7 +64,7 @@ extension Contact {
 
 @available(macOS 10.15, iOS 13, *)
 extension DecryptedModel where M.SecureProps: MetadataProps {
-    @CryptoActor public func getProp<P: Plugin, C: Codable, Result>(
+    @MainActor public func getProp<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: @Sendable (C) throws -> Result
@@ -74,7 +74,7 @@ extension DecryptedModel where M.SecureProps: MetadataProps {
         return try run(pluginMetadata)
     }
     
-    @CryptoActor public func withMetadata<P: Plugin, C: Codable, Result>(
+    @MainActor public func withMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result

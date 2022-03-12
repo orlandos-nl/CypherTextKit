@@ -53,7 +53,7 @@ public struct FriendshipPlugin: Plugin {
         self.ruleset = ruleset
     }
     
-    @CryptoActor public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
+    @MainActor public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         let senderUsername = message.sender.username
         let target = await message.conversation.getTarget()
         let username: Username = ""// = await message.messenger.username
@@ -168,7 +168,7 @@ public struct FriendshipPlugin: Plugin {
 
 @available(macOS 10.15, iOS 13, *)
 extension Contact {
-    @CryptoActor public var ourState: FriendshipStatus {
+    @MainActor public var ourState: FriendshipStatus {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -176,7 +176,7 @@ extension Contact {
         )) ?? .undecided
     }
     
-    @CryptoActor public var theirState: FriendshipStatus {
+    @MainActor public var theirState: FriendshipStatus {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -184,7 +184,7 @@ extension Contact {
         )) ?? .undecided
     }
     
-    @CryptoActor public var isMutualFriendship: Bool {
+    @MainActor public var isMutualFriendship: Bool {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -192,7 +192,7 @@ extension Contact {
         )) ?? false
     }
     
-    @CryptoActor public var isBlocked: Bool {
+    @MainActor public var isBlocked: Bool {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -200,19 +200,19 @@ extension Contact {
         )) ?? false
     }
     
-    @CryptoActor public func block() async throws {
+    @MainActor public func block() async throws {
         try await changeOurState(to: .blocked)
     }
     
-    @CryptoActor public func befriend() async throws {
+    @MainActor public func befriend() async throws {
         try await changeOurState(to: .friend)
     }
     
-    @CryptoActor public func unfriend() async throws {
+    @MainActor public func unfriend() async throws {
         try await changeOurState(to: .notFriend)
     }
     
-    @CryptoActor public func query() async throws {
+    @MainActor public func query() async throws {
         let privateChat = try await self.messenger.createPrivateChat(with: self.username)
         _ = try await privateChat.sendRawMessage(
             type: .magic,
@@ -222,7 +222,7 @@ extension Contact {
         )
     }
     
-    @CryptoActor public func unblock() async throws {
+    @MainActor public func unblock() async throws {
         guard ourState == .blocked else {
             return
         }
@@ -236,7 +236,7 @@ extension Contact {
         return try await changeOurState(to: oldState)
     }
     
-    @CryptoActor fileprivate func changeOurState(to newState: FriendshipStatus) async throws {
+    @MainActor fileprivate func changeOurState(to newState: FriendshipStatus) async throws {
         try await self.modifyMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self
