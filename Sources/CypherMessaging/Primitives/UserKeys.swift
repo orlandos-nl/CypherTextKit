@@ -28,7 +28,7 @@ public struct UserConfig: Codable, @unchecked Sendable {
         case devices = "b"
     }
     
-    /// Identity is a public key used to validate messages sidned by `identity`
+    /// Identity is a public key used to validate messages signed by `identity`
     /// This is the main device's identity, which when trusted verified all other devices' validity
     public let identity: PublicSigningKey
     

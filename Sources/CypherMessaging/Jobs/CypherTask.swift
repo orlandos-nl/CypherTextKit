@@ -228,17 +228,21 @@ enum CypherTask: Codable, StoredTask {
                 return mode
             }
             
-            return .retryAfter(30, maxAttempts: 3)
+            return .retryAfter(30, maxAttempts: nil)
         case .processMultiRecipientMessage, .processMessage:
             return .always
         case .receiveMessageDeliveryStateChangeTask:
-            return .retryAfter(60, maxAttempts: 5)
+            // Message sent by other device, but same (our) user
+            // We don't know what message this is, yet
+            return .retryAfter(60, maxAttempts: 30)
         }
     }
     
-    var requiresConnectivity: Bool {
+    func requiresConnectivity(on messenger: CypherMessenger) -> Bool {
         switch self {
-        case .sendMessage, .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
+        case .sendMessage:
+            return !messenger.canBroadcastInMesh
+        case .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
             return true
         case .processMessage, .processMultiRecipientMessage, .receiveMessageDeliveryStateChangeTask:
             return false
@@ -342,9 +346,9 @@ enum CypherTask: Codable, StoredTask {
     func onDelayed(on messenger: CypherMessenger) async throws {
         switch self {
         case .sendMessage(let task):
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            try await messenger._markMessage(byId: task.localId, as: .undelivered)
         case .sendMultiRecipientMessage(let task):
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            try await messenger._markMessage(byId: task.localId, as: .undelivered)
         case .processMessage, .processMultiRecipientMessage, .sendMessageDeliveryStateChangeTask, .receiveMessageDeliveryStateChangeTask:
             ()
         }
@@ -402,7 +406,7 @@ enum CypherTask: Codable, StoredTask {
                 fatalError("TODO")
             }
         case .receiveMessageDeliveryStateChangeTask(let task):
-            _ = try await messenger._markMessage(byRemoteId: task.messageId, updatedBy: task.sender, as: task.newState)
+            try await messenger._markMessage(byRemoteId: task.messageId, updatedBy: task.sender, as: task.newState)
         }
     }
 }
@@ -417,7 +421,7 @@ enum TaskHelpers {
         
         guard messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            try await messenger._markMessage(byId: task.localId, as: .undelivered)
             throw CypherSDKError.offline
         }
         
@@ -506,12 +510,12 @@ enum TaskHelpers {
                         )
                     )
                 )
+                
+                // Throw an error anyways, this packet may not arrive
+                throw CypherSDKError.offline
             } else {
                 throw CypherSDKError.offline
             }
         }
-        
-        // Message may be a magic packet
-        _ = try? await messenger._markMessage(byId: task.localId, as: .none)
     }
 }

@@ -21,7 +21,7 @@ public final class SwiftUIEventEmitter: ObservableObject {
     @Published public fileprivate(set) var contacts = [Contact]()
     let sortChats: @Sendable (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
     
-    public init(sortChats: @escaping @Sendable (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
+    public init(sortChats: @escaping @Sendable @MainActor (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
         self.sortChats = sortChats
     }
     
@@ -29,6 +29,15 @@ public final class SwiftUIEventEmitter: ObservableObject {
         do {
             self.conversations = try await messenger.listConversations(includingInternalConversation: true, increasingOrder: sortChats)
             self.contacts = try await messenger.listContacts()
+            
+            Task {
+                while !messenger.isOnline {
+                    try await Task.sleep(nanoseconds: NSEC_PER_SEC)
+                }
+                
+                try await Task.sleep(nanoseconds: NSEC_PER_SEC)
+                await messenger.resumeJobQueue()
+            }
         } catch {}
     }
 }
@@ -57,11 +66,11 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         }
     }
     
-    public func onConversationChange(_ conversation: AnyConversation) {
+    public func onConversationChange(_ viewModel: AnyConversation) {
         Task.detached {
-            let conversation = await conversation.resolveTarget()
+            let viewModel = await viewModel.resolveTarget()
             DispatchQueue.main.async {
-                emitter.conversationChanged.send(conversation)
+                emitter.conversationChanged.send(viewModel)
             }
         }
     }
@@ -79,9 +88,9 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         }
     }
     
-    public func onCreateConversation(_ conversation: AnyConversation) {
+    public func onCreateConversation(_ viewModel: AnyConversation) {
         DispatchQueue.main.async {
-            emitter.conversationAdded.send(conversation)
+            emitter.conversationAdded.send(viewModel)
         }
     }
     

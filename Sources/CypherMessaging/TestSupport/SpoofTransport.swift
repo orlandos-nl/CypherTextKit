@@ -132,6 +132,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     private let server: SpoofServer
     public private(set) var authenticated = AuthenticationState.unauthenticated
     public let supportsMultiRecipientMessages = true
+    public let supportsDelayedRegistration = true
     public var isConnected: Bool { !SpoofTransportClientSettings.isOffline }
     public weak var delegate: CypherTransportClientDelegate?
     
@@ -159,7 +160,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func receiveServerEvent(_ event: CypherServerEvent) async throws {
-        _ = try await delegate?.receiveServerEvent(event)
+        try await delegate?.receiveServerEvent(event)
     }
     
     public func reconnect() async throws {

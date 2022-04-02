@@ -122,7 +122,7 @@ public struct FriendshipPlugin: Plugin {
             case "query":
                 let changedState = try BSONEncoder().encode(
                     ChangeFriendshipState(
-                        newState: contact.ourState,
+                        newState: contact.ourFriendshipState,
                         subject: contact.username
                     )
                 )
@@ -140,7 +140,7 @@ public struct FriendshipPlugin: Plugin {
             }
         }
         
-        switch (contact.ourState, contact.theirState) {
+        switch (contact.ourFriendshipState, contact.theirFriendshipState) {
         case (.blocked, _), (_, .blocked):
             return .ignore
         case (.undecided, _), (_, .undecided):
@@ -168,7 +168,7 @@ public struct FriendshipPlugin: Plugin {
 
 @available(macOS 10.15, iOS 13, *)
 extension Contact {
-    @MainActor public var ourState: FriendshipStatus {
+    @MainActor public var ourFriendshipState: FriendshipStatus {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -176,7 +176,7 @@ extension Contact {
         )) ?? .undecided
     }
     
-    @MainActor public var theirState: FriendshipStatus {
+    @MainActor public var theirFriendshipState: FriendshipStatus {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -214,7 +214,7 @@ extension Contact {
     
     @MainActor public func query() async throws {
         let privateChat = try await self.messenger.createPrivateChat(with: self.username)
-        _ = try await privateChat.sendRawMessage(
+        try await privateChat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/contacts/friendship/query",
             text: "",
@@ -223,7 +223,7 @@ extension Contact {
     }
     
     @MainActor public func unblock() async throws {
-        guard ourState == .blocked else {
+        guard ourFriendshipState == .blocked else {
             return
         }
         
@@ -260,7 +260,7 @@ extension Contact {
         )
         
         let internalChat = try await self.messenger.getInternalConversation()
-        _ = try await internalChat.sendRawMessage(
+        try await internalChat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/contacts/friendship/change-state",
             text: "",
@@ -269,7 +269,7 @@ extension Contact {
         )
         
         let privateChat = try await self.messenger.createPrivateChat(with: self.username)
-        _ = try await privateChat.sendRawMessage(
+        try await privateChat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/contacts/friendship/change-state",
             text: "",

@@ -7,6 +7,7 @@ import NIO
 public struct Contact: Identifiable, Hashable {
     public let messenger: CypherMessenger
     public let model: DecryptedModel<ContactModel>
+    @CacheActor public let cache = Cache()
     
     @MainActor public func save() async throws {
         try await messenger.cachedStore.updateContact(model.encrypted)

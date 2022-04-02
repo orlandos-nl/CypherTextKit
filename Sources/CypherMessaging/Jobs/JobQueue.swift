@@ -82,6 +82,10 @@ final class JobQueue {
     
     @JobQueueActor
     public func queueTasks<T: StoredTask>(_ tasks: [T]) async throws {
+        if tasks.isEmpty {
+            return
+        }
+        
         guard let messenger = self.messenger else {
             throw CypherSDKError.appLocked
         }
@@ -107,7 +111,7 @@ final class JobQueue {
             debugLog("Failed to queue all jobs of type \(T.self)")
             
             for job in jobs {
-                _ = try? await database.removeJob(job)
+                try? await database.removeJob(job)
             }
             
             throw error
@@ -125,9 +129,6 @@ final class JobQueue {
     
     @JobQueueActor
     func awaitDoneProcessing() async throws -> SynchronisationResult {
-//        if runningJobs {
-//            return .busy
-//        } else
         if hasOutstandingTasks, let messenger = messenger {
             let promise = messenger.eventLoop.makePromise(of: Void.self)
             self.isDoneNotifications.append(promise)
@@ -141,18 +142,23 @@ final class JobQueue {
     
     @JobQueueActor
     func markAsDone() {
-        if !hasOutstandingTasks && !isDoneNotifications.isEmpty {
-            for notification in isDoneNotifications {
-                notification.succeed(())
-            }
-            
-            isDoneNotifications = []
+//        if !hasOutstandingTasks && !isDoneNotifications.isEmpty {
+        for notification in isDoneNotifications {
+            notification.succeed(())
         }
+        
+        isDoneNotifications = []
+//        }
     }
     
     @JobQueueActor
     func startRunningTasks() {
         debugLog("Starting job queue")
+        
+        if let messenger = messenger, !messenger.isOnline, !messenger.canBroadcastInMesh {
+            debugLog("App is offline, aborting")
+            return
+        }
 
         if runningJobs {
             debugLog("Job queue already running")
@@ -200,6 +206,9 @@ final class JobQueue {
                 switch result {
                 case .success, .delayed, .failed(haltExecution: false):
                     return try await next()
+                case .waitingForDelays:
+                    self.runningJobs = false
+                    self.markAsDone()
                 case .failed(haltExecution: true):
                     for job in self.jobs {
                         let task: StoredTask
@@ -286,6 +295,7 @@ final class JobQueue {
 
     public enum TaskResult {
         case success, delayed, failed(haltExecution: Bool)
+        case waitingForDelays
     }
 
     @JobQueueActor
@@ -294,10 +304,18 @@ final class JobQueue {
         var index = 0
         let initialJob = jobs[0]
 
-        if initialJob.props.isBackgroundTask, jobs.count > 1 {
+        findOtherJob: if (initialJob.props.isBackgroundTask && jobs.count > 1) || initialJob.delayedUntil != nil {
+            if let delayedUntil = initialJob.delayedUntil, delayedUntil <= Date() {
+                break findOtherJob
+            }
+        
             findBetterTask: for newIndex in 1..<jobs.count {
                 let newJob = jobs[newIndex]
                 if !newJob.props.isBackgroundTask {
+                    if let delayedUntil = newJob.delayedUntil, delayedUntil > Date() {
+                        continue findBetterTask
+                    }
+                    
                     index = newIndex
                     break findBetterTask
                 }
@@ -305,6 +323,10 @@ final class JobQueue {
         }
 
         let job = jobs[index]
+        
+        if let delayedUntil = job.delayedUntil, delayedUntil > Date() {
+            return .waitingForDelays
+        }
 
         debugLog("Running job", job.props)
 
@@ -332,7 +354,7 @@ final class JobQueue {
             throw CypherSDKError.appLocked
         }
         
-        if task.requiresConnectivity, messenger.isOnline, messenger.authenticated != .authenticated {
+        if task.requiresConnectivity(on: messenger), messenger.isOnline, messenger.authenticated != .authenticated {
             debugLog("Job required connectivity, but app is offline")
             throw CypherSDKError.offline
         }
@@ -346,7 +368,7 @@ final class JobQueue {
 
             switch task.retryMode.raw {
             case .retryAfter(let retryDelay, let maxAttempts):
-                debugLog("Delaying task for an hour")
+                debugLog("Delaying task for \(retryDelay) seconds")
                 try job.delayExecution(retryDelay: retryDelay)
                 
                 if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {

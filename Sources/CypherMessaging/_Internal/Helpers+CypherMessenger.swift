@@ -11,6 +11,7 @@ enum UserIdentityState {
 @available(macOS 10.15, iOS 13, *)
 internal extension CypherMessenger {
     @CryptoActor
+    @discardableResult
     func _markMessage(byRemoteId remoteId: String, updatedBy user: Username, as newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
         let message = try await cachedStore.fetchChatMessage(byRemoteId: remoteId)
         let decryptedMessage = try await self.decrypt(message)
@@ -103,6 +104,7 @@ internal extension CypherMessenger {
     }
     
     @CryptoActor
+    @discardableResult
     func _updateUserIdentity(of username: Username, to config: UserConfig) async throws -> UserIdentityState {
         if username == self.username {
             return .consistent
@@ -148,6 +150,7 @@ internal extension CypherMessenger {
     }
     
     @CryptoActor
+    @discardableResult
     func _createDeviceIdentity(
         from device: UserDeviceConfig,
         forUsername username: Username,
@@ -161,6 +164,13 @@ internal extension CypherMessenger {
                 deviceIdentity.props.username == username,
                 deviceIdentity.props.deviceId == device.deviceId
             {
+                guard
+                    deviceIdentity.publicKey == device.publicKey,
+                    deviceIdentity.identity.data == device.identity.data
+                else {
+                    throw CypherSDKError.invalidSignature
+                }
+                
                 return deviceIdentity
             }
         }
@@ -195,16 +205,37 @@ internal extension CypherMessenger {
         for username: Username
     ) async throws {
         let devices = try await self._fetchKnownDeviceIdentities(for: username)
-        _ = try await _rediscoverDeviceIdentities(for: username, knownDevices: devices)
+        try await _rediscoverDeviceIdentities(for: username, knownDevices: devices)
     }
     
     // TODO: Rate limit
     @CryptoActor
+    @discardableResult
     func _rediscoverDeviceIdentities(
         for username: Username,
         knownDevices: [_DecryptedModel<DeviceIdentityModel>]
     ) async throws -> [_DecryptedModel<DeviceIdentityModel>] {
         let userConfig = try await self.transport.readKeyBundle(forUsername: username)
+        return try await _processDeviceConfig(
+            userConfig,
+            forUername: username,
+            knownDevices: knownDevices
+        )
+    }
+    
+    @CryptoActor
+    @discardableResult
+    func _processDeviceConfig(
+        _ userConfig: UserConfig,
+        forUername username: Username,
+        knownDevices: [_DecryptedModel<DeviceIdentityModel>]
+    ) async throws -> [_DecryptedModel<DeviceIdentityModel>] {
+        if rediscoveredUsernames.contains(username) {
+            return knownDevices
+        }
+        
+        rediscoveredUsernames.insert(username)
+        
         let identityState = try await self._updateUserIdentity(
             of: username,
             to: userConfig
@@ -213,6 +244,7 @@ internal extension CypherMessenger {
         switch identityState {
         case .changedIdentity:
             await self.eventHandler.onContactIdentityChange(username: username, messenger: self)
+            // TODO: Remove unknown devices?
             fallthrough
         case .consistent, .newIdentity:
             var models = [_DecryptedModel<DeviceIdentityModel>]()
@@ -339,18 +371,32 @@ internal extension CypherMessenger {
                 
                 if deviceConfig.deviceId == self.deviceId {
                     // We're not going to add ourselves as a conversation partner
-                    // But we will mark ourselves as a child device
+                    // But we will mark ourselves as a registered device
                     try await self.updateConfig { config in
-                        config.registeryMode = .childDevice
+                        config.registeryMode = deviceConfig.isMasterDevice ? .masterDevice : .childDevice
                     }
                     return
                 }
                 
-                _ = try await self._createDeviceIdentity(
+                try await self._createDeviceIdentity(
                     from: deviceConfig,
                     forUsername: self.username
                 )
                 return
+            case (.magic, let subType) where subType == "_/devices/rename":
+                let rename = try BSONDecoder().decode(
+                    MagicPackets.RenameDevice.self,
+                    from: message.metadata
+                )
+                
+                guard rename.deviceId != self.deviceId else {
+                    // We don't rename ourselves, our identity is not stored like tat
+                    return
+                }
+                
+                let device = try await _fetchDeviceIdentity(for: username, deviceId: rename.deviceId)
+                try device.updateDeviceName(to: rename.name)
+                try await cachedStore.updateDeviceIdentity(device.encrypted)
             case (.magic, let subType) where subType.hasPrefix("_/p2p/0/"):
                 if
                     let sentDate = message.sentDate,
@@ -389,7 +435,7 @@ internal extension CypherMessenger {
                     return
                 case .save:
                     let conversation = try await self.getInternalConversation()
-                    let chatMessage = try await conversation._saveMessage(
+                    guard let chatMessage = try await conversation._saveMessage(
                         senderId: sender.props.senderId,
                         order: message.order,
                         props: .init(
@@ -399,7 +445,10 @@ internal extension CypherMessenger {
                             senderDeviceId: sender.props.deviceId
                         ),
                         remoteId: remoteMessageId
-                    )
+                    ) else {
+                        // Message was not saved, probably duplicate
+                        return
+                    }
                     
                     if await chatMessage.senderUser == self.username {
                         // Send by our device in this chat
@@ -435,7 +484,7 @@ internal extension CypherMessenger {
             case .ignore:
                 return
             case .save:
-                let chatMessage = try await group._saveMessage(
+                guard let chatMessage = try await group._saveMessage(
                     senderId: sender.props.senderId,
                     order: message.order,
                     props: .init(
@@ -445,7 +494,10 @@ internal extension CypherMessenger {
                         senderDeviceId: sender.props.deviceId
                     ),
                     remoteId: remoteMessageId
-                )
+                ) else {
+                    // Message was not saved, probably duplicate
+                    return
+                }
                 
                 if await chatMessage.senderUser != self.username {
                     try await self.jobQueue.queueTask(
@@ -501,7 +553,7 @@ internal extension CypherMessenger {
                 return
             case .save:
                 debugLog("Received message is to be saved")
-                let chatMessage = try await privateChat._saveMessage(
+                guard let chatMessage = try await privateChat._saveMessage(
                     senderId: sender.props.senderId,
                     order: message.order,
                     props: .init(
@@ -511,7 +563,10 @@ internal extension CypherMessenger {
                         senderDeviceId: sender.props.deviceId
                     ),
                     remoteId: remoteMessageId
-                )
+                ) else {
+                    // Message was not saved, probably duplicate
+                    return
+                }
                 
                 if await chatMessage.senderUser != self.username {
                     try await self.jobQueue.queueTask(

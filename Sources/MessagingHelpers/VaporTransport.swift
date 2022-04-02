@@ -93,7 +93,7 @@ struct ReadReceiptPacket: Codable {
     let recipient: UserDeviceId
 }
 
-let maxBodySize = 500_000
+let maxBodySize = 4_000_000
 
 @available(macOS 10.15, iOS 13, *)
 extension URLSession {
@@ -116,6 +116,7 @@ extension URLSession {
         return try BSONDecoder().decode(type, from: Document(data: data))
     }
     
+    @discardableResult
     func postBSON<E: Encodable>(
         httpHost: String,
         url: String,
@@ -333,13 +334,13 @@ public final class VaporTransport: CypherServerTransportClient {
             try await WebSocket.connect(
                 to: "wss://\(host)/websocket",
                 headers: headers,
-                configuration: .init(maxFrameSize: 512_000),
+                configuration: .init(maxFrameSize: maxBodySize),
                 on: eventLoop
             ) { webSocket in
                 self.webSocket = webSocket
                 self.authenticated = .authenticated
                 
-                _ = webSocket.eventLoop.scheduleRepeatedTask(
+                webSocket.eventLoop.scheduleRepeatedTask(
                     initialDelay: .seconds(15),
                     delay: .seconds(15)
                 ) { task in
@@ -417,7 +418,7 @@ public final class VaporTransport: CypherServerTransportClient {
                             let ack = try BSONEncoder().encode(Ack(id: packet.id)).makeData()
                             try await webSocket.send(raw: ack, opcode: .binary)
                         } catch {
-                            _ = await transport.disconnect()
+                            await transport.disconnect()
                         }
                     }
                 }
@@ -454,7 +455,7 @@ public final class VaporTransport: CypherServerTransportClient {
     }
     
     public func publishKeyBundle(_ data: UserConfig) async throws {
-        _ = try await self.httpClient.postBSON(
+        try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "current-user/config",
             username: self.username,
@@ -465,7 +466,7 @@ public final class VaporTransport: CypherServerTransportClient {
     }
     
     public func registerAPNSToken(_ token: Data) async throws {
-        _ = try await self.httpClient.postBSON(
+        try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "current-device/token",
             username: self.username,
@@ -498,7 +499,7 @@ public final class VaporTransport: CypherServerTransportClient {
         pushType: PushType,
         messageId: String
     ) async throws {
-        _ = try await self.httpClient.postBSON(
+        try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "users/\(username.raw)/devices/\(deviceId.raw)/send-message",
             username: self.username,
@@ -517,7 +518,7 @@ public final class VaporTransport: CypherServerTransportClient {
         pushType: PushType,
         messageId: String
     ) async throws {
-        _ = try await self.httpClient.postBSON(
+        let (_, response) = try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "actions/send-message",
             username: self.username,
@@ -529,6 +530,13 @@ public final class VaporTransport: CypherServerTransportClient {
                 messageId: messageId
             )
         )
+        
+        if let response = response as? HTTPURLResponse {
+            guard response.statusCode >= 200 && response.statusCode < 300 else {
+                debugLog("Status code \(response.statusCode)")
+                throw VaporTransportError.sendMessageFailed
+            }
+        }
     }
 }
 

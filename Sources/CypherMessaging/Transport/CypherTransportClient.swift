@@ -48,6 +48,9 @@ public protocol CypherServerTransportClient: AnyObject {
     /// Supporting MultiRecipient Messages allows the app to expend less data uploading files to multiple recipients.
     var supportsMultiRecipientMessages: Bool { get }
     
+    // TODO: Implement support
+    var supportsDelayedRegistration: Bool { get }
+    
     /// (Re-)starts the connection(s).
     func reconnect() async throws
     
@@ -113,6 +116,10 @@ public protocol CypherServerTransportClient: AnyObject {
     ///
     /// This function must complete after having successfully sent a message to the server, this should include an acknowledgement from the server.
     func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, pushType: PushType, messageId: String) async throws
+}
+
+extension CypherServerTransportClient {
+    public var supportsDelayedRegistration: Bool { false }
 }
 
 public protocol ConnectableCypherTransportClient: CypherServerTransportClient {

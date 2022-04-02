@@ -5,6 +5,8 @@ import CypherProtocol
 
 public final class ConversationModel: Model, @unchecked Sendable {
     public struct SecureProps: Codable, @unchecked Sendable, MetadataProps {
+        // TODO: Shorter CodingKeys
+        
         public var members: Set<Username>
         public var kickedMembers: Set<Username>
         public var metadata: Document
@@ -59,6 +61,8 @@ extension DecryptedModel where M == ConversationModel {
 
 public final class DeviceIdentityModel: Model, @unchecked Sendable {
     public struct SecureProps: Codable, Sendable {
+        // TODO: Shorter CodingKeys
+        
         let username: Username
         let deviceId: DeviceId
         let senderId: Int
@@ -66,6 +70,7 @@ public final class DeviceIdentityModel: Model, @unchecked Sendable {
         let identity: PublicSigningKey
         let isMasterDevice: Bool
         var doubleRatchet: DoubleRatchetHKDF<SHA512>.State?
+        var deviceName: String?
         
         // TODO: Verify identity on the server later when possible
         var serverVerified: Bool?
@@ -111,13 +116,21 @@ extension _DecryptedModel where M == DeviceIdentityModel {
     @CryptoActor var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
         get { props.doubleRatchet }
     }
+    @CryptoActor var deviceName: String? {
+        get { props.deviceName }
+    }
     @CryptoActor func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) throws {
         try setProp(at: \.doubleRatchet, to: newValue)
+    }
+    @CryptoActor func updateDeviceName(to newValue: String?) throws {
+        try setProp(at: \.deviceName, to: newValue)
     }
 }
 
 public final class ContactModel: Model, @unchecked Sendable {
     public struct SecureProps: Codable, @unchecked Sendable, MetadataProps {
+        // TODO: Shorter CodingKeys
+        
         public let username: Username
         public internal(set) var config: UserConfig
         public var metadata: Document

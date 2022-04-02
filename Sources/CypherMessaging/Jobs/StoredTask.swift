@@ -8,8 +8,8 @@ public protocol StoredTask: Codable, Sendable {
     var isBackgroundTask: Bool { get }
     var retryMode: TaskRetryMode { get }
     var priority: TaskPriority { get }
-    var requiresConnectivity: Bool { get }
     
+    func requiresConnectivity(on messenger: CypherMessenger) -> Bool
     func execute(on messenger: CypherMessenger) async throws
     func onDelayed(on messenger: CypherMessenger) async throws
 }

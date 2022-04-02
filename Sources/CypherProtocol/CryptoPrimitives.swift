@@ -97,7 +97,7 @@ public struct PublicSigningKey: Codable, @unchecked Sendable {
 /// A wrapper around Curve25519 private keys that provides Codable support using `Foundation.Data`
 ///
 /// This Private Key type is used for handshakes, to establish a shared secret key over unsafe communication channels.
-public struct PrivateKey: Codable {
+public struct PrivateKey: Codable, @unchecked Sendable {
     fileprivate let privateKey: PrivateKeyAgreementKeyAlg
     
     /// Derives a `PublicKey` that can be sent to a third party.

@@ -24,6 +24,10 @@ public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
         self.value = try AES.GCM.seal(data, using: encryptionKey)
     }
     
+    public func canDecrypt(using encryptionKey: SymmetricKey) throws {
+        _ = try AES.GCM.open(value, using: encryptionKey)
+    }
+    
     // The inverse of the initializer
     public func decrypt(using encryptionKey: SymmetricKey) throws -> T {
         if let wrapped = wrapped {

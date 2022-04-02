@@ -54,6 +54,11 @@ public struct TransportCreationRequest: Sendable {
     }
 }
 
+public struct ContactCard: Codable, Sendable {
+    let username: Username
+    let config: UserConfig
+}
+
 /// The representation of a P2PSession with another device
 ///
 /// Peer-to-peer sessions are used to communicate directly with another device
@@ -133,7 +138,7 @@ fileprivate final class CypherMessengerActor {
         let appEncryptionKey = CypherMessenger.formAppEncryptionKey(appPassword: appPassword, salt: salt)
         
         let encryptedConfig = try Encrypted(self.config, encryptionKey: appEncryptionKey)
-        let data = try BSONEncoder().encode(encryptedConfig).makeData()
+        let data = encryptedConfig.makeData()
         try await self.cachedStore.writeLocalDeviceConfig(data)
         self.appPassword = appPassword
     }
@@ -210,6 +215,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     internal let cachedStore: _CypherMessengerStoreCache
     internal let databaseEncryptionKey: SymmetricKey
     
+    /// All rediscovered usernames during this session
+    /// Will reset next boot
+    @CryptoActor internal var rediscoveredUsernames = Set<Username>()
+    
     /// The TransportClient implementation provided to CypherTextKit for this CypherMessenger to communicate through
     public let transport: CypherServerTransportClient
     
@@ -230,6 +239,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     /// The deviceId which, together with te username, identifies a registered device
     public let deviceId: DeviceId
+    
+    @CypherTextKitActor public var identity: PublicSigningKey {
+        state.config.deviceKeys.identity.publicKey
+    }
     
     private init(
         appPassword: String,
@@ -270,6 +283,19 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         for factory in p2pFactories {
             factory.delegate = self
         }
+        
+        // Ensure this device knows if it's registered or not
+        if config.registeryMode == .unregistered {
+            Task { @CypherTextKitActor in
+                let bundle = try await transport.readKeyBundle(forUsername: self.username)
+                for device in try bundle.readAndValidateDevices() {
+                    if device.deviceId == self.deviceId {
+                        try await self.updateConfig { $0.registeryMode = device.isMasterDevice ? .masterDevice : .childDevice }
+                        return
+                    }
+                }
+            }
+        }
     }
     
     /// Initializes and registers a new messenger. This generates a new private key.
@@ -299,7 +325,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             Data(bytes: buffer.baseAddress!, count: buffer.count)
         }
         
-        let config = _CypherMessengerConfig(
+        var config = _CypherMessengerConfig(
             databaseEncryptionKey: databaseEncryptionKeyData,
             deviceKeys: DevicePrivateKeys(deviceId: deviceId),
             username: username,
@@ -358,12 +384,18 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             try await transport.requestDeviceRegistery(metadata)
             return messenger
         } catch {
-            var config = config
             config.registeryMode = .masterDevice
-            encryptedConfig = try Encrypted(config, encryptionKey: appEncryptionKey)
             
+            encryptedConfig = try Encrypted(config, encryptionKey: appEncryptionKey)
             try await database.writeLocalDeviceConfig(encryptedConfig.makeData())
-            try await transport.publishKeyBundle(userConfig)
+            
+            guard transport.isConnected || transport.supportsDelayedRegistration else {
+                throw CypherSDKError.cannotRegisterDeviceConfig
+            }
+            
+            if transport.isConnected {
+                try await transport.publishKeyBundle(userConfig)
+            }
             
             return try await CypherMessenger(
                 appPassword: appPassword,
@@ -469,7 +501,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         let transportRequest = try TransportCreationRequest(
             username: config.username,
             deviceId: config.deviceKeys.deviceId,
-            userConfig: UserConfig(mainDevice: config.deviceKeys, otherDevices: []),
+            userConfig: UserConfig(
+                mainDevice: config.deviceKeys,
+                otherDevices: []
+            ),
             signingIdentity: config.deviceKeys.identity
         )
         
@@ -499,10 +534,52 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             let data = try await self.cachedStore.readLocalDeviceConfig()
             let box = try AES.GCM.SealedBox(combined: data)
             let config = Encrypted<_CypherMessengerConfig>(representing: box)
-            _ = try config.decrypt(using: appEncryptionKey)
+            try config.canDecrypt(using: appEncryptionKey)
             return true
         } catch {
             return false
+        }
+    }
+    
+    @CryptoActor public func importContactCard(
+        _ card: ContactCard
+    ) async throws {
+        let knownDevices = try await _fetchKnownDeviceIdentities(for: card.username)
+        guard knownDevices.isEmpty else {
+            throw CypherSDKError.cannotImportExistingContact
+        }
+        
+        try await _processDeviceConfig(
+            card.config,
+            forUername: card.username,
+            knownDevices: []
+        )
+    }
+    
+    @CypherTextKitActor public func createContactCard() async throws -> ContactCard {
+        if state.config.registeryMode == .masterDevice {
+            let otherDevices = try await _fetchKnownDeviceIdentities(for: self.username)
+            
+            return ContactCard(
+                username: self.username,
+                config: try UserConfig(
+                    mainDevice: state.config.deviceKeys,
+                    otherDevices: otherDevices.map { device in
+                        return UserDeviceConfig(
+                            deviceId: device.deviceId,
+                            identity: device.identity,
+                            publicKey: device.publicKey,
+                            isMasterDevice: false
+                        )
+                    }
+                )
+            )
+        } else {
+            let config = try await transport.readKeyBundle(forUsername: self.username)
+            return ContactCard(
+                username: self.username,
+                config: config
+            )
         }
     }
     
@@ -538,6 +615,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
     }
     
+    @CypherTextKitActor public var isPasswordProtected: Bool {
+        !state.appPassword.isEmpty
+    }
+    
     public func checkSetupCompleted() async -> Bool {
         await state.isSetupCompleted
     }
@@ -552,6 +633,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     /// This is handy when you're simulating communication, but want to delay assertions until this CypherMessenger has processed all outstanding work.
     public func processJobQueue() async throws -> SynchronisationResult {
         try await jobQueue.awaitDoneProcessing()
+    }
+    
+    public func resumeJobQueue() async {
+        await jobQueue.resume()
     }
     
     // TODO: Make internal
@@ -634,7 +719,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         try await self.transport.publishKeyBundle(config)
         let internalConversation = try await self.getInternalConversation()
         let metadata = try BSONEncoder().encode(deviceConfig)
-        _ = try await self._createDeviceIdentity(
+        try await self._createDeviceIdentity(
             from: deviceConfig,
             forUsername: self.username
         )
@@ -911,6 +996,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         remoteMessageId: String,
         sender device: _DecryptedModel<DeviceIdentityModel>
     ) async throws {
+        guard let sentDate = message.sentDate, abs(sentDate.timeIntervalSinceNow) <= 60 else {
+            // Ignore older P2P messages
+            return
+        }
+        
         var subType = message.messageSubtype ?? ""
         
         assert(subType.hasPrefix("_/p2p/0/"))
@@ -989,8 +1079,12 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     /// Lists all active P2P connections
     /// Especially useful for when a client wants to purge unneeded sessions
-    public func listOpenP2PConnections() async -> [P2PClient] {
-        await state.p2pSessions.map(\.client)
+    @CypherTextKitActor public func listOpenP2PConnections() -> [P2PClient] {
+        state.p2pSessions.map(\.client)
+    }
+    
+    @CypherTextKitActor public func hasP2PConnection(with username: Username) -> Bool {
+        state.p2pSessions.contains { $0.username == username }
     }
     
     internal func getEstablishedP2PConnection(
@@ -1075,6 +1169,24 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                     )
                 )
             )
+        }
+    }
+    
+    @CypherTextKitActor public var registeryMode: DeviceRegisteryMode {
+        self.state.config.registeryMode
+    }
+    
+    @CypherTextKitActor public func listDevices() async throws -> [UserDevice] {
+        return try await self._fetchDeviceIdentities(for: self.username).map { device in
+            UserDevice(device: device)
+        }
+    }
+}
+
+extension Contact {
+    @CypherTextKitActor public func listDevices() async throws -> [UserDevice] {
+        return try await messenger._fetchDeviceIdentities(for: username).map { device in
+            UserDevice(device: device)
         }
     }
 }
@@ -1230,3 +1342,28 @@ fileprivate let doubleRatchetConfig = DoubleRatchetConfiguration<SHA512>(
     headerAssociatedDataGenerator: .constant("Cypher ChatMessage".data(using: .ascii)!),
     maxSkippedMessageKeys: 100
 )
+
+public struct UserDevice: Identifiable {
+    public var id: DeviceId { config.deviceId }
+    public let username: Username
+    public let config: UserDeviceConfig
+    public let name: String?
+    
+    @CypherTextKitActor internal init(device: _DecryptedModel<DeviceIdentityModel>) {
+        self.username = device.username
+        self.name = device.deviceName
+        self.config = UserDeviceConfig(
+            deviceId: device.deviceId,
+            identity: device.identity,
+            publicKey: device.publicKey,
+            isMasterDevice: device.isMasterDevice
+        )
+    }
+}
+
+enum MagicPackets {
+    internal struct RenameDevice: Codable {
+        let deviceId: DeviceId
+        let name: String
+    }
+}

@@ -4,6 +4,10 @@ import NIO
 public struct ContactMetadata: Codable {
     public var status: String?
     public var nickname: String?
+    public var firstName: String?
+    public var lastName: String?
+    public var email: String?
+    public var phone: String?
     public var image: Data?
 }
 
@@ -46,50 +50,49 @@ public struct UserProfilePlugin: Plugin {
         let sender = message.sender.username
         let username = messenger.username
         
-        switch subType {
-        case "status/update":
+        func withMetadata(perform: @escaping (inout ContactMetadata) -> ()) async throws -> ProcessMessageAction {
             if sender == username {
                 return try await messenger.modifyCustomConfig(
                     ofType: ContactMetadata.self,
                     forPlugin: Self.self
                 ) { metadata in
-                    metadata.status = message.message.text
+                    perform(&metadata)
+                    return .ignore
+                }
+            } else {
+                let contact = try await messenger.createContact(byUsername: sender)
+                return try await contact.modifyMetadata(
+                    ofType: ContactMetadata.self,
+                    forPlugin: Self.self
+                ) { metadata in
+                    perform(&metadata)
                     return .ignore
                 }
             }
-            
-            let contact = try await messenger.createContact(byUsername: sender)
-            return try await contact.modifyMetadata(
-                ofType: ContactMetadata.self,
-                forPlugin: Self.self
-            ) { metadata in
-                metadata.status = message.message.text
+        }
+        
+        switch subType {
+        case "status/update":
+            return try await withMetadata { $0.status = message.message.text }
+        case "name/update":
+            guard
+                let firstName = message.message.metadata["firstName"] as? String,
+                let lastName = message.message.metadata["lastName"] as? String
+            else {
                 return .ignore
+            }
+            
+            return try await withMetadata { metadata in
+                metadata.firstName = firstName
+                metadata.lastName = lastName
             }
         case "picture/update":
             guard let imageBlob = message.message.metadata["blob"] as? Binary else {
                 return .ignore
             }
             
-            let image = imageBlob.data
-            
-            if sender == username {
-                return try await messenger.modifyCustomConfig(
-                    ofType: ContactMetadata.self,
-                    forPlugin: Self.self
-                ) { metadata in
-                    metadata.image = image
-                    return .ignore
-                }
-            }
-            
-            let contact = try await messenger.createContact(byUsername: sender)
-            return try await contact.modifyMetadata(
-                ofType: ContactMetadata.self,
-                forPlugin: Self.self
-            ) { metadata in
-                metadata.image = image
-                return .ignore
+            return try await withMetadata { metadata in
+                metadata.image = imageBlob.data
             }
         default:
             return .ignore
@@ -129,12 +132,52 @@ extension Contact {
         )
     }
     
-    @MainActor public var nickname: String {
+    @MainActor public var firstName: String? {
+        try? self.model.getProp(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self,
+            run: \.firstName
+        )
+    }
+    
+    @MainActor public var lastName: String? {
+        try? self.model.getProp(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self,
+            run: \.lastName
+        )
+    }
+    
+    @MainActor public var email: String? {
+        try? self.model.getProp(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self,
+            run: \.email
+        )
+    }
+    
+    @MainActor public var phone: String? {
+        try? self.model.getProp(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self,
+            run: \.phone
+        )
+    }
+    
+    @MainActor public var nickname: String? {
         (try? self.model.getProp(
             ofType: ContactMetadata.self,
             forPlugin: UserProfilePlugin.self,
             run: \.nickname
-        )) ?? self.username.raw
+        ))
+    }
+    
+    @MainActor public var contactMetadata: ContactMetadata? {
+        try? self.model.getProp(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self,
+            run: { $0 }
+        )
     }
     
     @CryptoActor public func setNickname(to nickname: String) async throws {
@@ -154,7 +197,7 @@ extension CypherMessenger {
     ) async throws {
         for contact in try await listContacts() {
             let chat = try await createPrivateChat(with: contact.model.username)
-            _ = try await chat.sendRawMessage(
+            try await chat.sendRawMessage(
                 type: .magic,
                 messageSubtype: "@/contacts/profile/status/update",
                 text: status,
@@ -163,7 +206,7 @@ extension CypherMessenger {
         }
         
         let chat = try await getInternalConversation()
-        _ = try await chat.sendRawMessage(
+        try await chat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/contacts/profile/status/update",
             text: status,
@@ -178,32 +221,56 @@ extension CypherMessenger {
         }
     }
     
-    public func changeProfilePicture(
-        to data: Data
-    ) async throws {
+    // TODO: Update firstName, lastName, phone, email
+    // TODO: Allow app to control which contacts get this info
+    
+    private func sendProfileUpdate(subtype: String, text: String, metadata: Document = [:]) async throws {
+        // TODO: limit who can see your changes?
         for contact in try await listContacts() {
             let chat = try await createPrivateChat(with: contact.model.username)
-            _ = try await chat.sendRawMessage(
+            try await chat.sendRawMessage(
                 type: .magic,
-                messageSubtype: "@/contacts/profile/picture/update",
-                text: "",
-                metadata: [
-                    "blob": data
-                ],
+                messageSubtype: "@/contacts/profile/\(subtype)",
+                text: text,
+                metadata: metadata,
                 preferredPushType: .none
             )
         }
         
         let chat = try await getInternalConversation()
-        _ = try await chat.sendRawMessage(
+        try await chat.sendRawMessage(
             type: .magic,
-            messageSubtype: "@/contacts/profile/picture/update",
-            text: "",
-            metadata: [
-                "blob": data
-            ],
+            messageSubtype: "@/contacts/profile/\(subtype)",
+            text: text,
+            metadata: metadata,
             preferredPushType: .none
         )
+    }
+    
+    public func changeName(
+        firstName: String,
+        lastName: String
+    ) async throws {
+        try await sendProfileUpdate(subtype: "name/update", text: "", metadata: [
+            "firstName": firstName,
+            "lastName": lastName
+        ])
+        
+        try await self.modifyCustomConfig(
+            ofType: ContactMetadata.self,
+            forPlugin: UserProfilePlugin.self
+        ) { metadata in
+            metadata.firstName = firstName
+            metadata.lastName = lastName
+        }
+    }
+    
+    public func changeProfilePicture(
+        to data: Data
+    ) async throws {
+        try await sendProfileUpdate(subtype: "picture/update", text: "", metadata: [
+            "blob": data
+        ])
         
         try await self.modifyCustomConfig(
             ofType: ContactMetadata.self,

@@ -24,7 +24,7 @@ private final class BufferHandler: ChannelInboundHandler {
         
         if let delegate = client.delegate {
             context.eventLoop.executeAsync {
-                _ = try await delegate.p2pConnection(client, receivedMessage: buffer)
+                try await delegate.p2pConnection(client, receivedMessage: buffer)
             }.whenFailure { error in
                 context.fireErrorCaught(error)
             }

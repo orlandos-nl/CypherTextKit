@@ -50,7 +50,7 @@ public struct ModifyMessagePlugin: Plugin {
 extension AnyChatMessage {
     @CryptoActor public func revoke() async throws {
         let chat = try await self.target.resolve(in: self.messenger)
-        _ = try await chat.sendRawMessage(
+        try await chat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/messaging/mutate-history/revoke",
             text: self.raw.encrypted.remoteId,

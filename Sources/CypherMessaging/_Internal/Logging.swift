@@ -1,7 +1,16 @@
 import Foundation
 
-enum LogDomain: String {
-    case none, webrtc, crypto
+public struct LogDomain {
+    fileprivate  enum Raw: String {
+        case none, webrtc, crypto, transport
+    }
+    
+    fileprivate let raw: Raw
+    
+    public static let none = LogDomain(raw: .none)
+    public static let webrtc = LogDomain(raw: .webrtc)
+    public static let transport = LogDomain(raw: .transport)
+    internal static let crypto = LogDomain(raw: .crypto)
 }
 
 fileprivate let formatter: ISO8601DateFormatter = {
@@ -12,9 +21,9 @@ fileprivate let formatter: ISO8601DateFormatter = {
 
 // TODO: Swift-log
 // This way this is a NO-OP in release
-@inline(__always) func debugLog(domain: LogDomain = .none, _ args: Any...) {
-    #if DEBUG
-    print(domain.rawValue, formatter.string(from: Date()), args)
+@inline(__always) public func debugLog(domain: LogDomain = .none, _ args: Any...) {
+    #if DEBUG || Xcode
+    print(domain.raw.rawValue, formatter.string(from: Date()), args)
     
     guard var url = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else {
         return

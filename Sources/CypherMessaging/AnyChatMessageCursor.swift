@@ -129,7 +129,6 @@ public final class AnyChatMessageCursor {
         }
 
         return try await deviceCursor.popNext()
-        return nil
     }
     
     @MainActor private func _getMore(_ max: Int, joinedWith resultSet: inout [AnyChatMessage]) async throws {

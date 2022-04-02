@@ -94,6 +94,103 @@ final class CypherSDKTests: XCTestCase {
         await XCTAssertThrowsAsyncError(try await m0.createPrivateChat(with: "m0"))
     }
     
+    @CypherTextKitActor func testOfflineSupport() async throws {
+        SpoofTransportClientSettings.isOffline = true
+        defer { SpoofTransportClientSettings.isOffline = false }
+        
+        defer { SpoofP2PTransportFactory.clearMesh() }
+        
+        let m0 = try await CypherMessenger.registerMessenger(
+            username: "m0",
+            authenticationMethod: .password("m0"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            p2pFactories: [
+                SpoofP2PTransportFactory(meshId: "m0")
+            ],
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let m1_0 = try await CypherMessenger.registerMessenger(
+            username: "m1_0",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            p2pFactories: [
+                SpoofP2PTransportFactory(meshId: "m1_0")
+            ],
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let m1_1 = try await CypherMessenger.registerMessenger(
+            username: "m1_1",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            p2pFactories: [
+                SpoofP2PTransportFactory(meshId: "m1_1")
+            ],
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let m2 = try await CypherMessenger.registerMessenger(
+            username: "m2",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            p2pFactories: [
+                SpoofP2PTransportFactory(meshId: "m2")
+            ],
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let sync = Synchronisation(apps: [m0, m1_0, m1_1, m2])
+        try await sync.synchronise()
+        
+        try await SpoofP2PTransportFactory.connectMesh(from: "m0", to: "m1_0")
+        try await SpoofP2PTransportFactory.connectMesh(from: "m0", to: "m1_1")
+        try await SpoofP2PTransportFactory.connectMesh(from: "m1_0", to: "m2")
+        try await SpoofP2PTransportFactory.connectMesh(from: "m1_1", to: "m2")
+        
+        let m0Card = try await m0.createContactCard()
+        let m2Card = try await m2.createContactCard()
+        
+        try await m2.importContactCard(m0Card)
+        try await m0.importContactCard(m2Card)
+        
+        let m0Chat = try await m0.createPrivateChat(with: "m2")
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        try await sync.synchronise()
+        
+        let m2Chat = try await m2.getPrivateChat(with: "m0")!
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
+        await XCTAssertAsyncEqual(try await m2Chat.allMessages(sortedBy: .descending).count, 1)
+        
+        try await sync.synchronise()
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        try await sync.synchronise()
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m2Chat.allMessages(sortedBy: .descending).count, 2)
+    }
+    
     @CypherTextKitActor func testP2PMeshNetworkTransport() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
