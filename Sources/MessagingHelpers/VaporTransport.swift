@@ -35,6 +35,12 @@ public struct UserDeviceId: Hashable, Codable {
     }
 }
 
+public struct Blob<C: Codable>: Codable {
+    public let _id: String
+    public let creator: Username
+    public var document: C
+}
+
 struct Token: JWTPayload {
     let device: UserDeviceId
     let exp: ExpirationClaim
@@ -128,6 +134,7 @@ extension URLSession {
         var request = URLRequest(url: URL(string: "\(httpHost)/\(url)")!)
         request.httpMethod = "POST"
         request.addValue("application/bson", forHTTPHeaderField: "Content-Type")
+        request.addValue("application/bson", forHTTPHeaderField: "Accept")
         request.addValue(username.raw, forHTTPHeaderField: "X-API-User")
         request.addValue(deviceId.raw, forHTTPHeaderField: "X-API-Device")
         if let token = token {
@@ -485,11 +492,42 @@ public final class VaporTransport: CypherServerTransportClient {
     }
     
     public func publishBlob<C>(_ blob: C) async throws -> ReferencedBlob<C> where C : Decodable, C : Encodable {
-        fatalError()
+        let (data, response) = try await httpClient.postBSON(
+            httpHost: httpHost,
+            url: "blobs",
+            username: self.username,
+            deviceId: self.deviceId,
+            token: self.makeToken(),
+            body: blob
+        )
+        
+        if let response = response as? HTTPURLResponse {
+            guard response.statusCode >= 200 && response.statusCode < 300 else {
+                debugLog("Status code \(response.statusCode)")
+                throw VaporTransportError.sendMessageFailed
+            }
+        }
+        
+        let document = Document(data: data)
+        
+        guard document.validate().isValid else {
+            throw VaporTransportError.sendMessageFailed
+        }
+        
+        let blob = try BSONDecoder().decode(Blob<C>.self, from: document)
+        return ReferencedBlob(id: blob._id, blob: blob.document)
     }
     
-    public func readPublishedBlob<C>(byId id: String, as type: C.Type) async throws -> ReferencedBlob<C>? where C : Decodable, C : Encodable {
-        fatalError()
+    public func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) async throws -> ReferencedBlob<C>? {
+        let blob = try await httpClient.getBSON(
+            httpHost: httpHost,
+            url: "blobs/\(id)",
+            username: username,
+            deviceId: deviceId,
+            as: Blob<C>.self
+        )
+        
+        return ReferencedBlob(id: blob._id, blob: blob.document)
     }
     
     public func sendMessage(

@@ -56,7 +56,7 @@ public struct FriendshipPlugin: Plugin {
     @MainActor public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         let senderUsername = message.sender.username
         let target = await message.conversation.getTarget()
-        let username: Username = await message.messenger.username
+        let username = message.messenger.username
         
         if case .groupChat = target {
             if ruleset.blockAffectsGroupChats, senderUsername != username {
