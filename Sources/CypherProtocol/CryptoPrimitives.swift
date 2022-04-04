@@ -53,6 +53,14 @@ public struct PublicSigningKey: Codable, @unchecked Sendable {
         self.publicKey = publicKey
     }
     
+    public init?(data: Data) {
+        do {
+            publicKey = try PublicSigningKeyAlg(rawRepresentation: data)
+        } catch {
+            return nil
+        }
+    }
+    
     public func encode(to encoder: Encoder) throws {
         try Binary(buffer: ByteBuffer(data: publicKey.rawRepresentation)).encode(to: encoder)
     }
@@ -147,6 +155,14 @@ public struct PublicKey: Codable, Equatable, @unchecked Sendable {
     
     fileprivate init(publicKey: PublicKeyAgreementKeyAlg) {
         self.publicKey = publicKey
+    }
+    
+    public init?(data: Data) {
+        do {
+            publicKey = try PublicKeyAgreementKeyAlg(rawRepresentation: data)
+        } catch {
+            return nil
+        }
     }
     
     public func encode(to encoder: Encoder) throws {
