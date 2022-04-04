@@ -165,6 +165,10 @@ public struct PublicKey: Codable, Equatable, @unchecked Sendable {
         }
     }
     
+    public var data: Data {
+        publicKey.rawRepresentation
+    }
+    
     public func encode(to encoder: Encoder) throws {
         try publicKey.rawRepresentation.encode(to: encoder)
     }
