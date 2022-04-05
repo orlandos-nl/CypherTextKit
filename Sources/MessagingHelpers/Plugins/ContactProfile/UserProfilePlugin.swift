@@ -35,42 +35,88 @@ public struct UserProfilePlugin: Plugin {
         }
     }
     
-    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
-        let internalChat = try await messenger.getInternalConversation()
-        
-        try await messenger.withCustomConfig(
-            ofType: ContactMetadata.self,
-            forPlugin: Self.self
-        ) { metadata in
-            if let status = metadata.status {
-                try await internalChat.sendMagicPacket(
-                    messageSubtype: "@/contacts/profile/status/update",
-                    text: status,
-                    toDeviceId: deviceId
-                )
-            }
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {
+        Task {
+            let internalChat = try await messenger.getInternalConversation()
             
-            if let firstName = metadata.firstName, let lastName = metadata.lastName {
-                try await internalChat.sendMagicPacket(
-                    messageSubtype: "@/contacts/profile/name/update",
-                    text: "",
-                    metadata: [
-                        "firstName": firstName,
-                        "lastName": lastName,
-                    ],
-                    toDeviceId: deviceId
-                )
+            try await messenger.withCustomConfig(
+                ofType: ContactMetadata.self,
+                forPlugin: Self.self
+            ) { metadata in
+                if let status = metadata.status {
+                    try await internalChat.sendMagicPacket(
+                        messageSubtype: "@/contacts/profile/status/update",
+                        text: status,
+                        toDeviceId: deviceId
+                    )
+                }
+                
+                if let firstName = metadata.firstName, let lastName = metadata.lastName {
+                    try await internalChat.sendMagicPacket(
+                        messageSubtype: "@/contacts/profile/name/update",
+                        text: "",
+                        metadata: [
+                            "firstName": firstName,
+                            "lastName": lastName,
+                        ],
+                        toDeviceId: deviceId
+                    )
+                }
+                
+                if let image = metadata.image {
+                    try await internalChat.sendMagicPacket(
+                        messageSubtype: "@/contacts/profile/picture/update",
+                        text: "",
+                        metadata: [
+                            "blob": Binary(buffer: ByteBuffer(data: image))
+                        ],
+                        toDeviceId: deviceId
+                    )
+                }
             }
+        }
+    }
+    
+    public func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger) {
+        Task {
+            // TODO: Select contacts to share the profile changes with
+            // TODO: Broadcast to a user that doesn't have a private chat
+            let chat = try await messenger.createPrivateChat(with: username)
             
-            if let image = metadata.image {
-                try await internalChat.sendMagicPacket(
-                    messageSubtype: "@/contacts/profile/picture/update",
-                    text: "",
-                    metadata: [
-                        "blob": Binary(buffer: ByteBuffer(data: image))
-                    ],
-                    toDeviceId: deviceId
-                )
+            try await messenger.withCustomConfig(
+                ofType: ContactMetadata.self,
+                forPlugin: Self.self
+            ) { metadata in
+                if let status = metadata.status {
+                    try await chat.sendMagicPacket(
+                        messageSubtype: "@/contacts/profile/status/update",
+                        text: status,
+                        toDeviceId: deviceId
+                    )
+                }
+                
+                if let firstName = metadata.firstName, let lastName = metadata.lastName {
+                    try await chat.sendMagicPacket(
+                        messageSubtype: "@/contacts/profile/name/update",
+                        text: "",
+                        metadata: [
+                            "firstName": firstName,
+                            "lastName": lastName,
+                        ],
+                        toDeviceId: deviceId
+                    )
+                }
+                
+                if let image = metadata.image {
+                    try await chat.sendMagicPacket(
+                        messageSubtype: "@/contacts/profile/picture/update",
+                        text: "",
+                        metadata: [
+                            "blob": Binary(buffer: ByteBuffer(data: image))
+                        ],
+                        toDeviceId: deviceId
+                    )
+                }
             }
         }
     }

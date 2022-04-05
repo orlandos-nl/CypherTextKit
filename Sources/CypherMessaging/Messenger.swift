@@ -600,6 +600,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     /// The client is responsible for transporting the UserDeviceConfig to another device, for example through a QR code.
     /// The master device must then call `addDevice` with this request.
     public func createDeviceRegisteryRequest(isMasterDevice: Bool = false) async throws -> UserDeviceConfig? {
+        guard await registeryMode == .unregistered else {
+            // Cannot register, already registered
+            return nil
+        }
+        
         if try await isRegisteredOnline() {
             try await updateConfig { config in
                 config.registeryMode = .childDevice
@@ -735,8 +740,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         for contact in try await listContacts() {
             try await _writeMessage(message, to: contact.username)
         }
-        
-        try await eventHandler.onDeviceRegistery(deviceConfig.deviceId, messenger: self)
     }
     
     @CypherTextKitActor func _writeMessageOverMesh(

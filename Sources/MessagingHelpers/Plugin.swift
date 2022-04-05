@@ -21,7 +21,8 @@ public protocol Plugin {
     func onP2PClientClose(messenger: CypherMessenger)
     func onRemoveContact(_ contact: Contact)
     func onRemoveChatMessage(_ message: AnyChatMessage)
-    func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
+    func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger)
+    func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger)
     func onCustomConfigChange()
 }
 
@@ -43,7 +44,8 @@ extension Plugin {
     public func onP2PClientClose(messenger: CypherMessenger) {}
     public func onRemoveContact(_ contact: Contact) {}
     public func onRemoveChatMessage(_ message: AnyChatMessage) {}
-    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {}
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {}
+    public func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger) {}
     public func onCustomConfigChange() {}
 }
 

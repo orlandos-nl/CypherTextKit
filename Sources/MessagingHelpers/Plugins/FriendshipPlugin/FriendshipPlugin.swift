@@ -156,7 +156,11 @@ public struct FriendshipPlugin: Plugin {
         }
     }
     
-    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {
+        // TODO: Sync states to new device
+    }
+    
+    public func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger) {
         // TODO: Sync states to new device
     }
     

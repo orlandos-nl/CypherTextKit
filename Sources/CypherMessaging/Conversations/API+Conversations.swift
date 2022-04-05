@@ -1,5 +1,5 @@
 import CypherProtocol
-import BSON
+@preconcurrency import BSON
 import Foundation
 import NIO
 
@@ -748,8 +748,6 @@ public struct PrivateChat: AnyConversation {
         messageSubtype: String? = nil,
         text: String,
         metadata: Document = [:],
-        destructionTimer: TimeInterval? = nil,
-        sentDate: Date = Date(),
         preferredPushType: PushType
     ) async throws -> AnyChatMessage? {
         let order = try await getNextLocalOrder()
@@ -759,14 +757,46 @@ public struct PrivateChat: AnyConversation {
                 messageSubtype: messageSubtype,
                 text: text,
                 metadata: metadata,
-                destructionTimer: destructionTimer,
-                sentDate: sentDate,
-                preferredPushType: preferredPushType,
+                destructionTimer: nil,
+                sentDate: Date(),
+                preferredPushType: PushType.none,
                 order: order,
                 target: getTarget()
             ),
             to: [conversationPartner],
-            pushType: preferredPushType
+            pushType: .none
+        )
+    }
+    
+    @JobQueueActor public func sendMagicPacket(
+        messageSubtype: String,
+        text: String,
+        metadata: Document = [:],
+        toDeviceId recipientDeviceId: DeviceId
+    ) async throws {
+        let order = try await getNextLocalOrder()
+        try await messenger._queueTask(
+            .sendMessage(
+                SendMessageTask(
+                    message: CypherMessage(
+                        message: SingleCypherMessage(
+                            messageType: .magic,
+                            messageSubtype: messageSubtype,
+                            text: text,
+                            metadata: metadata,
+                            sentDate: Date(),
+                            preferredPushType: PushType.none,
+                            order: order,
+                            target: .currentUser
+                        )
+                    ),
+                    recipient: conversationPartner,
+                    recipientDeviceId: recipientDeviceId,
+                    localId: nil,
+                    pushType: .none,
+                    messageId: UUID().uuidString
+                )
+            )
         )
     }
 }

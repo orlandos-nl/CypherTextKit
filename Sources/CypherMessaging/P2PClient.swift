@@ -293,7 +293,7 @@ public final class P2PClient {
                 // TODO: Broadcast ack back? How does the client know it's arrived?
             }
             
-            let p2pConnections = await messenger.listOpenP2PConnections()
+            let p2pConnections = messenger.listOpenP2PConnections()
             
             if let p2pConnection = p2pConnections.first(where: {
                 $0.client.state.username == destination.username && $0.client.state.deviceId == destination.deviceId

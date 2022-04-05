@@ -8,6 +8,9 @@ enum UserIdentityState {
     case consistent, newIdentity, changedIdentity
 }
 
+// TODO: Respect push notification preferences that other users apply on your chat
+// TODO: Server-Side mute and even block another user
+// TODO: Encrypted push notifs
 @available(macOS 10.15, iOS 13, *)
 internal extension CypherMessenger {
     @CryptoActor
@@ -207,6 +210,12 @@ internal extension CypherMessenger {
         
         let decryptedDevice = try self._decrypt(newDevice)
         try await self.cachedStore.createDeviceIdentity(newDevice)
+        
+        if username == self.username {
+            await eventHandler.onDeviceRegistery(device.deviceId, messenger: self)
+        } else {
+            await eventHandler.onOtherUserDeviceRegistery(username: username, deviceId: device.deviceId, messenger: self)
+        }
         return decryptedDevice
     }
     

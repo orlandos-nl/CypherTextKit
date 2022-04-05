@@ -488,7 +488,11 @@ enum TaskHelpers {
             }
         }
         
-        let device = try await messenger._fetchDeviceIdentity(for: task.recipient, deviceId: task.recipientDeviceId)
+        guard let device = try await messenger._fetchKnownDeviceIdentity(for: task.recipient, deviceId: task.recipientDeviceId) else {
+            // Nothing to do, device is not a member (anymore?)
+            return
+        }
+        
         try await device._writeWithRatchetEngine(messenger: messenger) { ratchetEngine, rekeyState in
             let encodedMessage = try BSONEncoder().encode(task.message).makeData()
             let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
