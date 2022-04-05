@@ -22,6 +22,7 @@ public protocol Plugin {
     func onRemoveContact(_ contact: Contact)
     func onRemoveChatMessage(_ message: AnyChatMessage)
     func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
+    func onCustomConfigChange()
 }
 
 extension Plugin {
@@ -43,6 +44,7 @@ extension Plugin {
     public func onRemoveContact(_ contact: Contact) {}
     public func onRemoveChatMessage(_ message: AnyChatMessage) {}
     public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {}
+    public func onCustomConfigChange() {}
 }
 
 @available(macOS 10.15, iOS 13, *)

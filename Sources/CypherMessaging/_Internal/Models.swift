@@ -60,7 +60,7 @@ extension DecryptedModel where M == ConversationModel {
 }
 
 public final class DeviceIdentityModel: Model, @unchecked Sendable {
-    public struct SecureProps: Codable, Sendable {
+    public struct SecureProps: Codable, @unchecked Sendable {
         // TODO: Shorter CodingKeys
         
         let username: Username
@@ -74,6 +74,7 @@ public final class DeviceIdentityModel: Model, @unchecked Sendable {
         
         // TODO: Verify identity on the server later when possible
         var serverVerified: Bool?
+        var lastRekey: Date?
     }
     
     public let id: UUID

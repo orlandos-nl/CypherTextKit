@@ -48,4 +48,5 @@ public struct SpoofCypherEventHandler: CypherMessengerEventHandler {
     
     public func onRemoveChatMessage(_ message: AnyChatMessage) {}
     public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {}
+    public func onCustomConfigChange() {}
 }

@@ -1,6 +1,6 @@
-import BSON
+@preconcurrency import BSON
 import CypherProtocol
-import Foundation
+@preconcurrency import Foundation
 
 /// A string wrapper so that Strings are handled in a case-insensitive manner and to prevent mistakes like provding the wring String in a function
 public struct GroupChatId: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable, ExpressibleByStringLiteral, Sendable {

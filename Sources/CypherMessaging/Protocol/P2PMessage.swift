@@ -7,10 +7,13 @@ public struct P2PSendMessage: Codable {
 }
 
 public struct P2PBroadcast: Codable {
+    // TODO: Shorter CodingKeys
     public struct Message: Codable {
+        // TODO: Shorter CodingKeys
         let origin: Peer
         let target: Peer
         let messageId: String
+        let createdAt: Date
         let payload: RatchetedCypherMessage
     }
     

@@ -1,5 +1,6 @@
 import CypherMessaging
 
+// TODO: Edit message history?
 @available(macOS 10.15, iOS 13, *)
 public struct ModifyMessagePlugin: Plugin {
     public static let pluginIdentifier = "@/messaging/mutate-history"

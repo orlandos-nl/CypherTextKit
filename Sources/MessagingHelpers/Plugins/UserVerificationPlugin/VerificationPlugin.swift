@@ -10,6 +10,10 @@ public struct UserVerificationPlugin: Plugin {
     public static let pluginIdentifier = "@/user-verification"
     
     public init() {}
+    
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+        // TODO: Sync states to new device
+    }
 }
 
 @available(macOS 10.15, iOS 13, *)

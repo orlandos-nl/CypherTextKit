@@ -63,6 +63,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         return try await base.updateContact(contact)
     }
     
+    // TODO: Rename to `byLocalId: UUID`
     @CypherCacheActor func fetchChatMessage(byId messageId: UUID) async throws -> ChatMessageModel {
         if let message = self.messages[messageId] {
             return message
@@ -73,6 +74,7 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
         }
     }
     
+    // TODO: Deprecate, remoteID should be unique per senderID, not globally
     @CypherCacheActor func fetchChatMessage(byRemoteId remoteId: String) async throws -> ChatMessageModel {
         let message = try await self.base.fetchChatMessage(byRemoteId: remoteId)
         if let cachedMessage = self.messages[message.id] {

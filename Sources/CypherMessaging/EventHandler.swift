@@ -65,4 +65,5 @@ public protocol CypherMessengerEventHandler {
     @MainActor func onRemoveContact(_ contact: Contact)
     @MainActor func onRemoveChatMessage(_ message: AnyChatMessage)
     @MainActor func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
+    @MainActor func onCustomConfigChange()
 }

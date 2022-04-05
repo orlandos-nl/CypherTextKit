@@ -157,6 +157,7 @@ internal extension CypherMessenger {
         serverVerified: Bool = true
     ) async throws -> _DecryptedModel<DeviceIdentityModel> {
         let deviceIdentities = try await cachedStore.fetchDeviceIdentities()
+        var knownSenderIds = [Int]()
         for deviceIdentity in deviceIdentities {
             let deviceIdentity = try self._decrypt(deviceIdentity)
             
@@ -173,17 +174,26 @@ internal extension CypherMessenger {
                 
                 return deviceIdentity
             }
+            
+            knownSenderIds.append(deviceIdentity.senderId)
         }
         
         if username == self.username && device.deviceId == self.deviceId {
             throw CypherSDKError.badInput
         }
         
+        var newSenderId: Int
+        knownSenderIds.append(deviceIdentityId)
+        
+        repeat {
+            newSenderId = .random(in: 1..<Int.max)
+        } while knownSenderIds.contains(newSenderId)
+        
         let newDevice = try DeviceIdentityModel(
             props: .init(
                 username: username,
                 deviceId: device.deviceId,
-                senderId: .random(in: 1..<Int.max),
+                senderId: newSenderId,
                 publicKey: device.publicKey,
                 identity: device.identity,
                 isMasterDevice: device.isMasterDevice,
@@ -274,7 +284,8 @@ internal extension CypherMessenger {
         _ message: MultiRecipientCypherMessage,
         messageId: String,
         sender: Username,
-        senderDevice: DeviceId
+        senderDevice: DeviceId,
+        createdAt: Date?
     ) async throws {
         guard let key = message.keys.first(where: { key in
             return key.user == self.username && key.deviceId == self.deviceId
@@ -287,7 +298,40 @@ internal extension CypherMessenger {
             multiRecipientContainer: message.container,
             messageId: messageId,
             sender: sender,
-            senderDevice: senderDevice
+            senderDevice: senderDevice,
+            createdAt: createdAt
+        )
+    }
+    
+    private func requestResendMessage(
+        messageId: String,
+        sender: Username,
+        senderDevice: DeviceId
+    ) async throws {
+        // Request message is resent
+        let resendRequest = SingleCypherMessage(
+            messageType: .magic,
+            messageSubtype: "_/resend/message",
+            text: messageId,
+            metadata: [:],
+            destructionTimer: nil,
+            sentDate: nil,
+            preferredPushType: PushType.none,
+            order: 0,
+            target: .otherUser(sender)
+        )
+        
+        try await _queueTask(
+            .sendMessage(
+                SendMessageTask(
+                    message: CypherMessage(message: resendRequest),
+                    recipient: sender,
+                    recipientDeviceId: senderDevice,
+                    localId: nil,
+                    pushType: .none,
+                    messageId: UUID().uuidString
+                )
+            )
         )
     }
     
@@ -297,12 +341,23 @@ internal extension CypherMessenger {
         multiRecipientContainer: MultiRecipientContainer?,
         messageId: String,
         sender: Username,
-        senderDevice: DeviceId
+        senderDevice: DeviceId,
+        createdAt: Date?
     ) async throws {
         // Receive message always retries, do we need to deal with decryption errors as a successful task execution
         // Otherwise the task will infinitely run
         // However, replies to this message may fail, and must then be retried
         let deviceIdentity = try await self._fetchDeviceIdentity(for: sender, deviceId: senderDevice)
+        
+        if
+            let createdAt = createdAt,
+            let lastRekey = deviceIdentity.props.lastRekey,
+            createdAt <= lastRekey
+        {
+            // Ignore message, since it was sent in a previous conversation.
+            return try await requestResendMessage(messageId: messageId, sender: sender, senderDevice: senderDevice)
+        }
+        
         let message: CypherMessage
         do {
             let data = try await deviceIdentity._readWithRatchetEngine(message: inbound, messenger: self)
@@ -324,7 +379,7 @@ internal extension CypherMessenger {
             }
         } catch {
             // Message was corrupt or unusable
-            return
+            return try await requestResendMessage(messageId: messageId, sender: sender, senderDevice: senderDevice)
         }
         
         func processMessage(_ message: SingleCypherMessage) async throws {
@@ -356,14 +411,17 @@ internal extension CypherMessenger {
         case .currentUser:
             guard
                 sender.username == self.username,
-                sender.deviceId != self.deviceId,
-                sender.isMasterDevice
+                sender.deviceId != self.deviceId
             else {
                 throw CypherSDKError.badInput
             }
             
             switch (message.messageType, message.messageSubtype ?? "") {
             case (.magic, "_/devices/announce"):
+                guard sender.isMasterDevice else {
+                    throw CypherSDKError.badInput
+                }
+                
                 let deviceConfig = try BSONDecoder().decode(
                     UserDeviceConfig.self,
                     from: message.metadata
@@ -411,7 +469,36 @@ internal extension CypherMessenger {
                     remoteMessageId: remoteMessageId,
                     sender: sender
                 )
-            case (.magic, let subType) where subType == "_/ignore":
+            case (.magic, "_/ignore"):
+                return
+            case (.magic, "_/resend/message"):
+                guard let encryptedMessage = try? await self.cachedStore.fetchChatMessage(byRemoteId: message.text) else {
+                    return
+                }
+                
+                let message = try await self.decrypt(encryptedMessage)
+                
+                guard message.encrypted.senderId == self.deviceIdentityId else {
+                    // We're not the origin!
+                    debugLog("\(sender.username) requested a message not sent by us")
+                    return
+                }
+                
+                // Check if this message was targetted at that useer
+                // We're the current user, so answer is automatically 'yes'
+                try await _queueTask(
+                    .sendMessage(
+                        SendMessageTask(
+                            message: CypherMessage(message: message.message),
+                            recipient: sender.username,
+                            recipientDeviceId: sender.deviceId,
+                            localId: nil,
+                            pushType: .none,
+                            messageId: message.encrypted.remoteId
+                        )
+                    )
+                )
+                
                 return
             default:
                 guard message.messageSubtype?.hasPrefix("_/") != true else {
@@ -463,6 +550,51 @@ internal extension CypherMessenger {
                 switch subType {
                 case "_/ignore":
                     // Do nothing, it's like a `ping` message without `pong` reply
+                    return
+                case "_/resend/message":
+                    guard let group = try await getGroupChat(byId: groupId) else {
+                        debugLog("\(sender.username) requested a message from an unknown group \(groupId)")
+                        return
+                    }
+                    
+                    // 1. Check if the user is a member
+                    guard await group.conversation.members.contains(sender.username) else {
+                        debugLog("\(sender.username) requested a message from group \(groupId) which they're not a member of")
+                        return
+                    }
+                    
+                    // TODO: 2. Check if the user has had access, I.E. participation date
+                    guard let encryptedMessage = try? await self.cachedStore.fetchChatMessage(byRemoteId: message.text) else {
+                        return
+                    }
+                    
+                    let message = try await self.decrypt(encryptedMessage)
+                    
+                    guard message.encrypted.senderId == self.deviceIdentityId else {
+                        // We're not the origin!
+                        debugLog("\(sender.username) requested a message not sent by us")
+                        return
+                    }
+                    
+                    guard group.conversation.encrypted.id == message.encrypted.conversationId else {
+                        debugLog("\(sender.username) requested a message from an unrelated chat")
+                        return
+                    }
+                    
+                    // Check if this message was targetted at that useer
+                    // We're the current user, so answer is automatically 'yes'
+                    try await _queueTask(
+                        .sendMessage(
+                            SendMessageTask(
+                                message: CypherMessage(message: message.message),
+                                recipient: sender.username,
+                                recipientDeviceId: sender.deviceId,
+                                localId: nil,
+                                pushType: .none,
+                                messageId: message.encrypted.remoteId
+                            )
+                        )
+                    )
                     return
                 default:
                     debugLog("Unknown message subtype in cypher messenger namespace: ", message.messageSubtype as Any)
@@ -521,10 +653,47 @@ internal extension CypherMessenger {
                     remoteMessageId: remoteMessageId,
                     sender: sender
                 )
-            case (.magic, let subType) where subType == "_/ignore":
+            case (.magic, "_/ignore"):
                 return
-            case (.magic, let subType) where subType == "_/devices/announce":
+            case (.magic, "_/devices/announce"):
                 try await self._refreshDeviceIdentities(for: sender.username)
+                return
+            case (.magic, "_/resend/message"):
+                guard let encryptedMessage = try? await self.cachedStore.fetchChatMessage(byRemoteId: message.text) else {
+                    return
+                }
+                
+                let message = try await self.decrypt(encryptedMessage)
+                
+                guard message.encrypted.senderId == self.deviceIdentityId else {
+                    // We're not the origin!
+                    debugLog("\(sender.username) requested a message not sent by us")
+                    return
+                }
+                
+                // Check if this message was targetted at that useer
+                guard let privateChat = try await getPrivateChat(with: sender.username) else {
+                    debugLog("\(sender.username) requested a message from an unknown private chat")
+                    return
+                }
+                
+                guard privateChat.conversation.encrypted.id == message.encrypted.conversationId else {
+                    debugLog("\(sender.username) requested a message from an unrelated chat")
+                    return
+                }
+                
+                try await _queueTask(
+                    .sendMessage(
+                        SendMessageTask(
+                            message: CypherMessage(message: message.message),
+                            recipient: sender.username,
+                            recipientDeviceId: sender.deviceId,
+                            localId: nil,
+                            pushType: .none,
+                            messageId: message.encrypted.remoteId
+                        )
+                    )
+                )
                 return
             case (.magic, let subType), (.media, let subType), (.text, let subType):
                 if subType.hasPrefix("_/") {

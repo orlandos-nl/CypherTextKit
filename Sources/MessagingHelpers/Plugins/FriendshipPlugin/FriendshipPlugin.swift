@@ -94,9 +94,9 @@ public struct FriendshipPlugin: Plugin {
                 default:
                     ()
                 }
-                
-                return .ignore
             }
+            
+            return nil
         }
         
         let contact = try await message.messenger.createContact(byUsername: senderUsername)
@@ -154,6 +154,10 @@ public struct FriendshipPlugin: Plugin {
         case (.notFriend, _), (_, .notFriend):
             return .ignore
         }
+    }
+    
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+        // TODO: Sync states to new device
     }
     
     public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document {
@@ -257,15 +261,6 @@ extension Contact {
                 newState: newState,
                 subject: self.username
             )
-        )
-        
-        let internalChat = try await self.messenger.getInternalConversation()
-        try await internalChat.sendRawMessage(
-            type: .magic,
-            messageSubtype: "@/contacts/friendship/change-state",
-            text: "",
-            metadata: message,
-            preferredPushType: .none
         )
         
         let privateChat = try await self.messenger.createPrivateChat(with: self.username)

@@ -174,4 +174,10 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         
         // TODO: Synchronise state to new device
     }
+    
+    public func onCustomConfigChange() {
+        for plugin in plugins {
+            plugin.onCustomConfigChange()
+        }
+    }
 }

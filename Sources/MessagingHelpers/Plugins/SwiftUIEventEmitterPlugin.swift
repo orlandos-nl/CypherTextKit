@@ -11,6 +11,8 @@ public final class SwiftUIEventEmitter: ObservableObject {
     public let chatMessageRemoved = PassthroughSubject<AnyChatMessage, Never>()
     public let conversationChanged = PassthroughSubject<TargetConversation.Resolved, Never>()
     public let contactChanged = PassthroughSubject<Contact, Never>()
+    public let userDevicesChanged = PassthroughSubject<Void, Never>()
+    public let customConfigChanged = PassthroughSubject<Void, Never>()
     
     public let p2pClientConnected = PassthroughSubject<P2PClient, Never>()
     
@@ -60,6 +62,12 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         }
     }
     
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+        DispatchQueue.main.async {
+            emitter.userDevicesChanged.send()
+        }
+    }
+    
     public func onMessageChange(_ message: AnyChatMessage) {
         DispatchQueue.main.async {
             emitter.chatMessageChanged.send(message)
@@ -76,46 +84,36 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
     }
     
     public func onContactChange(_ contact: Contact) {
-        DispatchQueue.main.async {
-            emitter.contactChanged.send(contact)
-        }
+        emitter.contactChanged.send(contact)
     }
     
     public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {
-        DispatchQueue.main.async {
-            emitter.contacts.append(contact)
-            emitter.contactAdded.send(contact)
-        }
+        emitter.contacts.append(contact)
+        emitter.contactAdded.send(contact)
     }
     
     public func onCreateConversation(_ viewModel: AnyConversation) {
-        DispatchQueue.main.async {
-            emitter.conversationAdded.send(viewModel)
-        }
+        emitter.conversationAdded.send(viewModel)
     }
     
     public func onCreateChatMessage(_ chatMessage: AnyChatMessage) {
-        DispatchQueue.main.async {
-            self.emitter.savedChatMessages.send(chatMessage)
-        }
+        self.emitter.savedChatMessages.send(chatMessage)
     }
     
     public func onRemoveContact(_ contact: Contact) {
-        DispatchQueue.main.async {
-            self.emitter.contacts.removeAll { $0.id == contact.id }
-        }
+        self.emitter.contacts.removeAll { $0.id == contact.id }
     }
     
     public func onRemoveChatMessage(_ message: AnyChatMessage) {
-        DispatchQueue.main.async {
-            self.emitter.chatMessageRemoved.send(message)
-        }
+        self.emitter.chatMessageRemoved.send(message)
     }
     
     public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {
-        DispatchQueue.main.async {
-            emitter.p2pClientConnected.send(client)
-        }
+        emitter.p2pClientConnected.send(client)
+    }
+    
+    public func onCustomConfigChange() {
+        emitter.customConfigChanged.send()
     }
 }
 #endif

@@ -394,6 +394,7 @@ public final class VaporTransport: CypherServerTransportClient {
                                         id: message.messageId,
                                         byUser: message.sender.user,
                                         deviceId: message.sender.device
+                                        // TODO: Creation date
                                     )
                                 )
                             case .multiRecipientMessage:
@@ -405,6 +406,7 @@ public final class VaporTransport: CypherServerTransportClient {
                                         id: message.messageId,
                                         byUser: message.sender.user,
                                         deviceId: message.sender.device
+                                        // TODO: Creation date
                                     )
                                 )
                             case .readReceipt:

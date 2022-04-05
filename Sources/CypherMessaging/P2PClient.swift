@@ -284,7 +284,8 @@ public final class P2PClient {
                             message: broadcastMessage.payload,
                             messageId: broadcastMessage.messageId,
                             sender: claimedOrigin.username,
-                            deviceId: claimedOrigin.deviceId
+                            deviceId: claimedOrigin.deviceId,
+                            createdAt: broadcastMessage.createdAt
                         )
                     )
                 )

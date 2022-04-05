@@ -585,6 +585,60 @@ public struct InternalConversation: AnyConversation {
         
         try await messenger._writeMessage(message, to: messenger.username)
     }
+    
+    @JobQueueActor public func sendMagicPacket(
+        messageSubtype: String,
+        text: String,
+        metadata: Document = [:],
+        toDeviceId recipientDeviceId: DeviceId
+    ) async throws {
+        let order = try await getNextLocalOrder()
+        try await messenger._queueTask(
+            .sendMessage(
+                SendMessageTask(
+                    message: CypherMessage(
+                        message: SingleCypherMessage(
+                            messageType: .magic,
+                            messageSubtype: messageSubtype,
+                            text: text,
+                            metadata: metadata,
+                            sentDate: Date(),
+                            preferredPushType: PushType.none,
+                            order: order,
+                            target: .currentUser
+                        )
+                    ),
+                    recipient: messenger.username,
+                    recipientDeviceId: recipientDeviceId,
+                    localId: nil,
+                    pushType: .none,
+                    messageId: UUID().uuidString
+                )
+            )
+        )
+    }
+    
+    @JobQueueActor public func sendMagicPacket(
+        messageSubtype: String,
+        text: String,
+        metadata: Document = [:]
+    ) async throws {
+        let order = try await getNextLocalOrder()
+        _ = try await _sendMessage(
+            SingleCypherMessage(
+                messageType: .magic,
+                messageSubtype: messageSubtype,
+                text: text,
+                metadata: metadata,
+                sentDate: Date(),
+                preferredPushType: PushType.none,
+                order: order,
+                target: .currentUser
+            ),
+            to: conversation.members,
+            pushType: .none
+        )
+    }
 }
 
 @available(macOS 10.15, iOS 13, *)
@@ -636,6 +690,8 @@ public struct GroupChat: AnyConversation {
             ),
             to: member
         )
+        
+        // TODO: Notify all members, update uploaded config
     }
 
     @MainActor public func inviteMember(_ member: Username) async throws {
@@ -655,6 +711,8 @@ public struct GroupChat: AnyConversation {
             text: member.raw,
             preferredPushType: .none
         )
+        
+        // TODO: Notify all members, update uploaded config
     }
 }
 
@@ -683,5 +741,32 @@ public struct PrivateChat: AnyConversation {
         var members = conversation.members
         members.remove(messenger.username)
         return members.first!
+    }
+    
+    @discardableResult
+    @JobQueueActor public func sendMagicPacketMessage(
+        messageSubtype: String? = nil,
+        text: String,
+        metadata: Document = [:],
+        destructionTimer: TimeInterval? = nil,
+        sentDate: Date = Date(),
+        preferredPushType: PushType
+    ) async throws -> AnyChatMessage? {
+        let order = try await getNextLocalOrder()
+        return try await self._sendMessage(
+            SingleCypherMessage(
+                messageType: .magic,
+                messageSubtype: messageSubtype,
+                text: text,
+                metadata: metadata,
+                destructionTimer: destructionTimer,
+                sentDate: sentDate,
+                preferredPushType: preferredPushType,
+                order: order,
+                target: getTarget()
+            ),
+            to: [conversationPartner],
+            pushType: preferredPushType
+        )
     }
 }

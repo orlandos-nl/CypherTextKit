@@ -90,12 +90,14 @@ struct ReceiveMessageTask: Codable {
         case messageId = "b"
         case sender = "c"
         case deviceId = "d"
+        case createdAt = "e"
     }
     
     let message: RatchetedCypherMessage
     let messageId: String
     let sender: Username
     let deviceId: DeviceId
+    let createdAt: Date?
 }
 
 @available(macOS 10.15, iOS 13, *)
@@ -137,12 +139,14 @@ struct ReceiveMultiRecipientMessageTask: Codable {
         case messageId = "b"
         case sender = "c"
         case deviceId = "d"
+        case createdAt = "e"
     }
     
     let message: MultiRecipientCypherMessage
     let messageId: String
     let sender: Username
     let deviceId: DeviceId
+    let createdAt: Date?
 }
 
 @available(macOS 10.15, iOS 13, *)
@@ -366,7 +370,8 @@ enum CypherTask: Codable, StoredTask {
                 multiRecipientContainer: nil,
                 messageId: message.messageId,
                 sender: message.sender,
-                senderDevice: message.deviceId
+                senderDevice: message.deviceId,
+                createdAt: message.createdAt
             )
         case .sendMultiRecipientMessage(let task):
             debugLog("Sending message to multiple recipients", task.recipients)
@@ -376,7 +381,8 @@ enum CypherTask: Codable, StoredTask {
                 task.message,
                 messageId: task.messageId,
                 sender: task.sender,
-                senderDevice: task.deviceId
+                senderDevice: task.deviceId,
+                createdAt: task.createdAt
             )
         case .sendMessageDeliveryStateChangeTask(let task):
             let result = try await messenger._markMessage(byId: task.localId, as: task.newState)

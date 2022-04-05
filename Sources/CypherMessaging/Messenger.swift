@@ -1,5 +1,5 @@
-import BSON
-import Foundation
+@preconcurrency import BSON
+@preconcurrency import Foundation
 import Crypto
 import NIO
 import CypherProtocol
@@ -643,31 +643,28 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     /// Internal API that CypherMessenger uses to read information from Transport Clients
     public func receiveServerEvent(_ event: CypherServerEvent) async throws {
         switch event.raw {
-        case let .multiRecipientMessageSent(message, id: messageId, byUser: sender, deviceId: deviceId):
-            //            guard let key = message.keys.first(where: {
-            //                $0.user == self.config.username && $0.deviceId == self.config.deviceKeys.deviceId
-            //            }) else {
-            //                return
-            //            }
-            
+        case let .multiRecipientMessageSent(message, id: messageId, byUser: sender, deviceId: deviceId, createdAt: createdAt):
             return try await self.jobQueue.queueTask(
                 CypherTask.processMultiRecipientMessage(
                     ReceiveMultiRecipientMessageTask(
                         message: message,
                         messageId: messageId,
                         sender: sender,
-                        deviceId: deviceId
+                        deviceId: deviceId,
+                        createdAt: createdAt
                     )
                 )
             )
-        case let .messageSent(message, id: messageId, byUser: sender, deviceId: deviceId):
+        case let .messageSent(message, id: messageId, byUser: sender, deviceId: deviceId, createdAt: createdAt):
+            // TODO: Server- or even origin-defined creation date
             return try await self.jobQueue.queueTask(
                 CypherTask.processMessage(
                     ReceiveMessageTask(
                         message: message,
                         messageId: messageId,
                         sender: sender,
-                        deviceId: deviceId
+                        deviceId: deviceId,
+                        createdAt: createdAt
                     )
                 )
             )
@@ -761,12 +758,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             origin: origin,
             target: recipient,
             messageId: messageId,
+            createdAt: Date(),
             payload: message
         )
         let signedBroadcastMessage = try await sign(broadcastMessage)
         let broadcast = P2PBroadcast(hops: 16, value: signedBroadcastMessage)
         
-        for client in await listOpenP2PConnections() where client.isMeshEnabled {
+        for client in listOpenP2PConnections() where client.isMeshEnabled {
             Task {
                 // Ignore errors
                 try await client.sendMessage(.broadcast(broadcast))
@@ -957,6 +955,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     /// Writes a new custom configuration file to this device
     public func writeCustomConfig(_ custom: Document) async throws {
         try await state.writeCustomConfig(custom)
+        await eventHandler.onCustomConfigChange()
     }
     
     func _writeWithRatchetEngine<T>(
@@ -1199,6 +1198,7 @@ extension _DecryptedModel where M == DeviceIdentityModel {
         @CryptoActor func rekey() async throws {
             debugLog("Rekeying - removing ratchet state")
             try self.updateDoubleRatchetState(to: nil)
+            try self.setProp(at: \.lastRekey, to: Date())
             
             try await messenger.eventHandler.onRekey(
                 withUser: username,
@@ -1258,6 +1258,7 @@ extension _DecryptedModel where M == DeviceIdentityModel {
                     initiator: messenger.username
                 )
                 let ratchetMessage = try message.readAndValidate(usingIdentity: self.identity)
+                try self.setProp(at: \.lastRekey, to: Date())
                 (ratchet, data) = try DoubleRatchetHKDF.initializeRecipient(
                     secretKey: symmetricKey,
                     localPrivateKey: messenger.state.config.deviceKeys.privateKey,
@@ -1294,6 +1295,7 @@ extension _DecryptedModel where M == DeviceIdentityModel {
         } else {
             let secret = try messenger._formSharedSecret(with: publicKey)
             let symmetricKey = messenger._deriveSymmetricKey(from: secret, initiator: self.username)
+            try self.setProp(at: \.lastRekey, to: Date())
             ratchet = try DoubleRatchetHKDF.initializeSender(
                 secretKey: symmetricKey,
                 contactingRemote: publicKey,
