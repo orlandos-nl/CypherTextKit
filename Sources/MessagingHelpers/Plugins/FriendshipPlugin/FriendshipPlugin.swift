@@ -235,7 +235,7 @@ extension Contact {
             return
         }
         
-        let oldState = (try? await self.model.withMetadata(
+        let oldState = (try? self.model.withMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.ourPreBlockedState

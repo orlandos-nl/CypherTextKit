@@ -23,18 +23,6 @@ public struct UserProfilePlugin: Plugin {
     
     public init() {}
     
-    public func onContactIdentityChange(username: Username, messenger: CypherMessenger) {
-        Task.detached {
-            let contact = try await messenger.createContact(byUsername: username)
-            try await contact.modifyMetadata(
-                ofType: ContactMetadata.self,
-                forPlugin: Self.self
-            ) { metadata in
-                metadata = .init()
-            }
-        }
-    }
-    
     public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {
         Task {
             let internalChat = try await messenger.getInternalConversation()

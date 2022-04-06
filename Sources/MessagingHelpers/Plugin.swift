@@ -60,7 +60,7 @@ extension Contact {
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
     ) async throws -> Result {
-        let result = try await model.withMetadata(ofType: type, forPlugin: plugin, run: run)
+        let result = try model.withMetadata(ofType: type, forPlugin: plugin, run: run)
         try await self.save()
         return result
     }
@@ -82,7 +82,7 @@ extension DecryptedModel where M.SecureProps: MetadataProps {
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
-    ) async throws -> Result {
+    ) throws -> Result {
         var metadata = self.props.metadata
         let pluginStorage = metadata[plugin.pluginIdentifier] ?? Document()
         var pluginMetadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)
