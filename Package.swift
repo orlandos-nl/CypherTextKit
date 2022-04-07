@@ -17,6 +17,9 @@ let package = Package(
         .library(
             name: "MessagingHelpers",
             targets: ["MessagingHelpers"]),
+        .library(
+            name: "CypherProtocol",
+            targets: ["CypherProtocol"]),
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.

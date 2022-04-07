@@ -30,8 +30,6 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
     public func onReceiveMessage(
         _ message: ReceivedMessageContext
     ) async throws -> ProcessMessageAction {
-        // TODO: Parse synchronisation messages
-        
         for plugin in plugins {
             if let result = try await plugin.onReceiveMessage(message) {
                 return result

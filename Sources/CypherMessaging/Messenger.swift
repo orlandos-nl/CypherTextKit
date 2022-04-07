@@ -906,6 +906,82 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         return decrypted
     }
     
+    @CryptoActor public func decryptDirectMessageNotification(
+        _ message: RatchetedCypherMessage,
+        senderUser username: Username,
+        senderDeviceId deviceId: DeviceId
+    ) async throws -> String? {
+        guard
+            !message.rekey,
+            let deviceIdentity = try await self._fetchKnownDeviceIdentity(for: username, deviceId: deviceId),
+            let ratchetState = deviceIdentity.doubleRatchet
+        else {
+            return nil
+        }
+        
+        let message = try message.readAndValidate(usingIdentity: deviceIdentity.identity)
+        var ratchet = DoubleRatchetHKDF(state: ratchetState, configuration: doubleRatchetConfig)
+        let data = try ratchet.ratchetDecrypt(message)
+        
+        // Don't save the ratchet state
+        let decryptedMessage = try BSONDecoder().decode(CypherMessage.self, from: Document(data: data))
+        
+        switch decryptedMessage.box {
+        case .array(let list):
+            return list.first { $0.messageType == .text }?.text
+        case .single(let message):
+            if message.messageType != .text || message.text.isEmpty {
+                return nil
+            }
+            
+            return message.text
+        }
+    }
+    
+    @CryptoActor public func decryptMultiRecipientMessageNotification(
+        _ message: MultiRecipientCypherMessage,
+        senderUser username: Username,
+        senderDeviceId deviceId: DeviceId
+    ) async throws -> String? {
+        guard
+            let foundKey = message.keys.first(where: { key in
+                key.deviceId == self.deviceId && key.user == self.username
+            }),
+            let deviceIdentity = try await self._fetchKnownDeviceIdentity(for: username, deviceId: deviceId),
+            let ratchetState = deviceIdentity.doubleRatchet
+        else {
+            return nil
+        }
+        
+        let keyMessage = try foundKey.message.readAndValidate(usingIdentity: deviceIdentity.identity)
+        var ratchet = DoubleRatchetHKDF(state: ratchetState, configuration: doubleRatchetConfig)
+        let keyData = try ratchet.ratchetDecrypt(keyMessage)
+        
+        guard keyData.count == 32 else {
+            throw CypherSDKError.invalidMultiRecipientKey
+        }
+        
+        let key = SymmetricKey(data: keyData)
+        
+        // Don't save the ratchet state
+        let decryptedMessage = try message.container.readAndValidate(
+            type: CypherMessage.self,
+            usingIdentity: deviceIdentity.props.identity,
+            decryptingWith: key
+        )
+        
+        switch decryptedMessage.box {
+        case .array(let list):
+            return list.first { $0.messageType == .text }?.text
+        case .single(let message):
+            if message.messageType != .text || message.text.isEmpty {
+                return nil
+            }
+            
+            return message.text
+        }
+    }
+    
     /// Encrypts a file for storage on the disk. Can be used for any personal information, or attachments received.
     public func encryptLocalFile(_ data: Data) throws -> AES.GCM.SealedBox {
         try AES.GCM.seal(data, using: databaseEncryptionKey)
