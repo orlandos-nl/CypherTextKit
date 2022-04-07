@@ -526,6 +526,7 @@ public final class VaporTransport: CypherServerTransportClient {
             url: "blobs/\(id)",
             username: username,
             deviceId: deviceId,
+            token: self.makeToken(),
             as: Blob<C>.self
         )
         

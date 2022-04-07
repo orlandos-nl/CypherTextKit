@@ -3,7 +3,7 @@
     "pins": [
       {
         "package": "BSON",
-        "repositoryURL": "https://github.com/OpenKitten/BSON.git",
+        "repositoryURL": "https://github.com/orlandos-nl/BSON.git",
         "state": {
           "branch": null,
           "revision": "98a2c90988895f1b985ed0066180995df995924c",
