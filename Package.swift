@@ -32,7 +32,7 @@ let package = Package(
         .package(url: "https://github.com/orlandos-nl/Dribble.git", from: "0.1.0"),
         .package(url: "https://github.com/vapor/jwt-kit.git", from: "4.0.0"),
         .package(url: "https://github.com/vapor/websocket-kit.git", from: "2.0.0"),
-        .package(url: "https://github.com/OpenKitten/BSON.git", from: "7.0.0"),
+        .package(url: "https://github.com/orlandos-nl/BSON.git", from: "7.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
     ],
     targets: [
