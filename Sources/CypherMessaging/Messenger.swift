@@ -25,6 +25,7 @@ internal struct _CypherMessengerConfig: Codable, Sendable {
         case registeryMode = "d"
         case custom = "e"
         case deviceIdentityId = "f"
+        case lastKnownUserConfig = "g"
     }
     
     let databaseEncryptionKey: Data
@@ -33,6 +34,7 @@ internal struct _CypherMessengerConfig: Codable, Sendable {
     var registeryMode: DeviceRegisteryMode
     var custom: Document
     let deviceIdentityId: Int
+    var lastKnownUserConfig: UserConfig?
 }
 
 enum RekeyState: Sendable {
@@ -55,8 +57,8 @@ public struct TransportCreationRequest: Sendable {
 }
 
 public struct ContactCard: Codable, Sendable {
-    let username: Username
-    let config: UserConfig
+    public let username: Username
+    public let config: UserConfig
 }
 
 /// The representation of a P2PSession with another device
@@ -240,10 +242,6 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     /// The deviceId which, together with te username, identifies a registered device
     public let deviceId: DeviceId
     
-    @CypherTextKitActor public var identity: PublicSigningKey {
-        state.config.deviceKeys.identity.publicKey
-    }
-    
     private init(
         appPassword: String,
         eventHandler: CypherMessengerEventHandler,
@@ -288,12 +286,20 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         if config.registeryMode == .unregistered {
             Task { @CypherTextKitActor in
                 let bundle = try await transport.readKeyBundle(forUsername: self.username)
+                try await self.updateConfig { appConfig in
+                    appConfig.lastKnownUserConfig = bundle
+                }
                 for device in try bundle.readAndValidateDevices() {
                     if device.deviceId == self.deviceId {
                         try await self.updateConfig { $0.registeryMode = device.isMasterDevice ? .masterDevice : .childDevice }
                         return
                     }
                 }
+            }
+        } else if transport.isConnected, config.lastKnownUserConfig == nil {
+            let bundle = try await transport.readKeyBundle(forUsername: config.username)
+            try await self.updateConfig { appConfig in
+                appConfig.lastKnownUserConfig = bundle
             }
         }
     }
@@ -325,24 +331,25 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             Data(bytes: buffer.baseAddress!, count: buffer.count)
         }
         
+        let deviceKeys = DevicePrivateKeys(deviceId: deviceId)
+        let userConfig = try UserConfig(
+            mainDevice: deviceKeys,
+            otherDevices: []
+        )
         var config = _CypherMessengerConfig(
             databaseEncryptionKey: databaseEncryptionKeyData,
-            deviceKeys: DevicePrivateKeys(deviceId: deviceId),
+            deviceKeys: deviceKeys,
             username: username,
             registeryMode: .unregistered,
             custom: [:],
-            deviceIdentityId: .random(in: 1 ..< .max)
+            deviceIdentityId: .random(in: 1 ..< .max),
+            lastKnownUserConfig: userConfig
         )
         
         let salt = try await database.readLocalDeviceSalt()
         let appEncryptionKey = Self.formAppEncryptionKey(
             appPassword: appPassword,
             salt: salt
-        )
-        
-        let userConfig = try UserConfig(
-            mainDevice: config.deviceKeys,
-            otherDevices: []
         )
         
         var encryptedConfig = try Encrypted(config, encryptionKey: appEncryptionKey)
@@ -498,10 +505,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         let box = try AES.GCM.SealedBox(combined: data)
         let encryptedConfig = Encrypted<_CypherMessengerConfig>(representing: box)
         let config = try encryptedConfig.decrypt(using: encryptionKey)
+        
         let transportRequest = try TransportCreationRequest(
             username: config.username,
             deviceId: config.deviceKeys.deviceId,
-            userConfig: UserConfig(
+            userConfig: config.lastKnownUserConfig ?? UserConfig(
                 mainDevice: config.deviceKeys,
                 otherDevices: []
             ),
@@ -509,6 +517,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         )
         
         let transport = try await createTransport(transportRequest)
+        
         return try await CypherMessenger(
             appPassword: appPassword,
             eventHandler: eventHandler,
@@ -574,11 +583,20 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                     }
                 )
             )
-        } else {
-            let config = try await transport.readKeyBundle(forUsername: self.username)
+        } else if let lastKnownUserConfig = state.config.lastKnownUserConfig {
             return ContactCard(
                 username: self.username,
-                config: config
+                config: lastKnownUserConfig
+            )
+        } else {
+            let bundle = try await transport.readKeyBundle(forUsername: self.username)
+            try await self.updateConfig { appConfig in
+                appConfig.lastKnownUserConfig = bundle
+            }
+            
+            return ContactCard(
+                username: self.username,
+                config: bundle
             )
         }
     }
@@ -606,8 +624,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         }
         
         if try await isRegisteredOnline() {
-            try await updateConfig { config in
-                config.registeryMode = .childDevice
+            try await updateConfig { appConfig in
+                appConfig.registeryMode = .childDevice
             }
             return nil
         }
@@ -719,6 +737,10 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         
         try config.addDeviceConfig(deviceConfig, signedWith: await state.config.deviceKeys.identity)
         try await self.transport.publishKeyBundle(config)
+        let uploadedConfig = config
+        try await self.updateConfig { appConfig in
+            appConfig.lastKnownUserConfig = uploadedConfig
+        }
         let internalConversation = try await self.getInternalConversation()
         let metadata = try BSONEncoder().encode(deviceConfig)
         try await self._createDeviceIdentity(

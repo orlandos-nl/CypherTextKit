@@ -312,7 +312,8 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
                 message,
                 id: messageId,
                 byUser: self.username,
-                deviceId: deviceId
+                deviceId: deviceId,
+                createdAt: Date()
             ),
             to: otherUser,
             deviceId: otherUserDeviceId

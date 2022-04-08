@@ -58,6 +58,10 @@ public struct UserConfig: Codable, @unchecked Sendable {
         _ config: UserDeviceConfig,
         signedWith identity: PrivateSigningKey
     ) throws {
+        guard self.identity.data == identity.publicKey.data else {
+            throw CypherSDKError.invalidSignature
+        }
+        
         var devices = try readAndValidateDevices()
         
         if devices.contains(where: { $0.deviceId == config.deviceId }) {
