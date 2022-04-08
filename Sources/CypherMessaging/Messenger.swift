@@ -1281,6 +1281,15 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             UserDevice(device: device)
         }
     }
+    
+    public func renameCurrentDevice(to name: String) async throws {
+        let chat = try await getInternalConversation()
+        try await chat.sendMagicPacket(
+            messageSubtype: "_/devices/rename",
+            text: "",
+            metadata: BSONEncoder().encode(MagicPackets.RenameDevice(deviceId: self.deviceId, name: name))
+        )
+    }
 }
 
 extension Contact {
