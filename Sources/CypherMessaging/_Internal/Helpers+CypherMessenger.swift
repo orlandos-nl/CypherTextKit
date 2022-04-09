@@ -388,7 +388,7 @@ internal extension CypherMessenger {
             }
             
             if inbound.rekey {
-                try self.setProp(at: \.lastRekey, to: createdAt ?? Date())
+                try deviceIdentity.setProp(at: \.lastRekey, to: createdAt ?? Date())
             }
         } catch {
             // Message was corrupt or unusable
