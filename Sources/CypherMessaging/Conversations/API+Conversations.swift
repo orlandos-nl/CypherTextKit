@@ -219,7 +219,7 @@ extension CypherMessenger {
                 )
                 
                 return PrivateChat(
-                    conversation: try await self.decrypt(conversation),
+                    conversation: try self.decrypt(conversation),
                     messenger: self
                 )
             }
@@ -750,31 +750,6 @@ public struct PrivateChat: AnyConversation {
         return members.first!
     }
     
-    @discardableResult
-    @JobQueueActor public func sendMagicPacketMessage(
-        messageSubtype: String? = nil,
-        text: String,
-        metadata: Document = [:],
-        preferredPushType: PushType
-    ) async throws -> AnyChatMessage? {
-        let order = try await getNextLocalOrder()
-        return try await self._sendMessage(
-            SingleCypherMessage(
-                messageType: .magic,
-                messageSubtype: messageSubtype,
-                text: text,
-                metadata: metadata,
-                destructionTimer: nil,
-                sentDate: Date(),
-                preferredPushType: PushType.none,
-                order: order,
-                target: getTarget()
-            ),
-            to: [conversationPartner],
-            pushType: .none
-        )
-    }
-    
     @JobQueueActor public func sendMagicPacket(
         messageSubtype: String,
         text: String,
@@ -804,6 +779,58 @@ public struct PrivateChat: AnyConversation {
                     messageId: UUID().uuidString
                 )
             )
+        )
+    }
+}
+
+extension AnyConversation {
+    @discardableResult
+    @JobQueueActor public func sendMagicPacketWithinCurrentUser(
+        messageSubtype: String? = nil,
+        text: String,
+        metadata: Document = [:],
+        preferredPushType: PushType
+    ) async throws -> AnyChatMessage? {
+        let order = try await getNextLocalOrder()
+        return try await self._sendMessage(
+            SingleCypherMessage(
+                messageType: .magic,
+                messageSubtype: messageSubtype,
+                text: text,
+                metadata: metadata,
+                destructionTimer: nil,
+                sentDate: Date(),
+                preferredPushType: PushType.none,
+                order: order,
+                target: getTarget()
+            ),
+            to: [messenger.username],
+            pushType: .none
+        )
+    }
+    
+    @discardableResult
+    @JobQueueActor public func sendMagicPacketMessage(
+        messageSubtype: String? = nil,
+        text: String,
+        metadata: Document = [:],
+        preferredPushType: PushType
+    ) async throws -> AnyChatMessage? {
+        let order = try await getNextLocalOrder()
+        return try await self._sendMessage(
+            SingleCypherMessage(
+                messageType: .magic,
+                messageSubtype: messageSubtype,
+                text: text,
+                metadata: metadata,
+                destructionTimer: nil,
+                sentDate: Date(),
+                preferredPushType: PushType.none,
+                order: order,
+                target: getTarget()
+            ),
+            to: conversation.members,
+            pushType: .none
         )
     }
 }
