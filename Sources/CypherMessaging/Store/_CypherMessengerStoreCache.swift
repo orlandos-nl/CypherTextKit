@@ -41,6 +41,12 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
             return contacts
         } else {
             let contacts = try await self.base.fetchContacts()
+            
+            // If two fetches ran in parallel, the first one wins
+            if let contacts = self.contacts {
+                return contacts
+            }
+            
             self.contacts = contacts
             return contacts
         }
@@ -89,6 +95,12 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
             return conversations
         } else {
             let conversations = try await self.base.fetchConversations()
+            
+            // If two `fetchConversations` ran in parallel, the first one wins
+            if let conversations = self.conversations {
+                return conversations
+            }
+            
             self.conversations = conversations
             return conversations
         }
@@ -116,6 +128,12 @@ internal final class _CypherMessengerStoreCache: CypherMessengerStore {
             return deviceIdentities
         } else {
             let deviceIdentities = try await self.base.fetchDeviceIdentities()
+            
+            // If two fetches ran in parallel, the first one wins
+            if let deviceIdentities = self.deviceIdentities {
+                return deviceIdentities
+            }
+            
             self.deviceIdentities = deviceIdentities
             return deviceIdentities
         }

@@ -65,6 +65,15 @@
         }
       },
       {
+        "package": "TaskQueue",
+        "repositoryURL": "https://github.com/Joannis/TaskQueue.git",
+        "state": {
+          "branch": null,
+          "revision": "38df6560a3ce185e0954ec2851b01ee82c01ee2c",
+          "version": "1.0.0"
+        }
+      },
+      {
         "package": "websocket-kit",
         "repositoryURL": "https://github.com/vapor/websocket-kit.git",
         "state": {

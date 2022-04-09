@@ -1,6 +1,7 @@
 @preconcurrency import BSON
 @preconcurrency import Foundation
 import Crypto
+import TaskQueue
 import NIO
 import CypherProtocol
 
@@ -208,7 +209,13 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     }
     
     internal let eventLoop: EventLoop
+    
+    /// A queue of stored jobs, executing signals in sequence. Mainly used for messaging traffic which requires cryptographic sequentiality.
     private(set) var jobQueue: JobQueue!
+    
+    /// A thread which executes higher-level operations in sequence. Does not load/store unfinished tasks, but might inject tasks into `jobQueue`
+    let taskQueue = TaskQueue()
+    
     private var inactiveP2PSessionsTimeout: Int? = 30
     internal let deviceIdentityId: Int
     fileprivate let state: CypherMessengerActor

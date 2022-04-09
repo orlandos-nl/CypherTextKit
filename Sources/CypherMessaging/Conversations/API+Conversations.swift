@@ -1,6 +1,7 @@
 import CypherProtocol
 @preconcurrency import BSON
 import Foundation
+import TaskQueue
 import NIO
 
 @available(macOS 10.15, iOS 13, *)
@@ -22,72 +23,76 @@ extension CypherMessenger {
     }
     
     @MainActor public func getInternalConversation() async throws -> InternalConversation {
-        let conversations = try await cachedStore.fetchConversations()
-        for conversation in conversations {
-            let conversation = try self.decrypt(conversation)
-            
-            if conversation.members == [self.username] {
-                return InternalConversation(conversation: conversation, messenger: self)
+        try await taskQueue.runThrowing { @MainActor in
+            let conversations = try await self.cachedStore.fetchConversations()
+            for conversation in conversations {
+                let conversation = try self.decrypt(conversation)
+                
+                if conversation.members == [self.username] {
+                    return InternalConversation(conversation: conversation, messenger: self)
+                }
             }
+            
+            let conversation = try await self._createConversation(
+                members: [self.username],
+                metadata: [:]
+            )
+            
+            return InternalConversation(
+                conversation: try self.decrypt(conversation),
+                messenger: self
+            )
         }
-        
-        let conversation = try await self._createConversation(
-            members: [self.username],
-            metadata: [:]
-        )
-        
-        return InternalConversation(
-            conversation: try self.decrypt(conversation),
-            messenger: self
-        )
     }
     
     internal func _openGroupChat(byId id: GroupChatId) async throws -> GroupChat {
-        if let groupChat = try await getGroupChat(byId: id) {
-            return groupChat
-        }
-        
-        let config = try await self.transport.readPublishedBlob(
-            byId: id.raw,
-            as: Signed<GroupChatConfig>.self
-        )
-    
-        guard let config = config else {
-            throw CypherSDKError.unknownGroup
-        }
-        
-        let groupConfig = try config.blob.readWithoutVerifying()
-        
-        let devices = try await self._fetchDeviceIdentities(for: groupConfig.admin)
-        for device in devices {
-            if await config.blob.isSigned(by: device.props.identity) {
-                let config = ReferencedBlob(id: config.id, blob: groupConfig)
-                let groupMetadata = GroupMetadata(
-                    custom: [:],
-                    config: config
-                )
-                let conversation = try ConversationModel(
-                    props: .init(
-                        members: groupConfig.members,
-                        kickedMembers: [],
-                        metadata: BSONEncoder().encode(groupMetadata),
-                        localOrder: 0
-                    ),
-                    encryptionKey: self.databaseEncryptionKey
-                )
-                
-                try await self.cachedStore.createConversation(conversation)
-                let chat = GroupChat(
-                    conversation: try await self.decrypt(conversation),
-                    messenger: self,
-                    metadata: groupMetadata
-                )
-                await self.eventHandler.onCreateConversation(chat)
-                return chat
+        try await taskQueue.runThrowing { @MainActor in
+            if let groupChat = try await self.getGroupChat(byId: id) {
+                return groupChat
             }
-        }
             
-        throw CypherSDKError.invalidGroupConfig
+            let config = try await self.transport.readPublishedBlob(
+                byId: id.raw,
+                as: Signed<GroupChatConfig>.self
+            )
+        
+            guard let config = config else {
+                throw CypherSDKError.unknownGroup
+            }
+            
+            let groupConfig = try config.blob.readWithoutVerifying()
+            
+            let devices = try await self._fetchDeviceIdentities(for: groupConfig.admin)
+            for device in devices {
+                if await config.blob.isSigned(by: device.props.identity) {
+                    let config = ReferencedBlob(id: config.id, blob: groupConfig)
+                    let groupMetadata = GroupMetadata(
+                        custom: [:],
+                        config: config
+                    )
+                    let conversation = try ConversationModel(
+                        props: .init(
+                            members: groupConfig.members,
+                            kickedMembers: [],
+                            metadata: BSONEncoder().encode(groupMetadata),
+                            localOrder: 0
+                        ),
+                        encryptionKey: self.databaseEncryptionKey
+                    )
+                    
+                    try await self.cachedStore.createConversation(conversation)
+                    let chat = GroupChat(
+                        conversation: try self.decrypt(conversation),
+                        messenger: self,
+                        metadata: groupMetadata
+                    )
+                    self.eventHandler.onCreateConversation(chat)
+                    return chat
+                }
+            }
+                
+            throw CypherSDKError.invalidGroupConfig
+        }
     }
     
     @MainActor public func getGroupChat(byId id: GroupChatId) async throws -> GroupChat? {
@@ -195,27 +200,29 @@ extension CypherMessenger {
     }
     
     public func createPrivateChat(with otherUser: Username) async throws -> PrivateChat {
-        guard otherUser != self.username else {
-            throw CypherSDKError.badInput
-        }
-        
-        if let conversation = try await self.getPrivateChat(with: otherUser) {
-            return conversation
-        } else {
-            let metadata = try await self.eventHandler.createPrivateChatMetadata(
-                withUser: otherUser,
-                messenger: self
-            )
+        try await taskQueue.runThrowing { @MainActor in
+            guard otherUser != self.username else {
+                throw CypherSDKError.badInput
+            }
             
-            let conversation = try await self._createConversation(
-                members: [otherUser],
-                metadata: metadata
-            )
-            
-            return PrivateChat(
-                conversation: try await self.decrypt(conversation),
-                messenger: self
-            )
+            if let conversation = try await self.getPrivateChat(with: otherUser) {
+                return conversation
+            } else {
+                let metadata = try await self.eventHandler.createPrivateChatMetadata(
+                    withUser: otherUser,
+                    messenger: self
+                )
+                
+                let conversation = try await self._createConversation(
+                    members: [otherUser],
+                    metadata: metadata
+                )
+                
+                return PrivateChat(
+                    conversation: try await self.decrypt(conversation),
+                    messenger: self
+                )
+            }
         }
     }
     
