@@ -314,7 +314,6 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func disconnect() async {
         do {
-            self.authenticated = .unauthenticated
             self.wantsConnection = false
             return try await (webSocket?.close() ?? eventLoop.makeSucceededVoidFuture()).get()
         } catch {}
@@ -322,7 +321,11 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func reconnect() async {
         do {
-            if authenticated == .authenticated {
+            if
+                authenticated == .authenticated,
+                let webSocket = webSocket,
+                !webSocket.isClosed
+            {
                 // Already connected
                 return
             }
@@ -434,6 +437,7 @@ public final class VaporTransport: CypherServerTransportClient {
                 
                 webSocket.onClose.whenComplete { [weak self] _ in
                     if let transport = self, transport.wantsConnection == true {
+                        transport.authenticated = .unauthenticated
                         Task.detached {
                             await transport.reconnect()
                         }
