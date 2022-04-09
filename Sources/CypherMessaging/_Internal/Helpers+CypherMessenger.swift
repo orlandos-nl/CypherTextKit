@@ -386,6 +386,10 @@ internal extension CypherMessenger {
             } else {
                 message = try BSONDecoder().decode(CypherMessage.self, from: Document(data: data))
             }
+            
+            if inbound.rekey {
+                try self.setProp(at: \.lastRekey, to: createdAt ?? Date())
+            }
         } catch {
             // Message was corrupt or unusable
             return try await requestResendMessage(messageId: messageId, sender: sender, senderDevice: senderDevice)

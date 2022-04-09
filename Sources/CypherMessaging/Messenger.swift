@@ -1368,7 +1368,6 @@ extension _DecryptedModel where M == DeviceIdentityModel {
                     initiator: messenger.username
                 )
                 let ratchetMessage = try message.readAndValidate(usingIdentity: self.identity)
-                try self.setProp(at: \.lastRekey, to: Date())
                 (ratchet, data) = try DoubleRatchetHKDF.initializeRecipient(
                     secretKey: symmetricKey,
                     localPrivateKey: messenger.state.config.deviceKeys.privateKey,
