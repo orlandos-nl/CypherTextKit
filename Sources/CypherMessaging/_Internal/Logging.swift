@@ -22,7 +22,7 @@ fileprivate let formatter: ISO8601DateFormatter = {
 // TODO: Swift-log
 // This way this is a NO-OP in release
 @inline(__always) public func debugLog(domain: LogDomain = .none, _ args: Any...) {
-    #if DEBUG || Xcode
+    #if DEBUG
     print(domain.raw.rawValue, formatter.string(from: Date()), args)
     
     guard var url = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else {
