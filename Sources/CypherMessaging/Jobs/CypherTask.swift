@@ -124,12 +124,14 @@ struct ReceiveMessageDeliveryStateChangeTask: Codable {
         case sender = "b"
         case deviceId = "c"
         case newState = "d"
+        case receivedAt = "e"
     }
     
     let messageId: String
     let sender: Username
     let deviceId: DeviceId?
     let newState: ChatMessageModel.DeliveryState
+    let receivedAt: Date
 }
 
 @available(macOS 10.15, iOS 13, *)

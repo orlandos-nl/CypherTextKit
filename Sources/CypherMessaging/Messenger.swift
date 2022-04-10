@@ -698,25 +698,27 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
                     )
                 )
             )
-        case let .messageDisplayed(by: recipient, deviceId: deviceId, id: messageId):
+        case let .messageDisplayed(by: recipient, deviceId: deviceId, id: messageId, receivedAt: receivedAt):
             return try await self.jobQueue.queueTask(
                 CypherTask.receiveMessageDeliveryStateChangeTask(
                     ReceiveMessageDeliveryStateChangeTask(
                         messageId: messageId,
                         sender: recipient,
                         deviceId: deviceId,
-                        newState: .read
+                        newState: .read,
+                        receivedAt: receivedAt
                     )
                 )
             )
-        case let .messageReceived(by: recipient, deviceId: deviceId, id: messageId):
+        case let .messageReceived(by: recipient, deviceId: deviceId, id: messageId, receivedAt: receivedAt):
             return try await self.jobQueue.queueTask(
                 CypherTask.receiveMessageDeliveryStateChangeTask(
                     ReceiveMessageDeliveryStateChangeTask(
                         messageId: messageId,
                         sender: recipient,
                         deviceId: deviceId,
-                        newState: .received
+                        newState: .received,
+                        receivedAt: receivedAt
                     )
                 )
             )

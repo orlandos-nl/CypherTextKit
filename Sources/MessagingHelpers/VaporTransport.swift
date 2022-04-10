@@ -64,7 +64,7 @@ public struct UserProfile: Decodable {
 enum MessageType: String, Codable {
     case message = "a"
     case multiRecipientMessage = "b"
-    case readReceipt = "c"
+    case receipt = "c"
     case ack = "d"
 }
 
@@ -86,17 +86,18 @@ struct ChatMultiRecipientMessagePacket: Codable {
     let multiRecipientMessage: MultiRecipientCypherMessage
 }
 
-struct ReadReceiptPacket: Codable {
+struct ReadReceipt: Codable {
     enum State: Int, Codable {
         case received = 0
         case displayed = 1
     }
     
-    let _id: ObjectId
     let messageId: String
     let state: State
-    let sender: UserDeviceId
+    let sender: Username
+    let senderDevice: UserDeviceId
     let recipient: UserDeviceId
+    let receivedAt: Date
 }
 
 let maxBodySize = 4_000_000
@@ -373,6 +374,11 @@ public final class VaporTransport: CypherServerTransportClient {
                         let body: Document
                     }
                     
+                    struct Receipt: Codable {
+                        let id: ObjectId
+                        let type: MessageType
+                    }
+                    
                     struct Ack: Codable {
                         let type: MessageType
                         let id: ObjectId
@@ -412,16 +418,14 @@ public final class VaporTransport: CypherServerTransportClient {
                                         createdAt: message.createdAt
                                     )
                                 )
-                            case .readReceipt:
-                                let receipt = try BSONDecoder().decode(ReadReceiptPacket.self, from: packet.body)
+                            case .receipt:
+                                let receipt = try BSONDecoder().decode(ReadReceipt.self, from: packet.body)
                                 
                                 switch receipt.state {
                                 case .displayed:
-        //                            delegate.receiveServerEvent(.)
-                                    ()
+                                    try await delegate.receiveServerEvent(.messageDisplayed(by: receipt.sender, deviceId: receipt.senderDevice.device, id: receipt.messageId, receivedAt: receipt.receivedAt))
                                 case .received:
-        //                            delegate.receiveServerEvent(.messageReceived(by: receipt., deviceId: receipt.sender, id: receipt.messageId))
-                                    ()
+                                    try await delegate.receiveServerEvent(.messageReceived(by: receipt.sender, deviceId: receipt.senderDevice.device, id: receipt.messageId, receivedAt: receipt.receivedAt))
                                 }
                             case .ack:
                                 ()
