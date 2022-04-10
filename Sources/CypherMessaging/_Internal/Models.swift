@@ -338,10 +338,12 @@ extension DecryptedModel where M == ChatMessageModel {
     }
     
     @discardableResult
-    @CryptoActor func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState, forUser user: Username) async throws -> MarkMessageResult {
-        var state = await self.deliveryState
-        let result = state.transition(to: newState)
-        try await setProp(at: \.deliveryState, to: state)
+    @CryptoActor func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState, forUser user: Username, messenger: CypherMessenger) async throws -> MarkMessageResult {
+        if user != messenger.username {
+            var state = await self.deliveryState
+            let result = state.transition(to: newState)
+            try await setProp(at: \.deliveryState, to: state)
+        }
         
         var allStates = await self.deliveryStates
         allStates[user].transition(to: newState)
