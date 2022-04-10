@@ -205,6 +205,7 @@ public final class ChatMessageModel: Model, @unchecked Sendable {
             case message = "d"
             case senderUser = "e"
             case senderDeviceId = "f"
+            case deliveryStates = "g"
         }
         
         public let sendDate: Date
@@ -213,6 +214,7 @@ public final class ChatMessageModel: Model, @unchecked Sendable {
         public var message: SingleCypherMessage
         public let senderUser: Username
         public let senderDeviceId: DeviceId
+        public internal(set) var deliveryStates: Document?
         
         init(
             sending message: SingleCypherMessage,
@@ -225,6 +227,7 @@ public final class ChatMessageModel: Model, @unchecked Sendable {
             self.message = message
             self.senderUser = senderUser
             self.senderDeviceId = senderDeviceId
+            self.deliveryStates = [:]
         }
         
         init(
@@ -239,6 +242,7 @@ public final class ChatMessageModel: Model, @unchecked Sendable {
             self.message = message
             self.senderUser = senderUser
             self.senderDeviceId = senderDeviceId
+            self.deliveryStates = [:]
         }
     }
     
@@ -287,6 +291,26 @@ public final class ChatMessageModel: Model, @unchecked Sendable {
     }
 }
 
+public struct DeliveryStates {
+    var document: Document
+    
+    public subscript(username: Username) -> ChatMessageModel.DeliveryState {
+        get {
+            if
+                let currentStateCode = document[username.raw] as? Int,
+                let currentState = ChatMessageModel.DeliveryState(rawValue: currentStateCode)
+            {
+                return currentState
+            } else {
+                return .none
+            }
+        }
+        set {
+            document[username.raw] = newValue.rawValue
+        }
+    }
+}
+
 extension DecryptedModel where M == ChatMessageModel {
     @MainActor  public var sendDate: Date {
         get { props.sendDate }
@@ -296,6 +320,12 @@ extension DecryptedModel where M == ChatMessageModel {
     }
     @MainActor public var deliveryState: ChatMessageModel.DeliveryState {
         get { props.deliveryState }
+    }
+    @MainActor var _deliveryStates: Document {
+        get { props.deliveryStates ?? [:] }
+    }
+    @MainActor var deliveryStates: DeliveryStates {
+        get { DeliveryStates(document: _deliveryStates) }
     }
     @MainActor public var message: SingleCypherMessage {
         get { props.message }
@@ -308,10 +338,15 @@ extension DecryptedModel where M == ChatMessageModel {
     }
     
     @discardableResult
-    @CryptoActor func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
+    @CryptoActor func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState, forUser user: Username) async throws -> MarkMessageResult {
         var state = await self.deliveryState
         let result = state.transition(to: newState)
         try await setProp(at: \.deliveryState, to: state)
+        
+        var allStates = await self.deliveryStates
+        allStates[user].transition(to: newState)
+        try await setProp(at: \.deliveryStates, to: allStates.document)
+        
         return result
     }
 }

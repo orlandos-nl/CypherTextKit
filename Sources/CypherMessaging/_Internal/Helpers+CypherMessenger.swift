@@ -24,7 +24,7 @@ internal extension CypherMessenger {
         }
         
         let oldState = await decryptedMessage.deliveryState
-        let result = try await decryptedMessage.transitionDeliveryState(to: newState)
+        let result = try await decryptedMessage.transitionDeliveryState(to: newState, forUser: user)
         
         do {
             try await self._updateChatMessage(decryptedMessage)
@@ -46,7 +46,7 @@ internal extension CypherMessenger {
         let decryptedMessage = try await self.decrypt(message)
         let oldState = await decryptedMessage.deliveryState
         
-        let result = try await decryptedMessage.transitionDeliveryState(to: newState)
+        let result = try await decryptedMessage.transitionDeliveryState(to: newState, forUser: self.username)
         
         do {
             try await self._updateChatMessage(decryptedMessage)
