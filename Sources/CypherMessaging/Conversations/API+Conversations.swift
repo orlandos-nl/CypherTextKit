@@ -833,4 +833,42 @@ extension AnyConversation {
             pushType: .none
         )
     }
+    
+    @discardableResult
+    @JobQueueActor public func createDeviceLocalMessage(
+        messageType: CypherMessageType,
+        messageSubtype: String? = nil,
+        text: String,
+        metadata: Document = [:]
+    ) async throws -> AnyChatMessage? {
+        let order = try await getNextLocalOrder()
+        let target = await getTarget()
+        guard let message = try await _saveMessage(
+            senderId: messenger.deviceIdentityId,
+            order: order,
+            props: .init(
+                sending: SingleCypherMessage(
+                    messageType: messageType,
+                    messageSubtype: messageSubtype,
+                    text: text,
+                    metadata: metadata,
+                    destructionTimer: nil,
+                    sentDate: Date(),
+                    preferredPushType: PushType.none,
+                    order: order,
+                    target: target
+                ),
+                senderUser: messenger.username,
+                senderDeviceId: messenger.deviceId
+            )
+        ) else {
+            return nil
+        }
+        
+        return AnyChatMessage(
+            target: target,
+            messenger: messenger,
+            raw: message
+        )
+    }
 }
