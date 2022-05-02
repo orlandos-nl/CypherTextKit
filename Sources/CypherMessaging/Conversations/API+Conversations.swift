@@ -184,7 +184,7 @@ extension CypherMessenger {
             metadata: metadataDocument
         )
         
-        let chat = GroupChat( 
+        let chat = GroupChat(
             conversation: try await self.decrypt(conversation),
             messenger: self,
             metadata: metadata
