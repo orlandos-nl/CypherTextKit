@@ -30,8 +30,6 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
     public func onReceiveMessage(
         _ message: ReceivedMessageContext
     ) async throws -> ProcessMessageAction {
-        // TODO: Parse synchronisation messages
-        
         for plugin in plugins {
             if let result = try await plugin.onReceiveMessage(message) {
                 return result
@@ -167,11 +165,21 @@ public struct PluginEventHandler: CypherMessengerEventHandler {
         }
     }
     
-    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {
         for plugin in plugins {
-            try await plugin.onDeviceRegistery(deviceId, messenger: messenger)
+            plugin.onDeviceRegistery(deviceId, messenger: messenger)
         }
-        
-        // TODO: Synchronise state to new device
+    }
+    
+    public func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger) {
+        for plugin in plugins {
+            plugin.onOtherUserDeviceRegistery(username: username, deviceId: deviceId, messenger: messenger)
+        }
+    }
+    
+    public func onCustomConfigChange() {
+        for plugin in plugins {
+            plugin.onCustomConfigChange()
+        }
     }
 }

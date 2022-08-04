@@ -24,7 +24,7 @@ private final class BufferHandler: ChannelInboundHandler {
         
         if let delegate = client.delegate {
             context.eventLoop.executeAsync {
-                _ = try await delegate.p2pConnection(client, receivedMessage: buffer)
+                try await delegate.p2pConnection(client, receivedMessage: buffer)
             }.whenFailure { error in
                 context.fireErrorCaught(error)
             }
@@ -42,10 +42,6 @@ final class IPv6TCPP2PTransportClient: P2PTransportClient {
     init(state: P2PFrameworkState, channel: Channel) {
         self.state = state
         self.channel = channel
-    }
-    
-    public func reconnect() async throws {
-        throw IPv6TCPP2PError.reconnectFailed
     }
     
     public func disconnect() async {

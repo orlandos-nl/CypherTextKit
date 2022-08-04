@@ -59,9 +59,6 @@ public protocol P2PTransportClient: AnyObject {
     /// Obtained on creation through `P2PTransportClientFactory`
     var state: P2PFrameworkState { get }
     
-    /// (Re-)starts the connection(s).
-    func reconnect() async throws
-    
     /// Disconnects any active connections.
     func disconnect() async
     
@@ -69,14 +66,12 @@ public protocol P2PTransportClient: AnyObject {
     func sendMessage(_ buffer: ByteBuffer) async throws
 }
 
-public enum P2PTransportClosureOption {
-    case reconnnectPossible
-}
+public enum P2PTransportClosureOption {}
 
 @available(macOS 10.15, iOS 13, *)
 public protocol P2PTransportClientDelegate: AnyObject {
     func p2pConnection(_ connection: P2PTransportClient, receivedMessage buffer: ByteBuffer) async throws
-    func p2pConnection(_ connection: P2PTransportClient, closedWithOptions: Set<P2PTransportClosureOption>) async throws
+    func p2pConnectionClosed(_ connection: P2PTransportClient) async throws
 }
 
 @available(macOS 10.15, iOS 13, *)

@@ -47,22 +47,24 @@ public struct ProcessMessageAction {
 // TODO: Make this into a concrete type, so more events can be supported
 @available(macOS 10.15, iOS 13, *)
 public protocol CypherMessengerEventHandler {
-    func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws
-    func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws
-    func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction
-    func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction
-    func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document
-    func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document
-    func onMessageChange(_ message: AnyChatMessage)
-    func onCreateContact(_ contact: Contact, messenger: CypherMessenger)
-    func onUpdateContact(_ contact: Contact)
-    func onCreateConversation(_ conversation: AnyConversation)
-    func onUpdateConversation(_ conversation: AnyConversation)
-    func onCreateChatMessage(_ conversation: AnyChatMessage)
-    func onContactIdentityChange(username: Username, messenger: CypherMessenger)
-    func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger)
-    func onP2PClientClose(messenger: CypherMessenger)
-    func onRemoveContact(_ contact: Contact)
-    func onRemoveChatMessage(_ message: AnyChatMessage)
-    func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
+    @MainActor func onRekey(withUser: Username, deviceId: DeviceId, messenger: CypherMessenger) async throws
+    @MainActor func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws
+    @MainActor func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction
+    @MainActor func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction
+    @MainActor func createPrivateChatMetadata(withUser otherUser: Username, messenger: CypherMessenger) async throws -> Document
+    @MainActor func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document
+    @MainActor func onMessageChange(_ message: AnyChatMessage)
+    @MainActor func onCreateContact(_ contact: Contact, messenger: CypherMessenger)
+    @MainActor func onUpdateContact(_ contact: Contact)
+    @MainActor func onCreateConversation(_ conversation: AnyConversation)
+    @MainActor func onUpdateConversation(_ conversation: AnyConversation)
+    @MainActor func onCreateChatMessage(_ conversation: AnyChatMessage)
+    @MainActor func onContactIdentityChange(username: Username, messenger: CypherMessenger)
+    @MainActor func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger)
+    @MainActor func onP2PClientClose(messenger: CypherMessenger)
+    @MainActor func onRemoveContact(_ contact: Contact)
+    @MainActor func onRemoveChatMessage(_ message: AnyChatMessage)
+    @MainActor func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async
+    @MainActor func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger)
+    @MainActor func onCustomConfigChange()
 }

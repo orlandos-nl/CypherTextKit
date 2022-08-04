@@ -2,7 +2,7 @@ import BSON
 import CypherProtocol
 import Foundation
 
-public enum PushType: RawRepresentable, Codable {
+public enum PushType: RawRepresentable, Codable, Sendable {
     case none
     case call
     case message
@@ -50,10 +50,23 @@ public enum CypherMessageType: String, Codable {
 }
 
 @available(macOS 10.15, iOS 13, *)
-public enum TargetConversation {
+public enum TargetConversation: Sendable, Equatable {
     case currentUser
     case otherUser(Username)
     case groupChat(GroupChatId)
+    
+    public static func ==(lhs: TargetConversation, rhs: TargetConversation) -> Bool {
+        switch (lhs, rhs) {
+        case (.currentUser, .currentUser):
+            return true
+        case (.groupChat(let lhs), .groupChat(let rhs)):
+            return lhs == rhs
+        case (.otherUser(let lhs), .otherUser(let rhs)):
+            return lhs == rhs
+        default:
+            return false
+        }
+    }
     
     public func resolve(
         in messenger: CypherMessenger
@@ -76,7 +89,7 @@ public enum TargetConversation {
         }
     }
     
-    public enum Resolved: AnyConversation, Identifiable {
+    public enum Resolved: AnyConversation, Identifiable, Sendable {
         case privateChat(PrivateChat)
         case groupChat(GroupChat)
         case internalChat(InternalConversation)

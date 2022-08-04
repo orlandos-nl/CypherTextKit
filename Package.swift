@@ -17,6 +17,9 @@ let package = Package(
         .library(
             name: "MessagingHelpers",
             targets: ["MessagingHelpers"]),
+        .library(
+            name: "CypherProtocol",
+            targets: ["CypherProtocol"]),
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
@@ -29,8 +32,9 @@ let package = Package(
         .package(url: "https://github.com/orlandos-nl/Dribble.git", from: "0.1.0"),
         .package(url: "https://github.com/vapor/jwt-kit.git", from: "4.0.0"),
         .package(url: "https://github.com/vapor/websocket-kit.git", from: "2.0.0"),
-        .package(url: "https://github.com/OpenKitten/BSON.git", from: "7.0.0"),
+        .package(url: "https://github.com/orlandos-nl/BSON.git", from: "7.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
+        .package(url: "https://github.com/Joannis/TaskQueue.git", from: "1.0.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -41,6 +45,7 @@ let package = Package(
                 .product(name: "Dribble", package: "Dribble"),
                 .target(name: "CypherProtocol"),
                 .product(name: "Logging", package: "swift-log"),
+                .product(name: "TaskQueue", package: "TaskQueue"),
             ]),
         .target(
             name: "MessagingHelpers",
@@ -61,11 +66,19 @@ let package = Package(
             ]),
         .testTarget(
             name: "CypherMessagingTests",
-            dependencies: ["CypherMessaging"]
+            dependencies: [
+                "CypherMessaging",
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
+            ]
         ),
         .testTarget(
             name: "CypherMessagingHelpersTests",
-            dependencies: ["MessagingHelpers"]
+            dependencies: [
+                "MessagingHelpers",
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
+            ]
         ),
     ]
 )

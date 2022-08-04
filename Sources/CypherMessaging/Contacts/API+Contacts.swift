@@ -7,13 +7,14 @@ import NIO
 public struct Contact: Identifiable, Hashable {
     public let messenger: CypherMessenger
     public let model: DecryptedModel<ContactModel>
+    @CacheActor public let cache = Cache()
     
-    public func save() async throws {
+    @MainActor public func save() async throws {
         try await messenger.cachedStore.updateContact(model.encrypted)
         messenger.eventHandler.onUpdateContact(self)
     }
     
-    @CryptoActor public var username: Username {
+    @MainActor public var username: Username {
         model.username
     }
     
@@ -27,28 +28,32 @@ public struct Contact: Identifiable, Hashable {
         id.hash(into: &hasher)
     }
     
-    public func remove() async throws {
+    @MainActor public func remove() async throws {
         try await messenger.cachedStore.removeContact(model.encrypted)
         messenger.eventHandler.onRemoveContact(self)
     }
-    
-    public func refreshDevices() async throws {
+
+    @MainActor public func refreshDevices() async throws {
         try await messenger._refreshDeviceIdentities(for: username)
     }
 }
 
 @available(macOS 10.15, iOS 13, *)
 extension CypherMessenger {
-    @CryptoActor public func listContacts() async throws -> [Contact] {
-        try await self.cachedStore.fetchContacts().asyncMap { contact in
-            Contact(
-                messenger: self,
-                model: try self.decrypt(contact)
+    @MainActor public func listContacts() async throws -> [Contact] {
+        var contacts = [Contact]()
+        for contact in try await self.cachedStore.fetchContacts() {
+            contacts.append(
+                Contact(
+                    messenger: self,
+                    model: try self.decrypt(contact)
+                )
             )
         }
+        return contacts
     }
     
-    @CryptoActor public func getContact(byUsername username: Username) async throws -> Contact? {
+    @MainActor public func getContact(byUsername username: Username) async throws -> Contact? {
         for contact in try await listContacts() {
             if contact.model.username == username {
                 return contact
@@ -58,7 +63,7 @@ extension CypherMessenger {
         return nil
     }
     
-    @CryptoActor public func createContact(byUsername username: Username) async throws -> Contact {
+    @MainActor public func createContact(byUsername username: Username) async throws -> Contact {
         if username == self.username {
             throw CypherSDKError.badInput
         }

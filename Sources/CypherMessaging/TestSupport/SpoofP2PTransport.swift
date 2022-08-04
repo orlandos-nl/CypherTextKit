@@ -19,15 +19,6 @@ public final class SpoofP2PTransportClient: P2PTransportClient {
         self.otherClient = otherClient
     }
     
-    public func reconnect() async throws {
-        if otherClient == nil {
-            self.connected = .disconnected
-            throw SpoofP2PTransportError.disconnected
-        } else {
-            self.connected = .connected
-        }
-    }
-    
     public func disconnect() async {
         if connected == .disconnected || connected == .disconnecting {
             return

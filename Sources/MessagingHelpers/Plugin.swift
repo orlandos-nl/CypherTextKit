@@ -21,7 +21,9 @@ public protocol Plugin {
     func onP2PClientClose(messenger: CypherMessenger)
     func onRemoveContact(_ contact: Contact)
     func onRemoveChatMessage(_ message: AnyChatMessage)
-    func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws
+    func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger)
+    func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger)
+    func onCustomConfigChange()
 }
 
 extension Plugin {
@@ -42,7 +44,9 @@ extension Plugin {
     public func onP2PClientClose(messenger: CypherMessenger) {}
     public func onRemoveContact(_ contact: Contact) {}
     public func onRemoveChatMessage(_ message: AnyChatMessage) {}
-    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {}
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {}
+    public func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger) {}
+    public func onCustomConfigChange() {}
 }
 
 @available(macOS 10.15, iOS 13, *)
@@ -51,12 +55,12 @@ extension Plugin {
 }
 
 extension Contact {
-    @CryptoActor public func modifyMetadata<P: Plugin, C: Codable, Result>(
+    @MainActor public func modifyMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
     ) async throws -> Result {
-        let result = try await model.withMetadata(ofType: type, forPlugin: plugin, run: run)
+        let result = try model.withMetadata(ofType: type, forPlugin: plugin, run: run)
         try await self.save()
         return result
     }
@@ -64,7 +68,7 @@ extension Contact {
 
 @available(macOS 10.15, iOS 13, *)
 extension DecryptedModel where M.SecureProps: MetadataProps {
-    @CryptoActor public func getProp<P: Plugin, C: Codable, Result>(
+    @MainActor public func getProp<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: @Sendable (C) throws -> Result
@@ -74,11 +78,11 @@ extension DecryptedModel where M.SecureProps: MetadataProps {
         return try run(pluginMetadata)
     }
     
-    @CryptoActor public func withMetadata<P: Plugin, C: Codable, Result>(
+    @MainActor public func withMetadata<P: Plugin, C: Codable, Result>(
         ofType type: C.Type,
         forPlugin plugin: P.Type,
         run: (inout C) throws -> Result
-    ) async throws -> Result {
+    ) throws -> Result {
         var metadata = self.props.metadata
         let pluginStorage = metadata[plugin.pluginIdentifier] ?? Document()
         var pluginMetadata = try BSONDecoder().decode(type, fromPrimitive: pluginStorage)

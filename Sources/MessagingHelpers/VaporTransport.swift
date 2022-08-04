@@ -35,6 +35,12 @@ public struct UserDeviceId: Hashable, Codable {
     }
 }
 
+public struct Blob<C: Codable>: Codable {
+    public let _id: String
+    public let creator: Username
+    public var document: C
+}
+
 struct Token: JWTPayload {
     let device: UserDeviceId
     let exp: ExpirationClaim
@@ -58,7 +64,7 @@ public struct UserProfile: Decodable {
 enum MessageType: String, Codable {
     case message = "a"
     case multiRecipientMessage = "b"
-    case readReceipt = "c"
+    case receipt = "c"
     case ack = "d"
 }
 
@@ -80,20 +86,21 @@ struct ChatMultiRecipientMessagePacket: Codable {
     let multiRecipientMessage: MultiRecipientCypherMessage
 }
 
-struct ReadReceiptPacket: Codable {
+struct ReadReceipt: Codable {
     enum State: Int, Codable {
         case received = 0
         case displayed = 1
     }
     
-    let _id: ObjectId
     let messageId: String
     let state: State
-    let sender: UserDeviceId
+    let sender: Username
+    let senderDevice: UserDeviceId
     let recipient: UserDeviceId
+    let receivedAt: Date
 }
 
-let maxBodySize = 500_000
+let maxBodySize = 4_000_000
 
 @available(macOS 10.15, iOS 13, *)
 extension URLSession {
@@ -116,6 +123,7 @@ extension URLSession {
         return try BSONDecoder().decode(type, from: Document(data: data))
     }
     
+    @discardableResult
     func postBSON<E: Encodable>(
         httpHost: String,
         url: String,
@@ -127,6 +135,7 @@ extension URLSession {
         var request = URLRequest(url: URL(string: "\(httpHost)/\(url)")!)
         request.httpMethod = "POST"
         request.addValue("application/bson", forHTTPHeaderField: "Content-Type")
+        request.addValue("application/bson", forHTTPHeaderField: "Accept")
         request.addValue(username.raw, forHTTPHeaderField: "X-API-User")
         request.addValue(deviceId.raw, forHTTPHeaderField: "X-API-Device")
         if let token = token {
@@ -306,7 +315,6 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func disconnect() async {
         do {
-            self.authenticated = .unauthenticated
             self.wantsConnection = false
             return try await (webSocket?.close() ?? eventLoop.makeSucceededVoidFuture()).get()
         } catch {}
@@ -314,7 +322,11 @@ public final class VaporTransport: CypherServerTransportClient {
     
     public func reconnect() async {
         do {
-            if authenticated == .authenticated {
+            if
+                authenticated == .authenticated,
+                let webSocket = webSocket,
+                !webSocket.isClosed
+            {
                 // Already connected
                 return
             }
@@ -333,13 +345,13 @@ public final class VaporTransport: CypherServerTransportClient {
             try await WebSocket.connect(
                 to: "wss://\(host)/websocket",
                 headers: headers,
-                configuration: .init(maxFrameSize: 512_000),
+                configuration: .init(maxFrameSize: maxBodySize),
                 on: eventLoop
             ) { webSocket in
                 self.webSocket = webSocket
                 self.authenticated = .authenticated
                 
-                _ = webSocket.eventLoop.scheduleRepeatedTask(
+                webSocket.eventLoop.scheduleRepeatedTask(
                     initialDelay: .seconds(15),
                     delay: .seconds(15)
                 ) { task in
@@ -360,6 +372,11 @@ public final class VaporTransport: CypherServerTransportClient {
                         let id: ObjectId
                         let type: MessageType
                         let body: Document
+                    }
+                    
+                    struct Receipt: Codable {
+                        let id: ObjectId
+                        let type: MessageType
                     }
                     
                     struct Ack: Codable {
@@ -385,7 +402,8 @@ public final class VaporTransport: CypherServerTransportClient {
                                         message.message,
                                         id: message.messageId,
                                         byUser: message.sender.user,
-                                        deviceId: message.sender.device
+                                        deviceId: message.sender.device,
+                                        createdAt: message.createdAt
                                     )
                                 )
                             case .multiRecipientMessage:
@@ -396,19 +414,18 @@ public final class VaporTransport: CypherServerTransportClient {
                                         message.multiRecipientMessage,
                                         id: message.messageId,
                                         byUser: message.sender.user,
-                                        deviceId: message.sender.device
+                                        deviceId: message.sender.device,
+                                        createdAt: message.createdAt
                                     )
                                 )
-                            case .readReceipt:
-                                let receipt = try BSONDecoder().decode(ReadReceiptPacket.self, from: packet.body)
+                            case .receipt:
+                                let receipt = try BSONDecoder().decode(ReadReceipt.self, from: packet.body)
                                 
                                 switch receipt.state {
                                 case .displayed:
-        //                            delegate.receiveServerEvent(.)
-                                    ()
+                                    try await delegate.receiveServerEvent(.messageDisplayed(by: receipt.sender, deviceId: receipt.senderDevice.device, id: receipt.messageId, receivedAt: receipt.receivedAt))
                                 case .received:
-        //                            delegate.receiveServerEvent(.messageReceived(by: receipt., deviceId: receipt.sender, id: receipt.messageId))
-                                    ()
+                                    try await delegate.receiveServerEvent(.messageReceived(by: receipt.sender, deviceId: receipt.senderDevice.device, id: receipt.messageId, receivedAt: receipt.receivedAt))
                                 }
                             case .ack:
                                 ()
@@ -417,13 +434,14 @@ public final class VaporTransport: CypherServerTransportClient {
                             let ack = try BSONEncoder().encode(Ack(id: packet.id)).makeData()
                             try await webSocket.send(raw: ack, opcode: .binary)
                         } catch {
-                            _ = await transport.disconnect()
+                            await transport.disconnect()
                         }
                     }
                 }
                 
                 webSocket.onClose.whenComplete { [weak self] _ in
                     if let transport = self, transport.wantsConnection == true {
+                        transport.authenticated = .unauthenticated
                         Task.detached {
                             await transport.reconnect()
                         }
@@ -454,7 +472,7 @@ public final class VaporTransport: CypherServerTransportClient {
     }
     
     public func publishKeyBundle(_ data: UserConfig) async throws {
-        _ = try await self.httpClient.postBSON(
+        try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "current-user/config",
             username: self.username,
@@ -465,7 +483,7 @@ public final class VaporTransport: CypherServerTransportClient {
     }
     
     public func registerAPNSToken(_ token: Data) async throws {
-        _ = try await self.httpClient.postBSON(
+        try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "current-device/token",
             username: self.username,
@@ -484,11 +502,43 @@ public final class VaporTransport: CypherServerTransportClient {
     }
     
     public func publishBlob<C>(_ blob: C) async throws -> ReferencedBlob<C> where C : Decodable, C : Encodable {
-        fatalError()
+        let (data, response) = try await httpClient.postBSON(
+            httpHost: httpHost,
+            url: "blobs",
+            username: self.username,
+            deviceId: self.deviceId,
+            token: self.makeToken(),
+            body: blob
+        )
+        
+        if let response = response as? HTTPURLResponse {
+            guard response.statusCode >= 200 && response.statusCode < 300 else {
+                debugLog("Status code \(response.statusCode)")
+                throw VaporTransportError.sendMessageFailed
+            }
+        }
+        
+        let document = Document(data: data)
+        
+        guard document.validate().isValid else {
+            throw VaporTransportError.sendMessageFailed
+        }
+        
+        let blob = try BSONDecoder().decode(Blob<C>.self, from: document)
+        return ReferencedBlob(id: blob._id, blob: blob.document)
     }
     
-    public func readPublishedBlob<C>(byId id: String, as type: C.Type) async throws -> ReferencedBlob<C>? where C : Decodable, C : Encodable {
-        fatalError()
+    public func readPublishedBlob<C: Codable>(byId id: String, as type: C.Type) async throws -> ReferencedBlob<C>? {
+        let blob = try await httpClient.getBSON(
+            httpHost: httpHost,
+            url: "blobs/\(id)",
+            username: username,
+            deviceId: deviceId,
+            token: self.makeToken(),
+            as: Blob<C>.self
+        )
+        
+        return ReferencedBlob(id: blob._id, blob: blob.document)
     }
     
     public func sendMessage(
@@ -498,7 +548,7 @@ public final class VaporTransport: CypherServerTransportClient {
         pushType: PushType,
         messageId: String
     ) async throws {
-        _ = try await self.httpClient.postBSON(
+        try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "users/\(username.raw)/devices/\(deviceId.raw)/send-message",
             username: self.username,
@@ -517,7 +567,7 @@ public final class VaporTransport: CypherServerTransportClient {
         pushType: PushType,
         messageId: String
     ) async throws {
-        _ = try await self.httpClient.postBSON(
+        let (_, response) = try await self.httpClient.postBSON(
             httpHost: httpHost,
             url: "actions/send-message",
             username: self.username,
@@ -529,6 +579,13 @@ public final class VaporTransport: CypherServerTransportClient {
                 messageId: messageId
             )
         )
+        
+        if let response = response as? HTTPURLResponse {
+            guard response.statusCode >= 200 && response.statusCode < 300 else {
+                debugLog("Status code \(response.statusCode)")
+                throw VaporTransportError.sendMessageFailed
+            }
+        }
     }
 }
 

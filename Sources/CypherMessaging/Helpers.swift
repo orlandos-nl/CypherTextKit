@@ -1,5 +1,4 @@
 import NIO
-import _NIOConcurrency
 
 @available(macOS 10.15, iOS 13, *)
 extension EventLoop {

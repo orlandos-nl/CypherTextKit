@@ -69,7 +69,7 @@ final class UserProfilePluginTests: XCTestCase {
         SpoofTransportClient.resetServer()
     }
     
-    @CryptoActor func testChangeStatus() async throws {
+    @MainActor func testChangeStatus() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),

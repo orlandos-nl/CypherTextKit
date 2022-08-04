@@ -57,7 +57,7 @@ final class FriendshipPluginTests: XCTestCase {
         SpoofTransportClient.resetServer()
     }
     
-    @CryptoActor func testIgnoreUndecided() async throws {
+    @MainActor func testIgnoreUndecided() async throws {
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false
@@ -340,7 +340,7 @@ final class FriendshipPluginTests: XCTestCase {
         await XCTAssertAsyncEqual(try await m1GroupChat.allMessages(sortedBy: .descending).count, 1)
     }
     
-    @CryptoActor func testBlockingCanPreventOtherPlugins() async throws {
+    @MainActor func testBlockingCanPreventOtherPlugins() async throws {
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false

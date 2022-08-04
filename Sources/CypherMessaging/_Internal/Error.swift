@@ -19,4 +19,6 @@ enum CypherSDKError: Error {
     case notGroupMember, notGroupModerator
     case duplicateChatMessage
     case invalidSignature
+    case cannotRegisterDeviceConfig
+    case cannotImportExistingContact
 }

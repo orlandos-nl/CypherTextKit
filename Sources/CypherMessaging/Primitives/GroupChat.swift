@@ -1,9 +1,9 @@
-import BSON
+@preconcurrency import BSON
 import CypherProtocol
-import Foundation
+@preconcurrency import Foundation
 
 /// A string wrapper so that Strings are handled in a case-insensitive manner and to prevent mistakes like provding the wring String in a function
-public struct GroupChatId: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable, ExpressibleByStringLiteral {
+public struct GroupChatId: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable, ExpressibleByStringLiteral, Sendable {
     public let raw: String
     
     public static func ==(lhs: GroupChatId, rhs: GroupChatId) -> Bool {
@@ -38,7 +38,7 @@ public struct GroupChatId: CustomStringConvertible, Identifiable, Codable, Hasha
     public var id: String { raw }
 }
 
-public struct ReferencedBlob<T: Codable>: Codable {
+public struct ReferencedBlob<T: Codable & Sendable>: Codable, Sendable {
     public let id: String
     public var blob: T
     
@@ -48,7 +48,7 @@ public struct ReferencedBlob<T: Codable>: Codable {
     }
 }
 
-public struct GroupChatConfig: Codable {
+public struct GroupChatConfig: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case members = "a"
         case createdAt = "b"

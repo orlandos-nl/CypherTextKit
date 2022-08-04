@@ -3,7 +3,7 @@ import Foundation
 import NIO
 
 public enum SpoofTransportClientSettings {
-    public enum PacketType {
+    public enum PacketType: Sendable {
         case readReceipt(remoteId: String, otherUser: Username)
         case receiveReceipt(remoteId: String, otherUser: Username)
         case deviceRegistery
@@ -132,6 +132,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     private let server: SpoofServer
     public private(set) var authenticated = AuthenticationState.unauthenticated
     public let supportsMultiRecipientMessages = true
+    public let supportsDelayedRegistration = true
     public var isConnected: Bool { !SpoofTransportClientSettings.isOffline }
     public weak var delegate: CypherTransportClientDelegate?
     
@@ -159,7 +160,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
     }
     
     public func receiveServerEvent(_ event: CypherServerEvent) async throws {
-        _ = try await delegate?.receiveServerEvent(event)
+        try await delegate?.receiveServerEvent(event)
     }
     
     public func reconnect() async throws {
@@ -311,7 +312,8 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
                 message,
                 id: messageId,
                 byUser: self.username,
-                deviceId: deviceId
+                deviceId: deviceId,
+                createdAt: Date()
             ),
             to: otherUser,
             deviceId: otherUserDeviceId

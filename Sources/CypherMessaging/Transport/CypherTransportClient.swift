@@ -48,6 +48,9 @@ public protocol CypherServerTransportClient: AnyObject {
     /// Supporting MultiRecipient Messages allows the app to expend less data uploading files to multiple recipients.
     var supportsMultiRecipientMessages: Bool { get }
     
+    // TODO: Implement support
+    var supportsDelayedRegistration: Bool { get }
+    
     /// (Re-)starts the connection(s).
     func reconnect() async throws
     
@@ -115,6 +118,10 @@ public protocol CypherServerTransportClient: AnyObject {
     func sendMultiRecipientMessage(_ message: MultiRecipientCypherMessage, pushType: PushType, messageId: String) async throws
 }
 
+extension CypherServerTransportClient {
+    public var supportsDelayedRegistration: Bool { false }
+}
+
 public protocol ConnectableCypherTransportClient: CypherServerTransportClient {
     static func login(_ request: TransportCreationRequest) async throws -> Self
 }
@@ -125,29 +132,29 @@ public protocol CypherTransportClientDelegate: AnyObject {
 
 public struct CypherServerEvent {
     enum _CypherServerEvent {
-        case multiRecipientMessageSent(MultiRecipientCypherMessage, id: String, byUser: Username, deviceId: DeviceId)
-        case messageSent(RatchetedCypherMessage, id: String, byUser: Username, deviceId: DeviceId)
-        case messageDisplayed(by: Username, deviceId: DeviceId, id: String)
-        case messageReceived(by: Username, deviceId: DeviceId, id: String)
+        case multiRecipientMessageSent(MultiRecipientCypherMessage, id: String, byUser: Username, deviceId: DeviceId, createdAt: Date?)
+        case messageSent(RatchetedCypherMessage, id: String, byUser: Username, deviceId: DeviceId, createdAt: Date?)
+        case messageDisplayed(by: Username, deviceId: DeviceId, id: String, receivedAt: Date)
+        case messageReceived(by: Username, deviceId: DeviceId, id: String, receivedAt: Date)
         case requestDeviceRegistery(UserDeviceConfig)
     }
     
     internal let raw: _CypherServerEvent
     
-    public static func multiRecipientMessageSent(_ message: MultiRecipientCypherMessage, id: String, byUser user: Username, deviceId: DeviceId) -> CypherServerEvent {
-        CypherServerEvent(raw: .multiRecipientMessageSent(message, id: id, byUser: user, deviceId: deviceId))
+    public static func multiRecipientMessageSent(_ message: MultiRecipientCypherMessage, id: String, byUser user: Username, deviceId: DeviceId, createdAt: Date? = Date()) -> CypherServerEvent {
+        CypherServerEvent(raw: .multiRecipientMessageSent(message, id: id, byUser: user, deviceId: deviceId, createdAt: createdAt))
     }
     
-    public static func messageSent(_ message: RatchetedCypherMessage, id: String, byUser user: Username, deviceId: DeviceId) -> CypherServerEvent {
-        CypherServerEvent(raw: .messageSent(message, id: id, byUser: user, deviceId: deviceId))
+    public static func messageSent(_ message: RatchetedCypherMessage, id: String, byUser user: Username, deviceId: DeviceId, createdAt: Date? = Date()) -> CypherServerEvent {
+        CypherServerEvent(raw: .messageSent(message, id: id, byUser: user, deviceId: deviceId, createdAt: createdAt))
     }
     
-    public static func messageDisplayed(by user: Username, deviceId: DeviceId, id: String) -> CypherServerEvent {
-        CypherServerEvent(raw: .messageDisplayed(by: user, deviceId: deviceId, id: id))
+    public static func messageDisplayed(by user: Username, deviceId: DeviceId, id: String, receivedAt: Date = Date()) -> CypherServerEvent {
+        CypherServerEvent(raw: .messageDisplayed(by: user, deviceId: deviceId, id: id, receivedAt: receivedAt))
     }
     
-    public static func messageReceived(by user: Username, deviceId: DeviceId, id: String) -> CypherServerEvent {
-        CypherServerEvent(raw: .messageReceived(by: user, deviceId: deviceId, id: id))
+    public static func messageReceived(by user: Username, deviceId: DeviceId, id: String, receivedAt: Date = Date()) -> CypherServerEvent {
+        CypherServerEvent(raw: .messageReceived(by: user, deviceId: deviceId, id: id, receivedAt: receivedAt))
     }
     
     public static func requestDeviceRegistery(_ config: UserDeviceConfig) -> CypherServerEvent {
