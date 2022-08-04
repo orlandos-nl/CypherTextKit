@@ -195,13 +195,15 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
                     return self.eventLoop.makeFailedFuture(IPv6TCPP2PError.socketCreationFailed)
                 }
                 
+                
                 return channel.eventLoop.executeAsync {
-                    try await handle.sendMessage("", metadata: [
-                        "ip": address.ipAddress,
-                        "port": port
-                    ])
+//                     try await handle.sendMessage("", metadata: [
+//                        "ip": address.ipAddress,
+//                        "port": port
+//                    ])
                 }
-            }.whenFailure { error in
+            }
+            .whenFailure { error in
                 debugLog("Failed to host IPv6 Server", error)
                 promise.fail(error)
             }
