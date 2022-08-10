@@ -312,7 +312,7 @@ public struct DeliveryStates {
 }
 
 extension DecryptedModel where M == ChatMessageModel {
-    @MainActor  public var sendDate: Date {
+    @MainActor public var sendDate: Date {
         get { props.sendDate }
     }
     @MainActor public var receiveDate: Date {
@@ -372,11 +372,11 @@ public final class JobModel: Model, @unchecked Sendable {
         var attempts: Int
         let isBackgroundTask: Bool
         
-        init<T: StoredTask>(task: T) throws {
+        init<T: StoredTask>(task: T, scheduledAt: Date = Date()) throws {
             self.taskKey = task.key.rawValue
             self.isBackgroundTask = task.isBackgroundTask
             self.task = try BSONEncoder().encode(task)
-            self.scheduledAt = Date()
+            self.scheduledAt = scheduledAt
             self.attempts = 0
         }
     }

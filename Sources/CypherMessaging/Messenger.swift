@@ -661,8 +661,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     
     /// Mainly used by test suties, to ensure all outstanding work is finished.
     /// This is handy when you're simulating communication, but want to delay assertions until this CypherMessenger has processed all outstanding work.
-    public func processJobQueue() async throws -> SynchronisationResult {
-        try await jobQueue.awaitDoneProcessing()
+    public func processJobQueue(untilEmpty: Bool = false) async throws -> SynchronisationResult {
+        try await jobQueue.awaitDoneProcessing(untilEmpty: untilEmpty)
     }
     
     public func resumeJobQueue() async {
@@ -952,7 +952,9 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         
         let message = try message.readAndValidate(usingIdentity: deviceIdentity.identity)
         var ratchet = DoubleRatchetHKDF(state: ratchetState, configuration: doubleRatchetConfig)
-        let data = try ratchet.ratchetDecrypt(message)
+        guard case .success(let data) = try ratchet.ratchetDecrypt(message) else {
+            return nil
+        }
         
         // Don't save the ratchet state
         let decryptedMessage = try BSONDecoder().decode(CypherMessage.self, from: Document(data: data))
@@ -986,7 +988,9 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         
         let keyMessage = try foundKey.message.readAndValidate(usingIdentity: deviceIdentity.identity)
         var ratchet = DoubleRatchetHKDF(state: ratchetState, configuration: doubleRatchetConfig)
-        let keyData = try ratchet.ratchetDecrypt(keyMessage)
+        guard case .success(let keyData) = try ratchet.ratchetDecrypt(keyMessage) else {
+            return nil
+        }
         
         guard keyData.count == 32 else {
             throw CypherSDKError.invalidMultiRecipientKey
@@ -1071,7 +1075,7 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
     func _writeWithRatchetEngine<T>(
         ofUser username: Username,
         deviceId: DeviceId,
-        run: @escaping (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
+        run: @Sendable (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
     ) async throws -> T {
         let device = try await self._fetchDeviceIdentity(for: username, deviceId: deviceId)
         return try await device._writeWithRatchetEngine(messenger: self, run: run)
@@ -1313,7 +1317,7 @@ extension _DecryptedModel where M == DeviceIdentityModel {
     @CryptoActor func _readWithRatchetEngine(
         message: RatchetedCypherMessage,
         messenger: CypherMessenger
-    ) async throws -> Data {
+    ) async throws -> Data? {
         @CryptoActor func rekey() async throws {
             debugLog("Rekeying - removing ratchet state")
             try self.updateDoubleRatchetState(to: nil)
@@ -1358,7 +1362,12 @@ extension _DecryptedModel where M == DeviceIdentityModel {
             
             do {
                 let ratchetMessage = try message.readAndValidate(usingIdentity: self.identity)
-                data = try ratchet.ratchetDecrypt(ratchetMessage)
+                switch try ratchet.ratchetDecrypt(ratchetMessage) {
+                case .success(let d):
+                    data = d
+                case .keyExpiry:
+                    return nil
+                }
             } catch {
                 try await rekey()
                 debugLog("Failed to read message", error)
@@ -1399,7 +1408,7 @@ extension _DecryptedModel where M == DeviceIdentityModel {
     
     @CryptoActor func _writeWithRatchetEngine<T>(
         messenger: CypherMessenger,
-        run: @escaping (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
+        run: @Sendable @CryptoActor (inout DoubleRatchetHKDF<SHA512>, RekeyState) async throws -> T
     ) async throws -> T {
         var ratchet: DoubleRatchetHKDF<SHA512>
         let rekey: Bool

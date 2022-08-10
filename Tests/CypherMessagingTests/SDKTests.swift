@@ -10,7 +10,21 @@ import CypherProtocol
 struct Synchronisation {
     let apps: [CypherMessenger]
     
-    func synchronise() async throws {
+    func flush(untilEmpty: Bool = false) async throws {
+        var hasWork = true
+        
+        repeat {
+            hasWork = false
+            
+            for app in apps {
+                if try await app.processJobQueue(untilEmpty: untilEmpty) == .synchronised {
+                    hasWork = true
+                }
+            }
+        } while hasWork
+    }
+    
+    func synchronise(untilEmpty: Bool = false) async throws {
         var hasWork = true
         
         repeat {
@@ -20,7 +34,7 @@ struct Synchronisation {
             }
             
             for app in apps {
-                if try await app.processJobQueue() == .synchronised {
+                if try await app.processJobQueue(untilEmpty: untilEmpty) == .synchronised {
                     hasWork = true
                 }
             }
@@ -95,10 +109,385 @@ final class CypherSDKTests: XCTestCase {
     }
     
     @CypherTextKitActor func testOfflineSupport() async throws {
+        let m0 = try await CypherMessenger.registerMessenger(
+            username: "m0",
+            authenticationMethod: .password("m0"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let m1 = try await CypherMessenger.registerMessenger(
+            username: "m1",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
+        try await m1.transport.disconnect()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        try await sync.flush()
+        if (try? await m1.getPrivateChat(with: "m0")) != nil {
+            XCTFail()
+        }
+        
+        try await m1.transport.reconnect()
+        try await sync.synchronise(untilEmpty: true)
+        guard let m1Chat = try await m1.getPrivateChat(with: "m0") else {
+            return XCTFail()
+        }
+        
+        try await sync.synchronise()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 2)
+        
+        try await m1.transport.disconnect()
+        
+        for i in 0..<200 {
+            _ = try await m0Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        try await sync.flush()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 202)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 2)
+        
+        try await m0.transport.disconnect()
+        try await m1.transport.reconnect()
+        try await sync.flush()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 202)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 202)
+        
+        for i in 0..<150 {
+            _ = try await m1Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 202)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 352)
+        
+        try await m0.transport.reconnect()
+        try await sync.synchronise()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 352)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 352)
+    }
+    
+    @CypherTextKitActor func testParallelOfflineSupport() async throws {
+        let m0 = try await CypherMessenger.registerMessenger(
+            username: "m0",
+            authenticationMethod: .password("m0"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let m1 = try await CypherMessenger.registerMessenger(
+            username: "m1",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
+        try await m1.transport.disconnect()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        try await sync.flush()
+        if (try? await m1.getPrivateChat(with: "m0")) != nil {
+            XCTFail()
+        }
+        
+        try await m1.transport.reconnect()
+        try await sync.synchronise(untilEmpty: true)
+        guard let m1Chat = try await m1.getPrivateChat(with: "m0") else {
+            return XCTFail()
+        }
+        
+        try await sync.synchronise()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 2)
+        
+        try await m1.transport.disconnect()
+        
+        for i in 0..<200 {
+            _ = try await m0Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        for i in 0..<150 {
+            _ = try await m1Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        while try await m0.processJobQueue(untilEmpty: true) == .synchronised {}
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 202)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 152)
+        
+        try await m0.transport.disconnect()
+        try await m1.transport.reconnect()
+        while try await m1.processJobQueue(untilEmpty: true) == .synchronised {}
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 202)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 352)
+        
+        try await m0.transport.reconnect()
+        try await sync.synchronise()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 352)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 352)
+    }
+    
+    @CypherTextKitActor func testParallelHalfBackloggedOfflineSupport() async throws {
+        let m0 = try await CypherMessenger.registerMessenger(
+            username: "m0",
+            authenticationMethod: .password("m0"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let m1 = try await CypherMessenger.registerMessenger(
+            username: "m1",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
+        try await m1.transport.disconnect()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        try await sync.flush()
+        if (try? await m1.getPrivateChat(with: "m0")) != nil {
+            XCTFail()
+        }
+        
+        try await m1.transport.reconnect()
+        try await sync.synchronise(untilEmpty: true)
+        guard let m1Chat = try await m1.getPrivateChat(with: "m0") else {
+            return XCTFail()
+        }
+        
+        try await sync.synchronise()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 2)
+        
+        try await m1.transport.disconnect()
+        
+        for i in 0..<200 {
+            _ = try await m0Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        for i in 0..<150 {
+            _ = try await m1Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        while try await m0.processJobQueue(untilEmpty: true) == .synchronised {}
+        let poppedBacklog = SpoofTransportClientSettings.removeBacklog()
+        
+        for i in 0..<200 {
+            _ = try await m0Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        while try await m0.processJobQueue(untilEmpty: true) == .synchronised {}
+        SpoofTransportClientSettings.addBacklog(poppedBacklog)
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 402)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 152)
+        
+        try await m0.transport.disconnect()
+        try await m1.transport.reconnect()
+        while try await m1.processJobQueue(untilEmpty: true) == .synchronised {}
+        
+        try await m0.transport.reconnect()
+        try await sync.synchronise()
+        // Eventually consistent chats
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 552)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 552)
+    }
+    
+    @CypherTextKitActor func testParallelHalfBackloggedOfflineSupport2() async throws {
+        let m0 = try await CypherMessenger.registerMessenger(
+            username: "m0",
+            authenticationMethod: .password("m0"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let m1 = try await CypherMessenger.registerMessenger(
+            username: "m1",
+            authenticationMethod: .password("m1"),
+            appPassword: "",
+            usingTransport: SpoofTransportClient.self,
+            database: MemoryCypherMessengerStore(),
+            eventHandler: SpoofCypherEventHandler()
+        )
+        
+        let sync = Synchronisation(apps: [m0, m1])
+        try await sync.synchronise()
+        
+        try await m1.transport.disconnect()
+        let m0Chat = try await m0.createPrivateChat(with: "m1")
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        _ = try await m0Chat.sendRawMessage(
+            type: .text,
+            text: "Hello",
+            preferredPushType: .none
+        )
+        
+        try await sync.flush()
+        if (try? await m1.getPrivateChat(with: "m0")) != nil {
+            XCTFail()
+        }
+        
+        try await m1.transport.reconnect()
+        try await sync.synchronise(untilEmpty: true)
+        guard let m1Chat = try await m1.getPrivateChat(with: "m0") else {
+            return XCTFail()
+        }
+        
+        try await sync.synchronise()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 2)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 2)
+        
+        try await m1.transport.disconnect()
+        
+        for i in 0..<200 {
+            _ = try await m0Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        for i in 0..<150 {
+            _ = try await m1Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        while try await m0.processJobQueue(untilEmpty: true) == .synchronised {}
+        let poppedBacklog = SpoofTransportClientSettings.removeBacklog()
+        
+        for i in 0..<200 {
+            _ = try await m0Chat.sendRawMessage(
+                type: .text,
+                text: "Hello \(i)",
+                preferredPushType: .none
+            )
+        }
+        
+        while try await m0.processJobQueue(untilEmpty: true) == .synchronised {}
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 402)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 152)
+        
+        try await m0.transport.disconnect()
+        try await m1.transport.reconnect()
+        while try await m1.processJobQueue(untilEmpty: true) == .synchronised {}
+        
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 402)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 352)
+        
+        SpoofTransportClientSettings.addBacklog(poppedBacklog)
+        
+        try await m0.transport.reconnect()
+        try await sync.synchronise()
+        await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 552)
+        await XCTAssertAsyncEqual(try await m1Chat.allMessages(sortedBy: .descending).count, 552)
+    }
+    
+    @CypherTextKitActor func testMeshSupport() async throws {
+        defer { SpoofP2PTransportFactory.clearMesh() }
+        
         SpoofTransportClientSettings.isOffline = true
         defer { SpoofTransportClientSettings.isOffline = false }
-        
-        defer { SpoofP2PTransportFactory.clearMesh() }
         
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
@@ -172,7 +561,9 @@ final class CypherSDKTests: XCTestCase {
         
         try await sync.synchronise()
         
-        let m2Chat = try await m2.getPrivateChat(with: "m0")!
+        guard let m2Chat = try await m2.getPrivateChat(with: "m0") else {
+            return XCTFail()
+        }
         
         await XCTAssertAsyncEqual(try await m0Chat.allMessages(sortedBy: .descending).count, 1)
         await XCTAssertAsyncEqual(try await m2Chat.allMessages(sortedBy: .descending).count, 1)

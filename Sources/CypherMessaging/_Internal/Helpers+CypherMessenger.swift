@@ -369,7 +369,16 @@ internal extension CypherMessenger {
         
         let message: CypherMessage
         do {
-            let data = try await deviceIdentity._readWithRatchetEngine(message: inbound, messenger: self)
+            guard let data = try await deviceIdentity._readWithRatchetEngine(
+                message: inbound,
+                messenger: self
+            ) else {
+                return try await self.requestResendMessage(
+                    messageId: messageId,
+                    sender: sender,
+                    senderDevice: senderDevice
+                )
+            }
             
             if let multiRecipientContainer = multiRecipientContainer {
                 guard data.count == 32 else {
@@ -684,14 +693,18 @@ internal extension CypherMessenger {
                     return
                 }
                 
-                guard sender.username == recipient || sender.username == self.username else {
-                    debugLog("\(sender.username) requested a message from an unrelated chat")
-                    return
-                }
-                
                 // Check if this message was targetted at that useer
                 guard let privateChat = try await getPrivateChat(with: recipient) else {
                     debugLog("\(sender.username) requested a message from an unknown private chat")
+                    return
+                }
+                
+                let conversationPartner = await privateChat.conversationPartner
+                guard
+                    sender.username == conversationPartner // They requested our message
+                        || sender.username == self.username // We requested our own message
+                else {
+                    debugLog("\(sender.username) requested a message from an unrelated chat")
                     return
                 }
                 

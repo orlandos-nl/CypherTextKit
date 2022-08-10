@@ -499,7 +499,7 @@ enum TaskHelpers {
             let encodedMessage = try BSONEncoder().encode(task.message).makeData()
             let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
 
-            let encryptedMessage = try await messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
+            let encryptedMessage = try messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
             if messenger.isOnline {
                 try await messenger.transport.sendMessage(
                     encryptedMessage,

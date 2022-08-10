@@ -16,6 +16,12 @@ public enum SpoofTransportClientSettings {
     
     public static var isOffline = false
     public static var shouldDropPacket: @Sendable @CryptoActor (Username, PacketType) async throws -> () = { _, _  in }
+    public static func removeBacklog() -> [DeviceId: [CypherServerEvent]] {
+        SpoofServer.local.removeBacklog()
+    }
+    public static func addBacklog(_ backlog: [DeviceId: [CypherServerEvent]]) {
+        SpoofServer.local.addBacklog(backlog)
+    }
 }
 
 fileprivate final class SpoofServer {
@@ -45,6 +51,22 @@ fileprivate final class SpoofServer {
         publicKeys = [:]
         groupChats = [:]
         publishedBlobs = [:]
+    }
+    
+    func removeBacklog() -> [DeviceId: [CypherServerEvent]] {
+        defer { backlog = [:] }
+        return backlog
+    }
+    
+    func addBacklog(_ backlog: [DeviceId: [CypherServerEvent]]) {
+        for (device, log) in backlog {
+            if var existing = self.backlog[device] {
+                existing.append(contentsOf: log)
+                self.backlog[device] = existing
+            } else {
+                self.backlog[device] = log
+            }
+        }
     }
     
     fileprivate func login(username: Username, deviceId: DeviceId) async throws -> SpoofTransportClient {
@@ -170,6 +192,7 @@ public final class SpoofTransportClient: ConnectableCypherTransportClient {
         
         server.connectUser(self)
         authenticated = .authenticated
+        try await server.requestBacklog(username: username, deviceId: deviceId, into: self)
     }
     
     public func disconnect() async throws {

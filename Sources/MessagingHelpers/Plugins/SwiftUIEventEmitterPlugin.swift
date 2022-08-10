@@ -21,7 +21,7 @@ public final class SwiftUIEventEmitter: ObservableObject {
     
     @Published public private(set) var conversations = [TargetConversation.Resolved]()
     @Published public fileprivate(set) var contacts = [Contact]()
-    let sortChats: @Sendable (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
+    let sortChats: @MainActor @Sendable (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
     
     public init(sortChats: @escaping @Sendable @MainActor (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
         self.sortChats = sortChats

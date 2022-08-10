@@ -1,4 +1,4 @@
-// swift-tools-version:5.5
+// swift-tools-version:5.7
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "CypherTextKit",
     platforms: [
-        .macOS(.v12),
-        .iOS(.v15),
+        .macOS(.v13),
+        .iOS(.v16),
     ],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
@@ -27,6 +27,7 @@ let package = Package(
 //        .package(name: "swift-nio", path: "/Users/joannisorlandos/git/joannis/swift-nio"),
 //        .package(name: "swift-nio-ssl", path: "/Users/joannisorlandos/git/joannis/swift-nio-ssl"),
 //        .package(name: "Dribble", path: "/Users/joannisorlandos/git/orlandos-nl/Dribble"),
+        .package(url: "https://github.com/apple/swift-distributed-actors.git", from: "1.0.0-beta.1.1"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.0.0"),
         .package(url: "https://github.com/orlandos-nl/Dribble.git", from: "0.1.0"),
@@ -46,6 +47,7 @@ let package = Package(
                 .target(name: "CypherProtocol"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "TaskQueue", package: "TaskQueue"),
+//                .product(name: "DistributedActors", package: "swifIt-distributed-actors")
             ]),
         .target(
             name: "MessagingHelpers",

@@ -29,7 +29,7 @@ final class JobQueue {
     
     @JobQueueActor
     func loadJobs() async throws {
-        self.jobs = try await database.readJobs().asyncMap { job -> (Date, _DecryptedModel<JobModel>) in
+        self.jobs = try await database.readJobs().map { job -> (Date, _DecryptedModel<JobModel>) in
             let job = try messenger!._cachelessDecrypt(job)
             return (job.scheduledAt, job)
         }.sorted { lhs, rhs in
@@ -128,8 +128,12 @@ final class JobQueue {
     @JobQueueActor fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
     
     @JobQueueActor
-    func awaitDoneProcessing() async throws -> SynchronisationResult {
-        if hasOutstandingTasks, let messenger = messenger {
+    func awaitDoneProcessing(untilEmpty: Bool) async throws -> SynchronisationResult {
+        if hasOutstandingTasks, !jobs.isEmpty, let messenger = messenger {
+            if !untilEmpty, nextJob() == nil {
+                return .skipped
+            }
+            
             let promise = messenger.eventLoop.makePromise(of: Void.self)
             self.isDoneNotifications.append(promise)
             startRunningTasks()
@@ -142,13 +146,11 @@ final class JobQueue {
     
     @JobQueueActor
     func markAsDone() {
-//        if !hasOutstandingTasks && !isDoneNotifications.isEmpty {
         for notification in isDoneNotifications {
             notification.succeed(())
         }
         
         isDoneNotifications = []
-//        }
     }
     
     @JobQueueActor
@@ -297,18 +299,18 @@ final class JobQueue {
         case success, delayed, failed(haltExecution: Bool)
         case waitingForDelays
     }
-
+    
     @JobQueueActor
-    private func runNextJob() async throws -> TaskResult {
+    private func nextJob() -> _DecryptedModel<JobModel>? {
         debugLog("Available jobs", jobs.count)
         var index = 0
         let initialJob = jobs[0]
-
+        
         findOtherJob: if (initialJob.props.isBackgroundTask && jobs.count > 1) || initialJob.delayedUntil != nil {
             if let delayedUntil = initialJob.delayedUntil, delayedUntil <= Date() {
                 break findOtherJob
             }
-        
+            
             findBetterTask: for newIndex in 1..<jobs.count {
                 let newJob = jobs[newIndex]
                 if !newJob.props.isBackgroundTask {
@@ -321,10 +323,19 @@ final class JobQueue {
                 }
             }
         }
-
+        
         let job = jobs[index]
         
         if let delayedUntil = job.delayedUntil, delayedUntil > Date() {
+            return nil
+        } else {
+            return job
+        }
+    }
+
+    @JobQueueActor
+    private func runNextJob() async throws -> TaskResult {
+        guard let job = nextJob() else {
             return .waitingForDelays
         }
 
