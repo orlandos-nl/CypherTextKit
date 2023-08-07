@@ -1,4 +1,4 @@
-//#if canImport(SwiftUI) && canImport(Combine)
+#if canImport(SwiftUI) && canImport(Combine) && (os(macOS) || os(iOS))
 import SwiftUI
 import CypherMessaging
 import Combine
@@ -11,6 +11,8 @@ public final class SwiftUIEventEmitter: ObservableObject {
     public let chatMessageRemoved = PassthroughSubject<AnyChatMessage, Never>()
     public let conversationChanged = PassthroughSubject<TargetConversation.Resolved, Never>()
     public let contactChanged = PassthroughSubject<Contact, Never>()
+    public let userDevicesChanged = PassthroughSubject<Void, Never>()
+    public let customConfigChanged = PassthroughSubject<Void, Never>()
     
     public let p2pClientConnected = PassthroughSubject<P2PClient, Never>()
     
@@ -19,16 +21,25 @@ public final class SwiftUIEventEmitter: ObservableObject {
     
     @Published public private(set) var conversations = [TargetConversation.Resolved]()
     @Published public fileprivate(set) var contacts = [Contact]()
-    let sortChats: (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
+    let sortChats: @MainActor @Sendable (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool
     
-    public init(sortChats: @escaping (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
+    public init(sortChats: @escaping @Sendable @MainActor (TargetConversation.Resolved, TargetConversation.Resolved) -> Bool) {
         self.sortChats = sortChats
     }
     
-    public func boot(for messenger: CypherMessenger) async {
+    @MainActor public func boot(for messenger: CypherMessenger) async {
         do {
             self.conversations = try await messenger.listConversations(includingInternalConversation: true, increasingOrder: sortChats)
             self.contacts = try await messenger.listContacts()
+            
+            Task {
+                while !messenger.isOnline {
+                    try await Task.sleep(nanoseconds: NSEC_PER_SEC)
+                }
+                
+                try await Task.sleep(nanoseconds: NSEC_PER_SEC)
+                await messenger.resumeJobQueue()
+            }
         } catch {}
     }
 }
@@ -51,62 +62,58 @@ public struct SwiftUIEventEmitterPlugin: Plugin {
         }
     }
     
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) async throws {
+        DispatchQueue.main.async {
+            emitter.userDevicesChanged.send()
+        }
+    }
+    
     public func onMessageChange(_ message: AnyChatMessage) {
         DispatchQueue.main.async {
             emitter.chatMessageChanged.send(message)
         }
     }
     
-    public func onConversationChange(_ conversation: AnyConversation) {
+    public func onConversationChange(_ viewModel: AnyConversation) {
         Task.detached {
-            let conversation = await conversation.resolveTarget()
+            let viewModel = await viewModel.resolveTarget()
             DispatchQueue.main.async {
-                emitter.conversationChanged.send(conversation)
+                emitter.conversationChanged.send(viewModel)
             }
         }
     }
     
     public func onContactChange(_ contact: Contact) {
-        DispatchQueue.main.async {
-            emitter.contactChanged.send(contact)
-        }
+        emitter.contactChanged.send(contact)
     }
     
     public func onCreateContact(_ contact: Contact, messenger: CypherMessenger) {
-        DispatchQueue.main.async {
-            emitter.contacts.append(contact)
-            emitter.contactAdded.send(contact)
-        }
+        emitter.contacts.append(contact)
+        emitter.contactAdded.send(contact)
     }
     
-    public func onCreateConversation(_ conversation: AnyConversation) {
-        DispatchQueue.main.async {
-            emitter.conversationAdded.send(conversation)
-        }
+    public func onCreateConversation(_ viewModel: AnyConversation) {
+        emitter.conversationAdded.send(viewModel)
     }
     
     public func onCreateChatMessage(_ chatMessage: AnyChatMessage) {
-        DispatchQueue.main.async {
-            self.emitter.savedChatMessages.send(chatMessage)
-        }
+        self.emitter.savedChatMessages.send(chatMessage)
     }
     
     public func onRemoveContact(_ contact: Contact) {
-        DispatchQueue.main.async {
-            self.emitter.contacts.removeAll { $0.id == contact.id }
-        }
+        self.emitter.contacts.removeAll { $0.id == contact.id }
     }
     
     public func onRemoveChatMessage(_ message: AnyChatMessage) {
-        DispatchQueue.main.async {
-            self.emitter.chatMessageRemoved.send(message)
-        }
+        self.emitter.chatMessageRemoved.send(message)
     }
     
     public func onP2PClientOpen(_ client: P2PClient, messenger: CypherMessenger) {
-        DispatchQueue.main.async {
-            emitter.p2pClientConnected.send(client)
-        }
+        emitter.p2pClientConnected.send(client)
+    }
+    
+    public func onCustomConfigChange() {
+        emitter.customConfigChanged.send()
     }
 }
-//#endif
+#endif

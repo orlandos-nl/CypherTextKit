@@ -6,7 +6,7 @@ public enum IPv6TCPP2PError: Error {
     case reconnectFailed, timeout, socketCreationFailed
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 private final class BufferHandler: ChannelInboundHandler {
     typealias InboundIn = ByteBuffer
     private weak var client: IPv6TCPP2PTransportClient?
@@ -24,7 +24,7 @@ private final class BufferHandler: ChannelInboundHandler {
         
         if let delegate = client.delegate {
             context.eventLoop.executeAsync {
-                _ = try await delegate.p2pConnection(client, receivedMessage: buffer)
+                try await delegate.p2pConnection(client, receivedMessage: buffer)
             }.whenFailure { error in
                 context.fireErrorCaught(error)
             }
@@ -32,7 +32,7 @@ private final class BufferHandler: ChannelInboundHandler {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 final class IPv6TCPP2PTransportClient: P2PTransportClient {
     public weak var delegate: P2PTransportClientDelegate?
     public private(set) var connected = ConnectionState.connected
@@ -42,10 +42,6 @@ final class IPv6TCPP2PTransportClient: P2PTransportClient {
     init(state: P2PFrameworkState, channel: Channel) {
         self.state = state
         self.channel = channel
-    }
-    
-    public func reconnect() async throws {
-        throw IPv6TCPP2PError.reconnectFailed
     }
     
     public func disconnect() async {
@@ -101,9 +97,11 @@ public struct StunConfig {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
     public let transportLayerIdentifier = "_ipv6-tcp"
+    public let isMeshEnabled = false
+    public weak var delegate: P2PTransportFactoryDelegate?
     let eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
     let stun: StunConfig?
     

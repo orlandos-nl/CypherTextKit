@@ -2,19 +2,71 @@ import BSON
 import CypherProtocol
 import Foundation
 
-public enum PushType: String, Codable {
-    case none, call, message, contactRequest = "contactrequest", cancelCall = "cancelcall"
+public enum PushType: RawRepresentable, Codable, Sendable {
+    case none
+    case call
+    case message
+    case contactRequest
+    case cancelCall
+    case custom(String)
+    
+    public init(rawValue: String) {
+        switch rawValue {
+        case "none":
+            self = .none
+        case "call":
+            self = .call
+        case "message":
+            self = .message
+        case "contact-request":
+            self = .contactRequest
+        case "cancel-call":
+            self = .cancelCall
+        default:
+            self = .custom(rawValue)
+        }
+    }
+    
+    public var rawValue: String {
+        switch self {
+        case .none:
+            return "none"
+        case .call:
+            return "call"
+        case .message:
+            return "message"
+        case .contactRequest:
+            return "contact-request"
+        case .cancelCall:
+            return "cancel-call"
+        case .custom(let string):
+            return string
+        }
+    }
 }
 
 public enum CypherMessageType: String, Codable {
     case text, media, magic
 }
 
-@available(macOS 12, iOS 15, *)
-public enum TargetConversation {
+@available(macOS 10.15, iOS 13, *)
+public enum TargetConversation: Sendable, Equatable {
     case currentUser
     case otherUser(Username)
     case groupChat(GroupChatId)
+    
+    public static func ==(lhs: TargetConversation, rhs: TargetConversation) -> Bool {
+        switch (lhs, rhs) {
+        case (.currentUser, .currentUser):
+            return true
+        case (.groupChat(let lhs), .groupChat(let rhs)):
+            return lhs == rhs
+        case (.otherUser(let lhs), .otherUser(let rhs)):
+            return lhs == rhs
+        default:
+            return false
+        }
+    }
     
     public func resolve(
         in messenger: CypherMessenger
@@ -37,19 +89,19 @@ public enum TargetConversation {
         }
     }
     
-    public enum Resolved: AnyConversation, Identifiable {
+    public enum Resolved: AnyConversation, Identifiable, Sendable {
         case privateChat(PrivateChat)
         case groupChat(GroupChat)
         case internalChat(InternalConversation)
         
         init?(conversation: DecryptedModel<ConversationModel>, messenger: CypherMessenger) async {
-            let members = conversation.members
+            let members = await conversation.members
             let username = messenger.username
             guard members.contains(username) else {
                 return nil
             }
             
-            let metadata = conversation.metadata
+            let metadata = await conversation.metadata
             switch members.count {
             case ..<0:
                 return nil
@@ -100,7 +152,7 @@ public enum TargetConversation {
         public func getTarget() async -> TargetConversation {
             switch self {
             case .privateChat(let chat):
-                return chat.getTarget()
+                return await chat.getTarget()
             case .groupChat(let chat):
                 return await chat.getTarget()
             case .internalChat(let chat):
@@ -129,7 +181,7 @@ public enum TargetConversation {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct ConversationTarget: Codable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {
@@ -159,8 +211,8 @@ public struct ConversationTarget: Codable {
     }
 }
 
-@available(macOS 12, iOS 15, *)
-public struct SingleCypherMessage: Codable {
+@available(macOS 10.15, iOS 13, *)
+public struct SingleCypherMessage: Codable, @unchecked Sendable {
     // Only the fields specified here are encoded
     private enum CodingKeys: String, CodingKey {
         case messageType = "a"

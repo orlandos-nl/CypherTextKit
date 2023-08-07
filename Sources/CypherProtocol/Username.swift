@@ -1,5 +1,5 @@
 /// A helper wrapper around `String`, so that the type cannot be used interchangably with other String based types
-public struct Username: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable, ExpressibleByStringLiteral {
+public struct Username: CustomStringConvertible, Identifiable, Codable, Hashable, Equatable, Comparable, ExpressibleByStringLiteral, Sendable {
     public let raw: String
     
     public static func ==(lhs: Username, rhs: Username) -> Bool {

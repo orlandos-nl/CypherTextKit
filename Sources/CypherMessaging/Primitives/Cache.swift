@@ -5,26 +5,29 @@
 //  Created by Joannis Orlandos on 19/04/2021.
 //
 
-import SwiftUI
+typealias CacheActor = MainActor
 
 public protocol CacheKey {
     associatedtype Value
 }
 
-public final class Cache {
+@CacheActor public final class Cache: Sendable {
     internal init() {}
     
     private var values = [ObjectIdentifier: Any]()
     
+    @CacheActor
     public func read<Key: CacheKey>(_ key: Key.Type) -> Key.Value? {
         values[ObjectIdentifier(key)] as? Key.Value
     }
     
+    @CacheActor
     public func setValue<Key: CacheKey>(_ value: Key.Value, forKey key: Key.Type) {
         values[ObjectIdentifier(key)] = value
     }
     
-    public func readOrCreateValue<Key: CacheKey>(forKey key: Key.Type, resolve: () -> Key.Value) -> Key.Value {
+    @CacheActor
+    public func readOrCreateValue<Key: CacheKey>(forKey key: Key.Type, resolve: @Sendable () -> Key.Value) -> Key.Value {
         if let value = read(key) {
             return value
         } else {

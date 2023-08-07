@@ -2,19 +2,19 @@ import NIO
 import BSON
 import Foundation
 
-@available(macOS 12, iOS 15, *)
-public protocol StoredTask: Codable {
+@available(macOS 10.15, iOS 13, *)
+public protocol StoredTask: Codable, Sendable {
     var key: TaskKey { get }
     var isBackgroundTask: Bool { get }
     var retryMode: TaskRetryMode { get }
     var priority: TaskPriority { get }
-    var requiresConnectivity: Bool { get }
     
+    func requiresConnectivity(on messenger: CypherMessenger) -> Bool
     func execute(on messenger: CypherMessenger) async throws
     func onDelayed(on messenger: CypherMessenger) async throws
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 typealias TaskDecoder = (Document) throws -> StoredTask
 
 public struct TaskPriority {

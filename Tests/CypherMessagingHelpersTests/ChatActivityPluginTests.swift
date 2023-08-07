@@ -2,13 +2,13 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 final class ChatActivityPluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
     }
     
-    func testPrivateChat() async throws {
+    @MainActor func testPrivateChat() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),
@@ -50,7 +50,7 @@ final class ChatActivityPluginTests: XCTestCase {
         XCTAssertNotNil(m1Chat.lastActivity)
     }
     
-    func testGroupChat() async throws {
+    @MainActor func testGroupChat() async throws {
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
             authenticationMethod: .password("m0"),

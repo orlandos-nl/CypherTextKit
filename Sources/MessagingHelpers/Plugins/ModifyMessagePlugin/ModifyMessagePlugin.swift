@@ -1,10 +1,11 @@
 import CypherMessaging
 
-@available(macOS 12, iOS 15, *)
+// TODO: Edit message history?
+@available(macOS 10.15, iOS 13, *)
 public struct ModifyMessagePlugin: Plugin {
     public static let pluginIdentifier = "@/messaging/mutate-history"
     
-    public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
+    @MainActor public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         guard
             message.message.messageType == .magic,
             var subType = message.message.messageSubtype,
@@ -31,7 +32,7 @@ public struct ModifyMessagePlugin: Plugin {
         }
     }
     
-    public func onSendMessage(
+    @CryptoActor public func onSendMessage(
         _ message: SentMessageContext
     ) async throws -> SendMessageAction? {
         guard
@@ -46,11 +47,11 @@ public struct ModifyMessagePlugin: Plugin {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension AnyChatMessage {
-    public func revoke() async throws {
+    @CryptoActor public func revoke() async throws {
         let chat = try await self.target.resolve(in: self.messenger)
-        _ = try await chat.sendRawMessage(
+        try await chat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/messaging/mutate-history/revoke",
             text: self.raw.encrypted.remoteId,

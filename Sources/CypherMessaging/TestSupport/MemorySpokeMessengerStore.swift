@@ -5,7 +5,7 @@ public enum MemoryCypherMessengerStoreError: Error {
     case notFound
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public final actor MemoryCypherMessengerStore: CypherMessengerStore {
     private let salt = UUID().uuidString
     private var localConfig: Data?

@@ -3,16 +3,19 @@ import BSON
 import Foundation
 import CypherProtocol
 
-public final class ConversationModel: Model {
-    public struct SecureProps: Codable, MetadataProps {
+public final class ConversationModel: Model, @unchecked Sendable {
+    public struct SecureProps: Codable, @unchecked Sendable, MetadataProps {
+        // TODO: Shorter CodingKeys
+        
         public var members: Set<Username>
+        public var kickedMembers: Set<Username>
         public var metadata: Document
         public var localOrder: Int
     }
     
     public let id: UUID
     
-    public var props: Encrypted<SecureProps>
+    public let props: Encrypted<SecureProps>
     
     public init(id: UUID, props: Encrypted<SecureProps>) {
         self.id = id
@@ -29,25 +32,37 @@ public final class ConversationModel: Model {
 }
 
 extension DecryptedModel where M == ConversationModel {
-    public var members: Set<Username> {
+    @MainActor public var members: Set<Username> {
         get { props.members }
     }
-    public var metadata: Document {
+    @MainActor public var kickedMembers: Set<Username> {
+        get { props.kickedMembers }
+    }
+    @MainActor public var allHistoricMembers: Set<Username> {
+        get {
+            var members = members
+            members.formUnion(kickedMembers)
+            return members
+        }
+    }
+    @MainActor public var metadata: Document {
         get { props.metadata }
     }
-    public var localOrder: Int {
+    @MainActor public var localOrder: Int {
         get { props.localOrder }
     }
     
-    func getNextLocalOrder() async throws -> Int {
-        let order = localOrder
+    @CryptoActor func getNextLocalOrder() async throws -> Int {
+        let order = await localOrder
         try await setProp(at: \.localOrder, to: order &+ 1)
         return order
    }
 }
 
-public final class DeviceIdentityModel: Model {
-    public struct SecureProps: Codable {
+public final class DeviceIdentityModel: Model, @unchecked Sendable {
+    public struct SecureProps: Codable, @unchecked Sendable {
+        // TODO: Shorter CodingKeys
+        
         let username: Username
         let deviceId: DeviceId
         let senderId: Int
@@ -55,11 +70,16 @@ public final class DeviceIdentityModel: Model {
         let identity: PublicSigningKey
         let isMasterDevice: Bool
         var doubleRatchet: DoubleRatchetHKDF<SHA512>.State?
+        var deviceName: String?
+        
+        // TODO: Verify identity on the server later when possible
+        var serverVerified: Bool?
+        var lastRekey: Date?
     }
     
     public let id: UUID
 
-    public var props: Encrypted<SecureProps>
+    public let props: Encrypted<SecureProps>
     
     public init(id: UUID, props: Encrypted<SecureProps>) {
         self.id = id
@@ -75,35 +95,43 @@ public final class DeviceIdentityModel: Model {
     }
 }
 
-extension DecryptedModel where M == DeviceIdentityModel {
-    public var username: Username {
+extension _DecryptedModel where M == DeviceIdentityModel {
+    @CryptoActor var username: Username {
         get { props.username }
     }
-    public var deviceId: DeviceId {
+    @CryptoActor var deviceId: DeviceId {
         get { props.deviceId }
     }
-    public var isMasterDevice: Bool {
+    @CryptoActor var isMasterDevice: Bool {
         get { props.isMasterDevice }
     }
-    public var senderId: Int {
+    @CryptoActor var senderId: Int {
         get { props.senderId }
     }
-    public var publicKey: PublicKey {
+    @CryptoActor var publicKey: PublicKey {
         get { props.publicKey }
     }
-    public var identity: PublicSigningKey {
+    @CryptoActor var identity: PublicSigningKey {
         get { props.identity }
     }
-    public var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
+    @CryptoActor var doubleRatchet: DoubleRatchetHKDF<SHA512>.State? {
         get { props.doubleRatchet }
     }
-    func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) async throws {
-        try await setProp(at: \.doubleRatchet, to: newValue)
+    @CryptoActor var deviceName: String? {
+        get { props.deviceName }
+    }
+    @CryptoActor func updateDoubleRatchetState(to newValue: DoubleRatchetHKDF<SHA512>.State?) throws {
+        try setProp(at: \.doubleRatchet, to: newValue)
+    }
+    @CryptoActor func updateDeviceName(to newValue: String?) throws {
+        try setProp(at: \.deviceName, to: newValue)
     }
 }
 
-public final class ContactModel: Model {
-    public struct SecureProps: Codable, MetadataProps {
+public final class ContactModel: Model, @unchecked Sendable {
+    public struct SecureProps: Codable, @unchecked Sendable, MetadataProps {
+        // TODO: Shorter CodingKeys
+        
         public let username: Username
         public internal(set) var config: UserConfig
         public var metadata: Document
@@ -111,7 +139,7 @@ public final class ContactModel: Model {
     
     public let id: UUID
 
-    public var props: Encrypted<SecureProps>
+    public let props: Encrypted<SecureProps>
     
     public init(id: UUID, props: Encrypted<SecureProps>) {
         self.id = id
@@ -128,27 +156,27 @@ public final class ContactModel: Model {
 }
 
 extension DecryptedModel where M == ContactModel {
-    public var username: Username {
+    @MainActor public var username: Username {
         get { props.username }
     }
-    public var config: UserConfig {
+    @MainActor public var config: UserConfig {
         get { props.config }
     }
-    public var metadata: Document {
+    @MainActor public var metadata: Document {
         get { props.metadata }
     }
-    func updateConfig(to newValue: UserConfig) async throws {
+    @CryptoActor func updateConfig(to newValue: UserConfig) async throws {
         try await self.setProp(at: \.config, to: newValue)
     }
 }
 
-public enum MarkMessageResult {
+public enum MarkMessageResult: Sendable {
     case success, error, notModified
 }
 
-@available(macOS 12, iOS 15, *)
-public final class ChatMessageModel: Model {
-    public enum DeliveryState: Int, Codable {
+@available(macOS 10.15, iOS 13, *)
+public final class ChatMessageModel: Model, @unchecked Sendable {
+    public enum DeliveryState: Int, Codable, Sendable {
         case none = 0
         case undelivered = 1
         case received = 2
@@ -169,7 +197,7 @@ public final class ChatMessageModel: Model {
         }
     }
     
-    public struct SecureProps: Codable {
+    public struct SecureProps: Codable, @unchecked Sendable {
         private enum CodingKeys: String, CodingKey {
             case sendDate = "a"
             case receiveDate = "b"
@@ -177,6 +205,7 @@ public final class ChatMessageModel: Model {
             case message = "d"
             case senderUser = "e"
             case senderDeviceId = "f"
+            case deliveryStates = "g"
         }
         
         public let sendDate: Date
@@ -185,6 +214,7 @@ public final class ChatMessageModel: Model {
         public var message: SingleCypherMessage
         public let senderUser: Username
         public let senderDeviceId: DeviceId
+        public internal(set) var deliveryStates: Document?
         
         init(
             sending message: SingleCypherMessage,
@@ -197,6 +227,7 @@ public final class ChatMessageModel: Model {
             self.message = message
             self.senderUser = senderUser
             self.senderDeviceId = senderDeviceId
+            self.deliveryStates = [:]
         }
         
         init(
@@ -211,6 +242,7 @@ public final class ChatMessageModel: Model {
             self.message = message
             self.senderUser = senderUser
             self.senderDeviceId = senderDeviceId
+            self.deliveryStates = [:]
         }
     }
     
@@ -224,7 +256,7 @@ public final class ChatMessageModel: Model {
     // `remoteId` must be unique, or rejected when saving
     public let remoteId: String
     
-    public var props: Encrypted<SecureProps>
+    public let props: Encrypted<SecureProps>
     
     public init(
         id: UUID,
@@ -259,38 +291,71 @@ public final class ChatMessageModel: Model {
     }
 }
 
+public struct DeliveryStates {
+    var document: Document
+    
+    public subscript(username: Username) -> ChatMessageModel.DeliveryState {
+        get {
+            if
+                let currentStateCode = document[username.raw] as? Int,
+                let currentState = ChatMessageModel.DeliveryState(rawValue: currentStateCode)
+            {
+                return currentState
+            } else {
+                return .none
+            }
+        }
+        set {
+            document[username.raw] = newValue.rawValue
+        }
+    }
+}
+
 extension DecryptedModel where M == ChatMessageModel {
-    public var sendDate: Date {
+    @MainActor public var sendDate: Date {
         get { props.sendDate }
     }
-    public var receiveDate: Date {
+    @MainActor public var receiveDate: Date {
         get { props.receiveDate }
     }
-    public var deliveryState: ChatMessageModel.DeliveryState {
+    @MainActor public var deliveryState: ChatMessageModel.DeliveryState {
         get { props.deliveryState }
     }
-    public var message: SingleCypherMessage {
+    @MainActor var _deliveryStates: Document {
+        get { props.deliveryStates ?? [:] }
+    }
+    @MainActor var deliveryStates: DeliveryStates {
+        get { DeliveryStates(document: _deliveryStates) }
+    }
+    @MainActor public var message: SingleCypherMessage {
         get { props.message }
     }
-    public var senderUser: Username {
+    @MainActor public var senderUser: Username {
         get { props.senderUser }
     }
-    public var senderDeviceId: DeviceId {
+    @MainActor public var senderDeviceId: DeviceId {
         get { props.senderDeviceId }
     }
     
     @discardableResult
-    func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState) async throws -> MarkMessageResult {
-        var state = self.deliveryState
-        let result = state.transition(to: newState)
-        try await setProp(at: \.deliveryState, to: state)
+    @CryptoActor func transitionDeliveryState(to newState: ChatMessageModel.DeliveryState, forUser user: Username, messenger: CypherMessenger) async throws -> MarkMessageResult {
+        if user != messenger.username {
+            var state = await self.deliveryState
+            state.transition(to: newState)
+            try await setProp(at: \.deliveryState, to: state)
+        }
+        
+        var allStates = await self.deliveryStates
+        let result = allStates[user].transition(to: newState)
+        try await setProp(at: \.deliveryStates, to: allStates.document)
+        
         return result
     }
 }
 
-@available(macOS 12, iOS 15, *)
-public final class JobModel: Model {
-    public struct SecureProps: Codable {
+@available(macOS 10.15, iOS 13, *)
+public final class JobModel: Model, @unchecked Sendable {
+    public struct SecureProps: Codable, @unchecked Sendable {
         private enum CodingKeys: String, CodingKey {
             case taskKey = "a"
             case task = "b"
@@ -307,18 +372,18 @@ public final class JobModel: Model {
         var attempts: Int
         let isBackgroundTask: Bool
         
-        init<T: StoredTask>(task: T) throws {
+        init<T: StoredTask>(task: T, scheduledAt: Date = Date()) throws {
             self.taskKey = task.key.rawValue
             self.isBackgroundTask = task.isBackgroundTask
             self.task = try BSONEncoder().encode(task)
-            self.scheduledAt = Date()
+            self.scheduledAt = scheduledAt
             self.attempts = 0
         }
     }
     
     // The concrete type is used to avoid collision with Identifiable
     public let id: UUID
-    public var props: Encrypted<SecureProps>
+    public let props: Encrypted<SecureProps>
     
     public init(id: UUID, props: Encrypted<SecureProps>) {
         self.id = id
@@ -331,27 +396,27 @@ public final class JobModel: Model {
     }
 }
 
-extension DecryptedModel where M == JobModel {
-    public var taskKey: String {
+extension _DecryptedModel where M == JobModel {
+    @CryptoActor var taskKey: String {
         get { props.taskKey }
     }
-    public var task: Document {
+    @CryptoActor var task: Document {
         get { props.task }
     }
-    public var delayedUntil: Date? {
+    @CryptoActor var delayedUntil: Date? {
         get { props.delayedUntil }
     }
-    public var scheduledAt: Date {
+    @CryptoActor var scheduledAt: Date {
         get { props.scheduledAt }
     }
-    public var attempts: Int {
+    @CryptoActor var attempts: Int {
         get { props.attempts }
     }
-    public var isBackgroundTask: Bool {
+    @CryptoActor var isBackgroundTask: Bool {
         get { props.isBackgroundTask }
     }
-    func delayExecution(retryDelay: TimeInterval) async throws {
-        try await setProp(at: \.delayedUntil, to: Date().addingTimeInterval(retryDelay))
-        try await setProp(at: \.attempts, to: self.attempts + 1)
+    @CryptoActor func delayExecution(retryDelay: TimeInterval) throws {
+        try setProp(at: \.delayedUntil, to: Date().addingTimeInterval(retryDelay))
+        try setProp(at: \.attempts, to: self.attempts + 1)
     }
 }

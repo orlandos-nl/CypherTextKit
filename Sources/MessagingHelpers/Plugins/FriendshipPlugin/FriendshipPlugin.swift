@@ -44,7 +44,7 @@ fileprivate struct ChangeFriendshipState: Codable {
     let subject: Username
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct FriendshipPlugin: Plugin {
     public static let pluginIdentifier = "@/contacts/friendship"
     public let ruleset: FriendshipRuleset
@@ -53,10 +53,10 @@ public struct FriendshipPlugin: Plugin {
         self.ruleset = ruleset
     }
     
-    public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
+    @MainActor public func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         let senderUsername = message.sender.username
         let target = await message.conversation.getTarget()
-        let username: Username = ""// = await message.messenger.username
+        let username = message.messenger.username
         
         if case .groupChat = target {
             if ruleset.blockAffectsGroupChats, senderUsername != username {
@@ -67,7 +67,7 @@ public struct FriendshipPlugin: Plugin {
             return nil
         }
         
-        if senderUsername ==  username{
+        if senderUsername == username {
             guard case .currentUser = target else {
                 return nil
             }
@@ -94,9 +94,9 @@ public struct FriendshipPlugin: Plugin {
                 default:
                     ()
                 }
-                
-                return .ignore
             }
+            
+            return nil
         }
         
         let contact = try await message.messenger.createContact(byUsername: senderUsername)
@@ -122,7 +122,7 @@ public struct FriendshipPlugin: Plugin {
             case "query":
                 let changedState = try BSONEncoder().encode(
                     ChangeFriendshipState(
-                        newState: contact.ourState,
+                        newState: contact.ourFriendshipState,
                         subject: contact.username
                     )
                 )
@@ -140,7 +140,7 @@ public struct FriendshipPlugin: Plugin {
             }
         }
         
-        switch (contact.ourState, contact.theirState) {
+        switch (contact.ourFriendshipState, contact.theirFriendshipState) {
         case (.blocked, _), (_, .blocked):
             return .ignore
         case (.undecided, _), (_, .undecided):
@@ -156,6 +156,14 @@ public struct FriendshipPlugin: Plugin {
         }
     }
     
+    public func onDeviceRegistery(_ deviceId: DeviceId, messenger: CypherMessenger) {
+        // TODO: Sync states to new device
+    }
+    
+    public func onOtherUserDeviceRegistery(username: Username, deviceId: DeviceId, messenger: CypherMessenger) {
+        // TODO: Sync states to new device
+    }
+    
     public func createContactMetadata(for username: Username, messenger: CypherMessenger) async throws -> Document {
         let metadata = FriendshipMetadata(
             ourState: .undecided,
@@ -166,9 +174,9 @@ public struct FriendshipPlugin: Plugin {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension Contact {
-    public var ourState: FriendshipStatus {
+    @MainActor public var ourFriendshipState: FriendshipStatus {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -176,7 +184,7 @@ extension Contact {
         )) ?? .undecided
     }
     
-    public var theirState: FriendshipStatus {
+    @MainActor public var theirFriendshipState: FriendshipStatus {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -184,7 +192,7 @@ extension Contact {
         )) ?? .undecided
     }
     
-    public var isMutualFriendship: Bool {
+    @MainActor public var isMutualFriendship: Bool {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -192,7 +200,7 @@ extension Contact {
         )) ?? false
     }
     
-    public var isBlocked: Bool {
+    @MainActor public var isBlocked: Bool {
         (try? self.model.getProp(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
@@ -200,21 +208,21 @@ extension Contact {
         )) ?? false
     }
     
-    public func block() async throws {
+    @MainActor public func block() async throws {
         try await changeOurState(to: .blocked)
     }
     
-    public func befriend() async throws {
+    @MainActor public func befriend() async throws {
         try await changeOurState(to: .friend)
     }
     
-    public func unfriend() async throws {
+    @MainActor public func unfriend() async throws {
         try await changeOurState(to: .notFriend)
     }
     
-    public func query() async throws {
+    @MainActor public func query() async throws {
         let privateChat = try await self.messenger.createPrivateChat(with: self.username)
-        _ = try await privateChat.sendRawMessage(
+        try await privateChat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/contacts/friendship/query",
             text: "",
@@ -222,12 +230,12 @@ extension Contact {
         )
     }
     
-    public func unblock() async throws {
-        guard ourState == .blocked else {
+    @MainActor public func unblock() async throws {
+        guard ourFriendshipState == .blocked else {
             return
         }
         
-        let oldState = (try? await self.model.withMetadata(
+        let oldState = (try? self.model.withMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self,
             run: \.ourPreBlockedState
@@ -236,7 +244,7 @@ extension Contact {
         return try await changeOurState(to: oldState)
     }
     
-    fileprivate func changeOurState(to newState: FriendshipStatus) async throws {
+    @MainActor fileprivate func changeOurState(to newState: FriendshipStatus) async throws {
         try await self.modifyMetadata(
             ofType: FriendshipMetadata.self,
             forPlugin: FriendshipPlugin.self
@@ -259,17 +267,8 @@ extension Contact {
             )
         )
         
-        let internalChat = try await self.messenger.getInternalConversation()
-        _ = try await internalChat.sendRawMessage(
-            type: .magic,
-            messageSubtype: "@/contacts/friendship/change-state",
-            text: "",
-            metadata: message,
-            preferredPushType: .none
-        )
-        
         let privateChat = try await self.messenger.createPrivateChat(with: self.username)
-        _ = try await privateChat.sendRawMessage(
+        try await privateChat.sendRawMessage(
             type: .magic,
             messageSubtype: "@/contacts/friendship/change-state",
             text: "",

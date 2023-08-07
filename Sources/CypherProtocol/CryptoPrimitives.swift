@@ -2,7 +2,7 @@ import NIOFoundationCompat
 import BSON
 import NIO
 import Foundation
-import CryptoKit
+import Crypto
 
 typealias PrivateSigningKeyAlg = Curve25519.Signing.PrivateKey
 typealias PublicSigningKeyAlg = Curve25519.Signing.PublicKey
@@ -17,7 +17,7 @@ enum CypherProtocolError: Error {
 ///
 /// Private keys are used to sign data, as to authenticate that it was sent by the owner of this private key.
 /// The `publicKey` can be shared, and can then be used to verify the signature's validity.
-public struct PrivateSigningKey: Codable {
+public struct PrivateSigningKey: Codable, @unchecked Sendable {
     fileprivate let privateKey: PrivateSigningKeyAlg
     
     /// The public key that can verify signatures of this private key, wrapped in a Codable container.
@@ -46,11 +46,19 @@ public struct PrivateSigningKey: Codable {
 /// A wrapper around Curve25519 public _signing_ keys that provides Codable support using `Foundation.Data`
 ///
 /// Public signing keys are used to verify signatures by the matching private key.
-public struct PublicSigningKey: Codable {
+public struct PublicSigningKey: Codable, @unchecked Sendable {
     fileprivate let publicKey: PublicSigningKeyAlg
     
     fileprivate init(publicKey: PublicSigningKeyAlg) {
         self.publicKey = publicKey
+    }
+    
+    public init?(data: Data) {
+        do {
+            publicKey = try PublicSigningKeyAlg(rawRepresentation: data)
+        } catch {
+            return nil
+        }
     }
     
     public func encode(to encoder: Encoder) throws {
@@ -97,7 +105,7 @@ public struct PublicSigningKey: Codable {
 /// A wrapper around Curve25519 private keys that provides Codable support using `Foundation.Data`
 ///
 /// This Private Key type is used for handshakes, to establish a shared secret key over unsafe communication channels.
-public struct PrivateKey: Codable {
+public struct PrivateKey: Codable, @unchecked Sendable {
     fileprivate let privateKey: PrivateKeyAgreementKeyAlg
     
     /// Derives a `PublicKey` that can be sent to a third party.
@@ -142,11 +150,23 @@ public struct PrivateKey: Codable {
 
 /// A key that is derived from `PrivateKey`.
 /// Used to create a shared secret, known only to the owner of the PrivateKeys that shared their PublicKey.
-public struct PublicKey: Codable, Equatable {
+public struct PublicKey: Codable, Equatable, @unchecked Sendable {
     fileprivate let publicKey: PublicKeyAgreementKeyAlg
     
     fileprivate init(publicKey: PublicKeyAgreementKeyAlg) {
         self.publicKey = publicKey
+    }
+    
+    public init?(data: Data) {
+        do {
+            publicKey = try PublicKeyAgreementKeyAlg(rawRepresentation: data)
+        } catch {
+            return nil
+        }
+    }
+    
+    public var data: Data {
+        publicKey.rawRepresentation
     }
     
     public func encode(to encoder: Encoder) throws {

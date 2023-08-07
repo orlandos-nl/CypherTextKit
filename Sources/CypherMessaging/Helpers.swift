@@ -1,7 +1,6 @@
 import NIO
-import _NIOConcurrency
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension EventLoop {
     public func executeAsync<T>(_ block: @escaping @Sendable () async throws -> T) -> EventLoopFuture<T> {
         let promise = self.makePromise(of: T.self)

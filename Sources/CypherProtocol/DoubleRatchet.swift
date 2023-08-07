@@ -2,7 +2,7 @@
 // TODO: Header encryption
 
 import Foundation
-import CryptoKit
+import Crypto
 
 /// A symmetric key encryption & decryption helper
 public protocol RatchetSymmetricEncryption {
@@ -184,7 +184,7 @@ public struct SkippedKey: Codable {
 }
 
 public struct DoubleRatchetHKDF<Hash: HashFunction> {
-    public struct State: Codable {
+    public struct State: Codable, @unchecked Sendable {
         private enum CodingKeys: String, CodingKey {
             case rootKey = "a"
             case localPrivateKey = "b"
@@ -328,7 +328,10 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
     ) throws -> (DoubleRatchetHKDF<Hash>, Data) {
         let state = try State(secretKey: secretKey, localPrivateKey: localPrivateKey, configuration: configuration)
         var engine = DoubleRatchetHKDF<Hash>(state: state, configuration: configuration)
-        let plaintext = try engine.ratchetDecrypt(initialMessage)
+        guard case let .success(plaintext) = try engine.ratchetDecrypt(initialMessage) else {
+            throw DoubleRatchetError.uninitializedRecipient
+        }
+        
         return (engine, plaintext)
     }
     
@@ -378,7 +381,7 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
     /// The message used as input _must_ be created by the remote party `ratchetEncrypt`
     ///
     /// - Returns: The decrypted data
-    public mutating func ratchetDecrypt(_ message: RatchetMessage) throws -> Data {
+    public mutating func ratchetDecrypt(_ message: RatchetMessage) throws -> RatchetDecryptionResult {
         var skippedKeys = state.skippedKeys
         defer {
             state.skippedKeys = skippedKeys
@@ -407,7 +410,7 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
             }
         }
         
-        func decodeUsingSkippedMessageKeys() throws -> Data? {
+        func decodeUsingSkippedMessageKeys() throws -> RatchetDecryptionResult? {
             for i in 0..<skippedKeys.count {
                 let skippedKey = skippedKeys[i]
                 
@@ -442,8 +445,8 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
         }
         
         // 1. Try skipped message keys
-        if let plaintext = try decodeUsingSkippedMessageKeys() {
-            return plaintext
+        if let result = try decodeUsingSkippedMessageKeys() {
+            return result
         }
         
         // 2. Check if the publicKey matches the current key
@@ -452,6 +455,8 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
             try skipMessageKeys(until: message.header.previousChainLength)
             state.skippedKeys = skippedKeys
             try diffieHellmanRatchet()
+        } else if message.header.messageNumber < state.receivedMessages {
+            return .keyExpiry
         }
         
         // 3.a. On-mismatch, Skip ahead in message keys until max. Store all the inbetween message keys in a history
@@ -469,7 +474,7 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
         return try decryptMessage(message, usingKey: messageKey)
     }
     
-    private func decryptMessage(_ message: RatchetMessage, usingKey messageKey: SymmetricKey) throws -> Data {
+    private func decryptMessage(_ message: RatchetMessage, usingKey messageKey: SymmetricKey) throws -> RatchetDecryptionResult {
         let headerData = try configuration.headerEncoder.encodeRatchetHeader(message.header)
         let nonce = configuration.headerEncoder.concatenate(
             authenticatedData: configuration.headerAssociatedDataGenerator.generateAssociatedData(),
@@ -480,11 +485,11 @@ public struct DoubleRatchetHKDF<Hash: HashFunction> {
             throw DoubleRatchetError.invalidNonceLength
         }
         
-        return try configuration.symmetricEncryption.decrypt(
+        return .success(try configuration.symmetricEncryption.decrypt(
             message.ciphertext,
             nonce: nonce,
             usingKey: messageKey
-        )
+        ))
     }
 }
 
@@ -513,6 +518,11 @@ public struct RatchetMessage: Codable {
     
     let header: Header
     let ciphertext: Data
+}
+
+public enum RatchetDecryptionResult {
+    case success(Data)
+    case keyExpiry
 }
 
 enum DoubleRatchetError: Error {

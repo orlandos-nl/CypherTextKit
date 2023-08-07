@@ -8,7 +8,7 @@ fileprivate struct ChatActivityMetadata: Codable {
 // TODO: Use synchronisation framework for own devices
 // TODO: Select contacts to share the profile changes with
 // TODO: Broadcast to a user that doesn't have a private chat
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 public struct ChatActivityPlugin: Plugin {
     public static let pluginIdentifier = "@/chats/activity"
     
@@ -47,9 +47,9 @@ public struct ChatActivityPlugin: Plugin {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 extension AnyConversation {
-    public var lastActivity: Date? {
+    @MainActor public var lastActivity: Date? {
         try? self.conversation.getProp(
             ofType: ChatActivityMetadata.self,
             forPlugin: ChatActivityPlugin.self,

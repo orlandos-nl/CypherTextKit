@@ -16,4 +16,9 @@ enum CypherSDKError: Error {
     case invalidTransport
     case unsupportedTransport
     case internalError
+    case notGroupMember, notGroupModerator
+    case duplicateChatMessage
+    case invalidSignature
+    case cannotRegisterDeviceConfig
+    case cannotImportExistingContact
 }

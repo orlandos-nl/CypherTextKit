@@ -1,16 +1,16 @@
-@available(macOS 12, iOS 15, *)
-struct CypherMessage: Codable {
+@available(macOS 10.15, iOS 13, *)
+struct CypherMessage: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case type = "a"
         case box = "b"
     }
     
-    private enum WrappedType: Int, Codable {
+    private enum WrappedType: Int, Codable, Sendable {
         case single = 0
         case array = 1
     }
     
-    internal enum Wrapped {
+    internal enum Wrapped: Sendable {
         case single(SingleCypherMessage)
         case array([SingleCypherMessage])
     }

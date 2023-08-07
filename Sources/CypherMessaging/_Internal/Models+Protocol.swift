@@ -5,54 +5,76 @@ public protocol MetadataProps {
     var metadata: Document { get set }
 }
 
-public protocol Model: Codable {
-    associatedtype SecureProps: Codable
+public protocol Model: Codable, Sendable {
+    associatedtype SecureProps: Codable & Sendable
     
     var id: UUID { get }
-    var props: Encrypted<SecureProps> { get set }
-//    func setProps(to props: Encrypted<SecureProps>) async
-    
-//    func save(on store: CypherMessengerStore) async throws
+    var props: Encrypted<SecureProps> { get }
 }
 
 // TODO: Re-enable cache, and reuse the cache globally
-public final class DecryptedModel<M: Model> {
-    private let lock = NSLock()
+public final class DecryptedModel<M: Model>: @unchecked Sendable {
     public let encrypted: M
     public var id: UUID { encrypted.id }
-    public private(set) var props: M.SecureProps
+    @MainActor public private(set) var props: M.SecureProps
     private let encryptionKey: SymmetricKey
     
-    public func withLock<T>(_ run: () async throws -> T) async rethrows -> T {
-        lock.lock()
-        do {
-            let result = try await run()
-            lock.unlock()
-            return result
-        } catch {
-            lock.unlock()
-            throw error
-        }
-    }
-    
-    public func withProps<T>(get: (M.SecureProps) async throws -> T) async throws -> T {
+    @MainActor
+    public func withProps<T>(get: @Sendable (M.SecureProps) async throws -> T) async throws -> T {
         let props = try encrypted.props.decrypt(using: encryptionKey)
         return try await get(props)
     }
     
-    public func modifyProps<T>(run: (inout M.SecureProps) async throws -> T) async throws -> T {
-        let value = try await run(&props)
-        try await encrypted.props.update(to: props, using: encryptionKey)
+    @MainActor
+    public func modifyProps<T>(run: @MainActor @Sendable (inout M.SecureProps) throws -> T) throws -> T {
+        let value = try run(&props)
+        try encrypted.props.update(to: props, using: encryptionKey)
         return value
     }
     
-    public func setProp<T>(at keyPath: WritableKeyPath<M.SecureProps, T>, to value: T) async throws {
-        try await modifyProps { props in
+    @MainActor
+    public func setProp<T>(at keyPath: WritableKeyPath<M.SecureProps, T>, to value: T) throws {
+        try modifyProps { props in
             props[keyPath: keyPath] = value
         }
     }
     
-    init(model: M, encryptionKey: SymmetricKey) async throws {
+    @MainActor
+    init(model: M, encryptionKey: SymmetricKey) throws {
+        self.encrypted = model
+        self.encryptionKey = encryptionKey
+        self.props = try model.props.decrypt(using: encryptionKey)
+    }
+}
+
+internal final class _DecryptedModel<M: Model>: @unchecked Sendable {
+    internal let encrypted: M
+    internal var id: UUID { encrypted.id }
+    @CryptoActor public private(set) var props: M.SecureProps
+    private let encryptionKey: SymmetricKey
+    
+    @CryptoActor
+    internal func withProps<T>(get: @Sendable (M.SecureProps) async throws -> T) async throws -> T {
+        let props = try encrypted.props.decrypt(using: encryptionKey)
+        return try await get(props)
+    }
+    
+    @CryptoActor
+    internal func modifyProps<T>(run: @CryptoActor @Sendable (inout M.SecureProps) throws -> T) throws -> T {
+        let value = try run(&props)
+        try encrypted.props.update(to: props, using: encryptionKey)
+        return value
+    }
+    
+    @CryptoActor
+    internal func setProp<T: Sendable>(at keyPath: WritableKeyPath<M.SecureProps, T>, to value: T) throws {
+        try modifyProps { props in
+            props[keyPath: keyPath] = value
+        }
+    }
+    
+    @CryptoActor
+    init(model: M, encryptionKey: SymmetricKey) throws {
         self.encrypted = model
         self.encryptionKey = encryptionKey
         self.props = try model.props.decrypt(using: encryptionKey)

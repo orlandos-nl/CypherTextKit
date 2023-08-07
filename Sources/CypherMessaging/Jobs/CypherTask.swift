@@ -1,6 +1,6 @@
 import CypherProtocol
 import Foundation
-import CryptoKit
+import Crypto
 import BSON
 import NIO
 
@@ -29,7 +29,7 @@ struct HandshakeMessageTask: Codable {
     let messageId: String
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct CreateChatTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -50,7 +50,7 @@ struct CreateChatTask: Codable {
     let acceptedByOtherUser: Bool
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct AddContactTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -65,7 +65,7 @@ struct AddContactTask: Codable {
     let nickname: String
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -90,15 +90,17 @@ struct ReceiveMessageTask: Codable {
         case messageId = "b"
         case sender = "c"
         case deviceId = "d"
+        case createdAt = "e"
     }
     
     let message: RatchetedCypherMessage
     let messageId: String
     let sender: Username
     let deviceId: DeviceId
+    let createdAt: Date?
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case localId = "a"
@@ -115,37 +117,41 @@ struct SendMessageDeliveryStateChangeTask: Codable {
     let newState: ChatMessageModel.DeliveryState
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct ReceiveMessageDeliveryStateChangeTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case messageId = "a"
         case sender = "b"
         case deviceId = "c"
         case newState = "d"
+        case receivedAt = "e"
     }
     
     let messageId: String
     let sender: Username
     let deviceId: DeviceId?
     let newState: ChatMessageModel.DeliveryState
+    let receivedAt: Date
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct ReceiveMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
         case messageId = "b"
         case sender = "c"
         case deviceId = "d"
+        case createdAt = "e"
     }
     
     let message: MultiRecipientCypherMessage
     let messageId: String
     let sender: Username
     let deviceId: DeviceId
+    let createdAt: Date?
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct SendMultiRecipientMessageTask: Codable {
     private enum CodingKeys: String, CodingKey {
         case message = "a"
@@ -207,7 +213,7 @@ public enum _CypherTaskConfig {
     public static var sendMessageRetryMode: TaskRetryMode? = nil
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 enum CypherTask: Codable, StoredTask {
     private enum CodingKeys: String, CodingKey {
         case key = "a"
@@ -228,17 +234,21 @@ enum CypherTask: Codable, StoredTask {
                 return mode
             }
             
-            return .retryAfter(30, maxAttempts: 3)
+            return .retryAfter(30, maxAttempts: nil)
         case .processMultiRecipientMessage, .processMessage:
             return .always
         case .receiveMessageDeliveryStateChangeTask:
-            return .retryAfter(60, maxAttempts: 5)
+            // Message sent by other device, but same (our) user
+            // We don't know what message this is, yet
+            return .retryAfter(60, maxAttempts: 30)
         }
     }
     
-    var requiresConnectivity: Bool {
+    func requiresConnectivity(on messenger: CypherMessenger) -> Bool {
         switch self {
-        case .sendMessage, .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
+        case .sendMessage:
+            return !messenger.canBroadcastInMesh
+        case .sendMultiRecipientMessage, .sendMessageDeliveryStateChangeTask:
             return true
         case .processMessage, .processMultiRecipientMessage, .receiveMessageDeliveryStateChangeTask:
             return false
@@ -342,9 +352,9 @@ enum CypherTask: Codable, StoredTask {
     func onDelayed(on messenger: CypherMessenger) async throws {
         switch self {
         case .sendMessage(let task):
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            try await messenger._markMessage(byId: task.localId, as: .undelivered)
         case .sendMultiRecipientMessage(let task):
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            try await messenger._markMessage(byId: task.localId, as: .undelivered)
         case .processMessage, .processMultiRecipientMessage, .sendMessageDeliveryStateChangeTask, .receiveMessageDeliveryStateChangeTask:
             ()
         }
@@ -362,7 +372,8 @@ enum CypherTask: Codable, StoredTask {
                 multiRecipientContainer: nil,
                 messageId: message.messageId,
                 sender: message.sender,
-                senderDevice: message.deviceId
+                senderDevice: message.deviceId,
+                createdAt: message.createdAt
             )
         case .sendMultiRecipientMessage(let task):
             debugLog("Sending message to multiple recipients", task.recipients)
@@ -372,7 +383,8 @@ enum CypherTask: Codable, StoredTask {
                 task.message,
                 messageId: task.messageId,
                 sender: task.sender,
-                senderDevice: task.deviceId
+                senderDevice: task.deviceId,
+                createdAt: task.createdAt
             )
         case .sendMessageDeliveryStateChangeTask(let task):
             let result = try await messenger._markMessage(byId: task.localId, as: task.newState)
@@ -402,20 +414,22 @@ enum CypherTask: Codable, StoredTask {
                 fatalError("TODO")
             }
         case .receiveMessageDeliveryStateChangeTask(let task):
-            _ = try await messenger._markMessage(byRemoteId: task.messageId, updatedBy: task.sender, as: task.newState)
+            try await messenger._markMessage(byRemoteId: task.messageId, updatedBy: task.sender, as: task.newState)
         }
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 enum TaskHelpers {
     fileprivate static func writeMultiRecipientMessageTask(
         task: SendMultiRecipientMessageTask,
         messenger: CypherMessenger
     ) async throws {
+        assert(messenger.transport.supportsMultiRecipientMessages)
+        
         guard messenger.authenticated == .authenticated else {
             debugLog("Not connected with the server")
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
+            try await messenger._markMessage(byId: task.localId, as: .undelivered)
             throw CypherSDKError.offline
         }
         
@@ -430,16 +444,16 @@ enum TaskHelpers {
             let index = devices.count - i - 1
             let device = devices[index]
             
-            do {
-                if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
-                    with: device.username,
-                    deviceId: device.deviceId
-                ) {
+            if let p2pTransport = try? await messenger.getEstablishedP2PConnection(
+                with: device.username,
+                deviceId: device.deviceId
+            ) {
+                do {
                     try await p2pTransport.sendMessage(task.message, messageId: task.messageId)
                     devices.remove(at: index)
+                } catch {
+                    debugLog("Failed to send message over P2P connection", error)
                 }
-            } catch {
-                debugLog("Failed to send message over P2P connection", error)
             }
         }
         
@@ -457,12 +471,6 @@ enum TaskHelpers {
         task: SendMessageTask,
         messenger: CypherMessenger
     ) async throws {
-        guard messenger.authenticated == .authenticated else {
-            debugLog("Not connected with the server")
-            _ = try await messenger._markMessage(byId: task.localId, as: .undelivered)
-            throw CypherSDKError.offline
-        }
-
         // Fetch the identity
         debugLog("Executing task: Send message")
             
@@ -482,21 +490,44 @@ enum TaskHelpers {
             }
         }
         
-        try await messenger._writeWithRatchetEngine(ofUser: task.recipient, deviceId: task.recipientDeviceId) { ratchetEngine, rekeyState in
+        guard let device = try await messenger._fetchKnownDeviceIdentity(for: task.recipient, deviceId: task.recipientDeviceId) else {
+            // Nothing to do, device is not a member (anymore?)
+            return
+        }
+        
+        try await device._writeWithRatchetEngine(messenger: messenger) { ratchetEngine, rekeyState in
             let encodedMessage = try BSONEncoder().encode(task.message).makeData()
             let ratchetMessage = try ratchetEngine.ratchetEncrypt(encodedMessage)
 
-            let encryptedMessage = try await messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
-            try await messenger.transport.sendMessage(
-                encryptedMessage,
-                toUser: task.recipient,
-                otherUserDeviceId: task.recipientDeviceId,
-                pushType: task.pushType,
-                messageId: task.messageId
-            )
+            let encryptedMessage = try messenger._signRatchetMessage(ratchetMessage, rekey: rekeyState)
+            if messenger.isOnline {
+                try await messenger.transport.sendMessage(
+                    encryptedMessage,
+                    toUser: task.recipient,
+                    otherUserDeviceId: task.recipientDeviceId,
+                    pushType: task.pushType,
+                    messageId: task.messageId
+                )
+            } else if messenger.canBroadcastInMesh, encodedMessage.count <= P2PClient.maximumMeshPacketSize {
+                try await messenger._writeMessageOverMesh(
+                    encryptedMessage,
+                    messageId: task.messageId,
+                    to: Peer(
+                        username: device.username,
+                        deviceConfig: UserDeviceConfig(
+                            deviceId: device.deviceId,
+                            identity: device.identity,
+                            publicKey: device.publicKey,
+                            isMasterDevice: device.isMasterDevice
+                        )
+                    )
+                )
+                
+                // Throw an error anyways, this packet may not arrive
+                throw CypherSDKError.offline
+            } else {
+                throw CypherSDKError.offline
+            }
         }
-        
-        // Message may be a magic packet
-        _ = try? await messenger._markMessage(byId: task.localId, as: .none)
     }
 }

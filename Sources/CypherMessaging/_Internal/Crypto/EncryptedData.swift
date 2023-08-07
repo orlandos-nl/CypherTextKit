@@ -3,7 +3,7 @@ import Foundation
 import Crypto
 
 /// Used when encrypting a specific value
-public final class Encrypted<T: Codable>: Codable {
+public final class Encrypted<T: Codable>: Codable, @unchecked Sendable {
     private var value: AES.GCM.SealedBox
     private var wrapped: T?
     
@@ -14,14 +14,18 @@ public final class Encrypted<T: Codable>: Codable {
         let data = try BSONEncoder().encode(wrapper).makeData()
         
         // Encrypt & store the encoded data
-        self.value = try AES.GCM.seal(data, using: encryptionKey)
+        self.value = try! AES.GCM.seal(data, using: encryptionKey)
     }
     
-    public func update(to value: T, using encryptionKey: SymmetricKey) async throws {
+    public func update(to value: T, using encryptionKey: SymmetricKey) throws {
         self.wrapped = value
         let wrapper = PrimitiveWrapper(value: value)
         let data = try BSONEncoder().encode(wrapper).makeData()
         self.value = try AES.GCM.seal(data, using: encryptionKey)
+    }
+    
+    public func canDecrypt(using encryptionKey: SymmetricKey) throws {
+        _ = try AES.GCM.open(value, using: encryptionKey)
     }
     
     // The inverse of the initializer
@@ -38,7 +42,7 @@ public final class Encrypted<T: Codable>: Codable {
         
         // Return the value
         let value = wrapper.value
-//        wrapped = value
+        wrapped = value
         return value
     }
     

@@ -1,24 +1,17 @@
 import BSON
 import Crypto
 import Foundation
-import SwiftUI
 import NIO
 
-@globalActor final actor JobQueueActor {
-    public static let shared = JobQueueActor()
-    
-    private init() {}
-}
-
-@available(macOS 12, iOS 15, *)
-final class JobQueue: ObservableObject {
+@available(macOS 10.15, iOS 13, *)
+final class JobQueue {
     weak private(set) var messenger: CypherMessenger?
     private let database: CypherMessengerStore
     private let databaseEncryptionKey: SymmetricKey
-    public private(set) var runningJobs = false
-    public private(set) var hasOutstandingTasks = true
-    private var pausing: EventLoopPromise<Void>?
-    private var jobs: [DecryptedModel<JobModel>] {
+    @JobQueueActor public private(set) var runningJobs = false
+    @JobQueueActor public private(set) var hasOutstandingTasks = true
+    @JobQueueActor private var pausing: EventLoopPromise<Void>?
+    @JobQueueActor private var jobs: [_DecryptedModel<JobModel>] {
         didSet {
             markAsDone()
         }
@@ -26,13 +19,18 @@ final class JobQueue: ObservableObject {
     private let eventLoop: EventLoop
     private static var taskDecoders = [TaskKey: TaskDecoder]()
 
-    init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) async throws {
+    init(messenger: CypherMessenger, database: CypherMessengerStore, databaseEncryptionKey: SymmetricKey) {
         self.messenger = messenger
         self.eventLoop = messenger.eventLoop
         self.database = database
         self.databaseEncryptionKey = databaseEncryptionKey
-        self.jobs = try await database.readJobs().asyncMap { job -> (Date, DecryptedModel<JobModel>) in
-            let job = try await messenger.decrypt(job)
+        self.jobs = []
+    }
+    
+    @JobQueueActor
+    func loadJobs() async throws {
+        self.jobs = try await database.readJobs().map { job -> (Date, _DecryptedModel<JobModel>) in
+            let job = try messenger!._cachelessDecrypt(job)
             return (job.scheduledAt, job)
         }.sorted { lhs, rhs in
             lhs.0 < rhs.0
@@ -46,13 +44,13 @@ final class JobQueue: ObservableObject {
     }
     
     @JobQueueActor
-    func cancelJob(_ job: DecryptedModel<JobModel>) async throws {
+    func cancelJob(_ job: _DecryptedModel<JobModel>) async throws {
         // TODO: What if the job is cancelled while executing and succeeding?
         try await dequeueJob(job)
     }
     
     @JobQueueActor
-    func dequeueJob(_ job: DecryptedModel<JobModel>) async throws {
+    func dequeueJob(_ job: _DecryptedModel<JobModel>) async throws {
         try await database.removeJob(job.encrypted)
         for i in 0..<self.jobs.count {
             if self.jobs[i].id == job.id {
@@ -62,7 +60,8 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    @JobQueueActor public func queueTask<T: StoredTask>(_ task: T) async throws {
+    @JobQueueActor
+    public func queueTask<T: StoredTask>(_ task: T) async throws {
         guard let messenger = self.messenger else {
             throw CypherSDKError.appLocked
         }
@@ -72,7 +71,7 @@ final class JobQueue: ObservableObject {
             encryptionKey: databaseEncryptionKey
         )
         
-        let queuedJob = try await messenger.decrypt(job)
+        let queuedJob = try messenger._cachelessDecrypt(job)
         self.jobs.append(queuedJob)
         self.hasOutstandingTasks = true
         try await database.createJob(job)
@@ -81,14 +80,60 @@ final class JobQueue: ObservableObject {
         }
     }
     
-    fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
+    @JobQueueActor
+    public func queueTasks<T: StoredTask>(_ tasks: [T]) async throws {
+        if tasks.isEmpty {
+            return
+        }
+        
+        guard let messenger = self.messenger else {
+            throw CypherSDKError.appLocked
+        }
+        
+        let jobs = try tasks.map { task in
+            try JobModel(
+                props: .init(task: task),
+                encryptionKey: databaseEncryptionKey
+            )
+        }
+        
+        var queuedJobs = [_DecryptedModel<JobModel>]()
+        
+        for job in jobs {
+            queuedJobs.append(try messenger._cachelessDecrypt(job))
+        }
+        
+        do {
+            for job in jobs {
+                try await database.createJob(job)
+            }
+        } catch {
+            debugLog("Failed to queue all jobs of type \(T.self)")
+            
+            for job in jobs {
+                try? await database.removeJob(job)
+            }
+            
+            throw error
+        }
+        
+        self.jobs.append(contentsOf: queuedJobs)
+        self.hasOutstandingTasks = true
+        
+        if !self.runningJobs {
+            self.startRunningTasks()
+        }
+    }
+    
+    @JobQueueActor fileprivate var isDoneNotifications = [EventLoopPromise<Void>]()
     
     @JobQueueActor
-    func awaitDoneProcessing() async throws -> SynchronisationResult {
-//        if runningJobs {
-//            return .busy
-//        } else
-        if hasOutstandingTasks, let messenger = messenger {
+    func awaitDoneProcessing(untilEmpty: Bool) async throws -> SynchronisationResult {
+        if hasOutstandingTasks, !jobs.isEmpty, let messenger = messenger {
+            if !untilEmpty, nextJob() == nil {
+                return .skipped
+            }
+            
             let promise = messenger.eventLoop.makePromise(of: Void.self)
             self.isDoneNotifications.append(promise)
             startRunningTasks()
@@ -99,19 +144,23 @@ final class JobQueue: ObservableObject {
         }
     }
     
+    @JobQueueActor
     func markAsDone() {
-        if !hasOutstandingTasks && !isDoneNotifications.isEmpty {
-            for notification in isDoneNotifications {
-                notification.succeed(())
-            }
-            
-            isDoneNotifications = []
+        for notification in isDoneNotifications {
+            notification.succeed(())
         }
+        
+        isDoneNotifications = []
     }
     
     @JobQueueActor
     func startRunningTasks() {
         debugLog("Starting job queue")
+        
+        if let messenger = messenger, !messenger.isOnline, !messenger.canBroadcastInMesh {
+            debugLog("App is offline, aborting")
+            return
+        }
 
         if runningJobs {
             debugLog("Job queue already running")
@@ -159,6 +208,9 @@ final class JobQueue: ObservableObject {
                 switch result {
                 case .success, .delayed, .failed(haltExecution: false):
                     return try await next()
+                case .waitingForDelays:
+                    self.runningJobs = false
+                    self.markAsDone()
                 case .failed(haltExecution: true):
                     for job in self.jobs {
                         let task: StoredTask
@@ -232,6 +284,7 @@ final class JobQueue: ObservableObject {
         resume()
     }
 
+    @JobQueueActor
     public func pause() async throws {
         let promise = eventLoop.makePromise(of: Void.self)
         pausing = promise
@@ -244,25 +297,47 @@ final class JobQueue: ObservableObject {
 
     public enum TaskResult {
         case success, delayed, failed(haltExecution: Bool)
+        case waitingForDelays
     }
-
+    
     @JobQueueActor
-    private func runNextJob() async throws -> TaskResult {
+    private func nextJob() -> _DecryptedModel<JobModel>? {
         debugLog("Available jobs", jobs.count)
         var index = 0
         let initialJob = jobs[0]
-
-        if initialJob.props.isBackgroundTask, jobs.count > 1 {
+        
+        findOtherJob: if (initialJob.props.isBackgroundTask && jobs.count > 1) || initialJob.delayedUntil != nil {
+            if let delayedUntil = initialJob.delayedUntil, delayedUntil <= Date() {
+                break findOtherJob
+            }
+            
             findBetterTask: for newIndex in 1..<jobs.count {
                 let newJob = jobs[newIndex]
                 if !newJob.props.isBackgroundTask {
+                    if let delayedUntil = newJob.delayedUntil, delayedUntil > Date() {
+                        continue findBetterTask
+                    }
+                    
                     index = newIndex
                     break findBetterTask
                 }
             }
         }
-
+        
         let job = jobs[index]
+        
+        if let delayedUntil = job.delayedUntil, delayedUntil > Date() {
+            return nil
+        } else {
+            return job
+        }
+    }
+
+    @JobQueueActor
+    private func runNextJob() async throws -> TaskResult {
+        guard let job = nextJob() else {
+            return .waitingForDelays
+        }
 
         debugLog("Running job", job.props)
 
@@ -290,7 +365,7 @@ final class JobQueue: ObservableObject {
             throw CypherSDKError.appLocked
         }
         
-        if task.requiresConnectivity, messenger.transport.authenticated != .authenticated {
+        if task.requiresConnectivity(on: messenger), messenger.isOnline, messenger.authenticated != .authenticated {
             debugLog("Job required connectivity, but app is offline")
             throw CypherSDKError.offline
         }
@@ -304,8 +379,8 @@ final class JobQueue: ObservableObject {
 
             switch task.retryMode.raw {
             case .retryAfter(let retryDelay, let maxAttempts):
-                debugLog("Delaying task for an hour")
-                try await job.delayExecution(retryDelay: retryDelay)
+                debugLog("Delaying task for \(retryDelay) seconds")
+                try job.delayExecution(retryDelay: retryDelay)
                 
                 if let maxAttempts = maxAttempts, job.attempts >= maxAttempts {
                     try await self.cancelJob(job)

@@ -2,7 +2,7 @@ import XCTest
 import CypherMessaging
 import MessagingHelpers
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct Synchronisation {
     let apps: [CypherMessenger]
     
@@ -24,11 +24,11 @@ struct Synchronisation {
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 struct CustomMagicPacketPlugin: Plugin {
     static let pluginIdentifier = "custom-magic-packet"
-    let onInput: () -> ()
-    let onOutput: () -> ()
+    let onInput: @Sendable () async -> ()
+    let onOutput: @Sendable () async -> ()
     
     func onDeviceRegisteryRequest(_ config: UserDeviceConfig, messenger: CypherMessenger) async throws {
         try await messenger.addDevice(config)
@@ -36,7 +36,7 @@ struct CustomMagicPacketPlugin: Plugin {
     
     func onReceiveMessage(_ message: ReceivedMessageContext) async throws -> ProcessMessageAction? {
         if message.message.messageSubtype == "custom-magic-packet" {
-            onInput()
+            await onInput()
         }
         
         return nil
@@ -44,20 +44,20 @@ struct CustomMagicPacketPlugin: Plugin {
     
     func onSendMessage(_ message: SentMessageContext) async throws -> SendMessageAction? {
         if message.message.messageSubtype == "custom-magic-packet" {
-            onOutput()
+            await onOutput()
         }
         
         return nil
     }
 }
 
-@available(macOS 12, iOS 15, *)
+@available(macOS 10.15, iOS 13, *)
 final class FriendshipPluginTests: XCTestCase {
     override func setUpWithError() throws {
         SpoofTransportClient.resetServer()
     }
     
-    func testIgnoreUndecided() async throws {
+    @MainActor func testIgnoreUndecided() async throws {
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false
@@ -340,13 +340,20 @@ final class FriendshipPluginTests: XCTestCase {
         await XCTAssertAsyncEqual(try await m1GroupChat.allMessages(sortedBy: .descending).count, 1)
     }
     
-    func testBlockingCanPreventOtherPlugins() async throws {
+    @MainActor func testBlockingCanPreventOtherPlugins() async throws {
         var ruleset = FriendshipRuleset()
         ruleset.ignoreWhenUndecided = true
         ruleset.blockAffectsGroupChats = false
         ruleset.canIgnoreMagicPackets = true
         ruleset.preventSendingDisallowedMessages = false
-        var inputCount = 0
+        actor Result {
+            var inputCount = 0
+            
+            func inc() {
+                inputCount += 1
+            }
+        }
+        let result = Result()
         
         let m0 = try await CypherMessenger.registerMessenger(
             username: "m0",
@@ -357,7 +364,7 @@ final class FriendshipPluginTests: XCTestCase {
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset),
                 CustomMagicPacketPlugin(onInput: {
-            inputCount += 1
+                    await result.inc()
         }, onOutput: {})
             ])
         )
@@ -371,7 +378,7 @@ final class FriendshipPluginTests: XCTestCase {
             eventHandler: PluginEventHandler(plugins: [
                 FriendshipPlugin(ruleset: ruleset),
                 CustomMagicPacketPlugin(onInput: {
-            inputCount += 1
+                    await result.inc()
         }, onOutput: {})
             ])
         )
@@ -392,7 +399,7 @@ final class FriendshipPluginTests: XCTestCase {
         
         try await sync.synchronise()
         
-        await XCTAssertAsyncEqual(inputCount, 0)
+        await XCTAssertAsyncEqual(await result.inputCount, 0)
         let m1Contact = try await m1.createContact(byUsername: "m0")
         
         try await m0Contact.befriend()
@@ -411,7 +418,7 @@ final class FriendshipPluginTests: XCTestCase {
         
         try await sync.synchronise()
         
-        await XCTAssertAsyncEqual(inputCount, 1)
+        await XCTAssertAsyncEqual(await result.inputCount, 1)
         _ = m0
         _ = m1
     }

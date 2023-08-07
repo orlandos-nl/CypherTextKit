@@ -1,8 +1,9 @@
 import Foundation
 import CypherProtocol
+import Crypto
 
 /// The user's private keys are only stored on the user's main device
-public struct DevicePrivateKeys: Codable {
+public struct DevicePrivateKeys: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case deviceId = "a"
         case identity = "b"
@@ -21,13 +22,13 @@ public struct DevicePrivateKeys: Codable {
     }
 }
 
-public struct UserConfig: Codable {
+public struct UserConfig: Codable, @unchecked Sendable {
     private enum CodingKeys: String, CodingKey {
         case identity = "a"
         case devices = "b"
     }
     
-    /// Identity is a public key used to validate messages sidned by `identity`
+    /// Identity is a public key used to validate messages signed by `identity`
     /// This is the main device's identity, which when trusted verified all other devices' validity
     public let identity: PublicSigningKey
     
@@ -57,6 +58,10 @@ public struct UserConfig: Codable {
         _ config: UserDeviceConfig,
         signedWith identity: PrivateSigningKey
     ) throws {
+        guard self.identity.data == identity.publicKey.data else {
+            throw CypherSDKError.invalidSignature
+        }
+        
         var devices = try readAndValidateDevices()
         
         if devices.contains(where: { $0.deviceId == config.deviceId }) {

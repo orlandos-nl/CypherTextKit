@@ -136,9 +136,13 @@ extension RatchetMessage {
     public func decrypt<D: Decodable, Hash: HashFunction>(
         as type: D.Type,
         using engine: inout DoubleRatchetHKDF<Hash>
-    ) throws -> D {
-        let data = try engine.ratchetDecrypt(self)
-        return try BSONDecoder().decode(type, from: Document(data: data))
+    ) throws -> D? {
+        switch try engine.ratchetDecrypt(self) {
+        case .success(let data):
+            return try BSONDecoder().decode(type, from: Document(data: data))
+        case .keyExpiry:
+            return nil
+        }
     }
     
     public init<E: Encodable, Hash: HashFunction>(
