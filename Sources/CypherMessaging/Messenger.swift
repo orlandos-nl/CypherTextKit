@@ -753,7 +753,8 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         
         try config.addDeviceConfig(deviceConfig, signedWith: await state.config.deviceKeys.identity)
         try await self.transport.publishKeyBundle(config)
-        let uploadedConfig = config
+        /// We need to reread the keybundle because at this point in time we have added a new device, and for that to actually be in the uploadedConfig property, we need to fetch it again rather than rely on the original bundle that we read.
+        let uploadedConfig = try await transport.readKeyBundle(forUsername: self.username)
         try await self.updateConfig { appConfig in
             appConfig.lastKnownUserConfig = uploadedConfig
         }
@@ -1308,6 +1309,20 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
             messageSubtype: "_/devices/rename",
             text: "",
             metadata: BSONEncoder().encode(MagicPackets.RenameDevice(deviceId: self.deviceId, name: name))
+        )
+    }
+}
+
+extension CypherMessenger {
+    @CryptoActor
+    public func updateChatMessage(_ message: DecryptedModel<ChatMessageModel>) async throws {
+        try await self.cachedStore.updateChatMessage(message.encrypted)
+        await self.eventHandler.onMessageChange(
+            AnyChatMessage(
+                target: message.props.message.target,
+                messenger: self,
+                raw: message
+            )
         )
     }
 }
