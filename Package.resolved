@@ -5,8 +5,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/orlandos-nl/BSON.git",
       "state" : {
-        "revision" : "98a2c90988895f1b985ed0066180995df995924c",
-        "version" : "7.0.28"
+        "revision" : "c29936981d39667429d4e0ec03aa8d6a722ea36a",
+        "version" : "7.0.31"
       }
     },
     {
@@ -32,8 +32,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-atomics",
       "state" : {
-        "revision" : "919eb1d83e02121cdb434c7bfc1f0c66ef17febe",
-        "version" : "1.0.2"
+        "revision" : "cd142fd2f64be2100422d658e7411e39489da985",
+        "version" : "1.2.0"
       }
     },
     {
@@ -104,8 +104,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "124119f0bb12384cef35aa041d7c3a686108722d",
-        "version" : "2.40.0"
+        "revision" : "54c85cb26308b89846d4671f23954dce088da2b0",
+        "version" : "2.60.0"
       }
     },
     {
@@ -124,6 +124,15 @@
       "state" : {
         "revision" : "52a486ff6de9bc3e26bf634c5413c41c5fa89ca5",
         "version" : "2.17.2"
+      }
+    },
+    {
+      "identity" : "swift-nio-transport-services",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-nio-transport-services.git",
+      "state" : {
+        "revision" : "ebf8b9c365a6ce043bf6e6326a04b15589bd285e",
+        "version" : "1.20.0"
       }
     },
     {

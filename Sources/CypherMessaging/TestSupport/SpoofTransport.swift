@@ -1,6 +1,9 @@
 import CypherProtocol
 import Foundation
 import NIO
+#if canImport(NIOTransportServices)
+import NIOTransportServices
+#endif
 
 public enum SpoofTransportClientSettings {
     public enum PacketType: Sendable {
@@ -25,7 +28,11 @@ public enum SpoofTransportClientSettings {
 }
 
 fileprivate final class SpoofServer {
+#if os(Linux) || os(Android) || os(Windows)
     fileprivate let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+#else
+    fileprivate let elg = NIOTSEventLoopGroup()
+#endif
     fileprivate var onlineDevices = [SpoofTransportClient]()
     private var backlog = [DeviceId: [CypherServerEvent]]()
     private var userDevices = [Username: Set<DeviceId>]()

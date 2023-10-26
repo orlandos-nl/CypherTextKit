@@ -5,7 +5,7 @@
 //  Created by Joannis Orlandos on 19/04/2021.
 //
 
-typealias CacheActor = MainActor
+public typealias CacheActor = MainActor
 
 public protocol CacheKey {
     associatedtype Value
