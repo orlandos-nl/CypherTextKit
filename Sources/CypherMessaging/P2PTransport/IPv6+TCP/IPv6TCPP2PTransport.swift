@@ -1,6 +1,8 @@
 import Dribble
 import NIO
-//import NIOTransportServices
+#if canImport(NIOTransportServices)
+import NIOTransportServices
+#endif
 
 public enum IPv6TCPP2PError: Error {
     case reconnectFailed, timeout, socketCreationFailed
@@ -102,10 +104,15 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
     public let transportLayerIdentifier = "_ipv6-tcp"
     public let isMeshEnabled = false
     public weak var delegate: P2PTransportFactoryDelegate?
+    
+    #if os(Linux) || os(Android) || os(Windows)
     let eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+    #else
+    let eventLoop = NIOTSEventLoopGroup().next()
+    #endif
     let stun: StunConfig?
     
-    public init(stun: StunConfig? = nil) {
+    public init(stun: StunConfig? = nil) async {
         self.stun = stun
     }
     

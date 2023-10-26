@@ -4,6 +4,9 @@ import Crypto
 import TaskQueue
 import NIO
 import CypherProtocol
+#if canImport(NIOTransportServices)
+import NIOTransportServices
+#endif
 
 public enum DeviceRegisteryMode: Int, Codable, Sendable {
     case masterDevice, childDevice, unregistered
@@ -257,7 +260,11 @@ public final class CypherMessenger: CypherTransportClientDelegate, P2PTransportC
         p2pFactories: [P2PTransportClientFactory],
         transport: CypherServerTransportClient
     ) async throws {
+#if os(Linux) || os(Android) || os(Windows)
         self.eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+#else
+        self.eventLoop = NIOTSEventLoopGroup().next()
+#endif
         self.eventHandler = eventHandler
         self.username = config.username
         self.deviceId = config.deviceKeys.deviceId

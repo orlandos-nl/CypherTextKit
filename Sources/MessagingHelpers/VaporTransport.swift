@@ -5,6 +5,7 @@ import CypherProtocol
 import CypherMessaging
 import JWTKit
 import WebSocketKit
+import NIOTransportServices
 
 // TODO: Secondary servers
 
@@ -209,7 +210,7 @@ public final class VaporTransport: CypherServerTransportClient {
         self.host = host
         self.username = username
         self.deviceId = deviceId
-        self.eventLoop = MultiThreadedEventLoopGroup(numberOfThreads: 1).next()
+        self.eventLoop = NIOTSEventLoopGroup().next()
         self.httpClient = httpClient
         self.signer = signer
     }
