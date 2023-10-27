@@ -196,18 +196,17 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
                 
                 guard
                     let localAddress = channel.localAddress,
-                    let port = localAddress.port,
-                    let ip = address.ipAddress
+                    let port = localAddress.port
                 else {
                     promise.fail(IPv6TCPP2PError.socketCreationFailed)
                     return self.eventLoop.makeFailedFuture(IPv6TCPP2PError.socketCreationFailed)
                 }
                 
-                return channel.eventLoop.executeAsync {
+                let l: EventLoopFuture<()> = channel.eventLoop.executeAsync {
                     try await handle.sendMessage("", metadata: [
-                        "ip": ip,
+                        "ip": address.ipAddress,
                         "port": port
-                    ] as! Document)
+                    ])
                 }
             }.whenFailure { error in
                 debugLog("Failed to host IPv6 Server", error)
@@ -217,4 +216,5 @@ public final class IPv6TCPP2PTransportClientFactory: P2PTransportClientFactory {
         return try await promise.futureResult.get()
 //        #endif
     }
+    
 }
