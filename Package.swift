@@ -31,7 +31,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.20.0"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.60.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.0.0"),
-        .package(url: "https://github.com/needle-tail/Dribble.git", branch: "main"),
+        .package(url: "https://github.com/orlandos-nl/Dribble.git", from: "0.1.1"),
         .package(url: "https://github.com/vapor/jwt-kit.git", from: "4.0.0"),
         .package(url: "https://github.com/vapor/websocket-kit.git", from: "2.0.0"),
         .package(url: "https://github.com/orlandos-nl/BSON.git", from: "8.0.9"),
