@@ -1,3 +1,9 @@
+# Deprecated in favour of E2EEKit
+
+If you have a need for a more evolved version of this library - [Contact Me](mailto:joannis@unbeatable.software)
+
+--------
+
 **CypherTextKit** is a framework for establishing end-to-end encrypted communication between two users. It supports multiple devices per user, features encryption at rest and peer-to-peer networking. CypherTextKit currently targets iOS 15+ and macOS 12+, but can also run on Linux using Swift 5.5 or later.
 
 The SDK is designed so that it can be easily implemented in existing communication apps. This allows you to re-use your existing iOS and backend code, but still provide a more secure and private communication experience.
